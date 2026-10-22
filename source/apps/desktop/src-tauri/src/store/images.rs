@@ -420,8 +420,8 @@ impl Store {
         media::read_part(&self.world_dir(world_id), name)
     }
 
-    /// The parts this device holds of the images it knows.
-    fn wanted_parts(&self, world_id: &str) -> Result<BTreeSet<String>> {
+    /// The parts of the images this device knows.
+    pub(crate) fn wanted_parts(&self, world_id: &str) -> Result<BTreeSet<String>> {
         self.with_journal(world_id, |journal| Ok(journal.needed_parts()))
     }
 

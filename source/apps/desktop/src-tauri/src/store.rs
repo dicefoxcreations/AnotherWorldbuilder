@@ -1681,6 +1681,11 @@ impl Store {
         })
     }
 
+    /// Of `ids`, those here, in an order a receiver can take them in.
+    pub fn in_order(&self, world_id: &str, ids: &[String]) -> Result<Vec<String>> {
+        self.with_journal(world_id, |journal| Ok(journal.in_order(ids)))
+    }
+
     /// The names of everything here — drafts too, for writing together over
     /// the network.
     pub fn inventory(&self, world_id: &str) -> Result<Vec<String>> {

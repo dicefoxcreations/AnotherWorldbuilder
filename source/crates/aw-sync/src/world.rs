@@ -98,6 +98,9 @@ pub enum Ask {
     },
     /// Takes `give`, then answers with the records not in `have`.
     Swap { have: Vec<String>, give: Vec<String> },
+    /// Takes records, and answers nothing back — a world brought over a
+    /// little at a time, without naming everything held each time.
+    Give { records: Vec<String> },
     /// The world itself, game master's part included — when the host hands
     /// it over to the asking side.
     Handover,
@@ -232,6 +235,10 @@ pub enum Reply {
     /// This world stays with its host: a member works on it online, with
     /// `Call`, and gets no copy.
     OnlineOnly,
+    /// What was given is taken; the digest after it.
+    Taken { digest: String },
+    /// The world is being written right now — ask again in a while.
+    Busy,
 }
 
 /// The side that holds worlds — implemented by the application.

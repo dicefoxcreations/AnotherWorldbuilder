@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { StorageArea } from "./Storage";
 import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
 import {
@@ -17,6 +18,7 @@ import {
   type ServerState,
   type SwitchProgress,
   type Template,
+  type Upload,
   type WorldInfo,
 } from "../../api/client";
 import { TemplateEditor } from "../templates/TemplateEditor";
@@ -332,6 +334,7 @@ function Encryption({ world, onChanged, onError }: { world: WorldInfo; onChanged
       )}
       <Copies world={world} onChanged={onChanged} onError={onError} />
       <LivesOn world={world} onChanged={onChanged} onError={onError} />
+      <CopyTo world={world} onChanged={onChanged} onError={onError} />
       {asking !== null && (
         <div className="dialog-backdrop" onClick={() => !busy && setAsking(null)}>
           <section className="dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -412,10 +415,22 @@ function Copies({ world, onChanged, onError }: { world: WorldInfo; onChanged: ()
  */
 function LivesOn({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
   const [servers, setServers] = useState<ServerEntry[]>([]);
+  const [upload, setUpload] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    api.networkSettings().then((n) => setServers(n.server_list)).catch(onError);
-  }, []);
+    const look = () =>
+      api
+        .networkSettings()
+        .then((n) => {
+          setServers(n.server_list);
+          setUpload(uploadText(n.uploads[world.id]));
+        })
+        .catch(onError);
+    look();
+    // How far it is on its way there.
+    const timer = setInterval(look, 3000);
+    return () => clearInterval(timer);
+  }, [world.id]);
   // On a server, it moves to another one; this device again only while it
   // still waits for the admin there.
   const there = servers.find((e) => e.code === world.server);
@@ -441,7 +456,7 @@ function LivesOn({ world, onChanged, onError }: { world: WorldInfo; onChanged: (
           {!world.server
             ? "offered from this device"
             : onServer
-              ? "the server keeps it for the players · your copy as GM stays here · moved, the old server lets it go"
+              ? upload || "the server keeps it for the players · your copy as GM stays here · moved, the old server lets it go"
               : "waits for the server's admin"}
         </small>
       </span>
@@ -452,6 +467,57 @@ function LivesOn({ world, onChanged, onError }: { world: WorldInfo; onChanged: (
             {serverName(e)}
           </option>
         ))}
+      </select>
+    </label>
+  );
+}
+
+/** A copy of the world — a world of its own, here or on a server. */
+function CopyTo({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
+  const [servers, setServers] = useState<ServerEntry[]>([]);
+  const [progress, setProgress] = useState<[number, number] | null>(null);
+  const [made, setMade] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.networkSettings().then((n) => setServers(n.server_list)).catch(onError);
+    const stop = listen<[number, number]>("package-progress", (e) => setProgress(e.payload));
+    return () => void stop.then((un) => un());
+  }, []);
+  if (!world.isGm) return null;
+  const copy = async (to: string) => {
+    setBusy(true);
+    setMade("");
+    try {
+      const copied = await api.worldCopy(world.id, to ? { kind: "server", server: to } : { kind: "local", path: "" });
+      setMade(`“${copied.name}” made`);
+      onChanged();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+  return (
+    <label className="line lives-on">
+      <span>
+        <strong>Copy</strong>
+        <small className="small">
+          {busy ? (progress ? `copying ${progress[0]} of ${progress[1]}` : "copying") : made || "a world of its own · without players and versions"}
+        </small>
+      </span>
+      <select value="-" disabled={busy} onChange={(e) => void copy(e.target.value)}>
+        <option value="-" disabled>
+          Copy to …
+        </option>
+        <option value="">This device</option>
+        {servers
+          .filter((e) => e.may_bring && e.reached)
+          .map((e) => (
+            <option key={e.code} value={e.code}>
+              {serverName(e)}
+            </option>
+          ))}
       </select>
     </label>
   );
@@ -1384,6 +1450,15 @@ function Servers({ view, busy, onSave, onError }: { view: NetworkView; busy: boo
 /** What a server is called — its own name, or its address while it has not answered. */
 export function serverName(entry: { code: string; name: string }): string {
   return entry.name || `Server @ ${entry.code.split("@")[1] ?? entry.code}`;
+}
+
+/** How far a world on its way to its server is — empty once it is there. */
+export function uploadText(u: Upload | undefined): string {
+  if (!u) return "";
+  const [records, all] = u.records;
+  if (records < all) return `uploading ${Math.floor((records * 100) / all)} %`;
+  const [images, every] = u.images;
+  return images < every ? `uploading images ${images} of ${every}` : "";
 }
 
 /** Size on disk, short. */

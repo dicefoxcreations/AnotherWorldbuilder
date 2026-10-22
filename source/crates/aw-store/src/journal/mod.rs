@@ -844,6 +844,9 @@ pub struct Journal {
     indexed: BTreeMap<String, (VersionHead, u64)>,
     /// Whether the index needs writing.
     dirty: bool,
+    /// Records taken in together, written together: one wait on the disk
+    /// for all of them, not two for each.
+    batch: Option<Vec<(PathBuf, Vec<u8>, String)>>,
     /// Records whose layer head or parents have not come yet.
     waiting: BTreeMap<String, Pending>,
     /// Files read already, whatever came of them.
@@ -944,6 +947,7 @@ impl Journal {
             trusted: index.trusted.into_iter().collect(),
             indexed: index.versions,
             dirty: false,
+            batch: None,
             waiting: BTreeMap::new(),
             read: HashSet::new(),
             listings: HashMap::new(),
@@ -1157,6 +1161,20 @@ impl Journal {
     /// once at the end: a whole world arriving would write it anew for every
     /// version. Returns how many were new.
     pub fn add_all(&mut self, raws: &[&[u8]]) -> Result<usize> {
+        self.batch = Some(Vec::new());
+        let taken = self.take_all(raws);
+        let written = self.write_batch();
+        // What did not reach the disk is not kept.
+        if taken.is_err() || written.is_err() {
+            let _ = self.reload();
+        }
+        let new = taken?;
+        written?;
+        self.flush()?;
+        Ok(new)
+    }
+
+    fn take_all(&mut self, raws: &[&[u8]]) -> Result<usize> {
         let mut new = 0;
         for raw in raws {
             if raw.len() > MAX_RECORD {
@@ -1168,12 +1186,24 @@ impl Journal {
                 new += 1;
                 // Something is gone for good: read everything anew without it.
                 if deletes {
+                    self.write_batch()?;
                     self.reload()?;
+                    self.batch = Some(Vec::new());
                 }
             }
         }
-        self.flush()?;
         Ok(new)
+    }
+
+    /// Writes what was taken in together.
+    fn write_batch(&mut self) -> Result<()> {
+        let Some(batch) = self.batch.take() else { return Ok(()) };
+        let files: Vec<(PathBuf, Vec<u8>)> = batch.iter().map(|(path, raw, _)| (path.clone(), raw.clone())).collect();
+        crate::durable::write_all(&files)?;
+        for (path, _, id) in &batch {
+            self.listed(path, id, true);
+        }
+        Ok(())
     }
 
     /// Forgets everything and reads it all from disk again — keys and who
@@ -1579,6 +1609,11 @@ impl Journal {
 
     fn store(&mut self, id: &str, raw: &[u8], record: &Record) -> Result<()> {
         let path = self.path_of(id, record).ok_or("a record without a place")?;
+        if let Some(batch) = &mut self.batch {
+            batch.push((path.clone(), raw.to_vec(), id.to_string()));
+            self.read.insert(path);
+            return Ok(());
+        }
         crate::durable::write(&path, raw)?;
         self.listed(&path, id, true);
         self.read.insert(path);

@@ -27,7 +27,7 @@
 use super::*;
 use crate::store::JoinRequest;
 use aw_sync::world::{Ask, HeldWorld, Host, Offer, Order, Person, Reach, Reply, Server, ServerState, WorldNet};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -186,6 +186,46 @@ struct Keeper {
     me: IdentityPublic,
     book: Mutex<Book>,
     path: PathBuf,
+    /// Worlds being written right now: asked about meanwhile, the server
+    /// says it is busy instead of waiting — and lists them as last known.
+    writing: Mutex<HashSet<String>>,
+    known: Mutex<HashMap<String, Known>>,
+}
+
+/// What the server last read of a world: its GM, and whether encrypted.
+#[derive(Clone, Default)]
+struct Known {
+    gm: String,
+    gm_id: String,
+    encrypted: bool,
+    at: Option<std::time::Instant>,
+}
+
+/// How long what is known of a world holds before it is read again.
+const KNOWN_FOR: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// A world being written, until it is done — whatever the outcome.
+struct Writing<'a> {
+    keeper: &'a Keeper,
+    world: String,
+}
+
+impl Drop for Writing<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut writing) = self.keeper.writing.lock() {
+            writing.remove(&self.world);
+        }
+    }
+}
+
+/// Whether an ask brings records or image parts along.
+fn writes(ask: &Ask) -> bool {
+    match ask {
+        Ask::Swap { give, .. } => !give.is_empty(),
+        Ask::Give { records } => !records.is_empty(),
+        Ask::Parts { give, .. } => !give.is_empty(),
+        _ => false,
+    }
 }
 
 impl Keeper {
@@ -196,7 +236,7 @@ impl Keeper {
             Err(_) => Book::default(),
         };
         let me = store.load_identity()?.public();
-        Ok(Keeper { store, admin, me, book: Mutex::new(book), path })
+        Ok(Keeper { store, admin, me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default() })
     }
 
     fn book(&self) -> Answer<std::sync::MutexGuard<'_, Book>> {
@@ -221,6 +261,39 @@ impl Keeper {
         Ok(())
     }
 
+    /// Asking about a world: `None` while it is being written; otherwise
+    /// the claim to write it, if the ask writes.
+    fn claim(&self, world: &str, writes: bool) -> Answer<Option<Option<Writing<'_>>>> {
+        let mut writing = self.writing.lock().map_err(AppError::from)?;
+        if writing.contains(world) {
+            return Ok(None);
+        }
+        if !writes {
+            return Ok(Some(None));
+        }
+        writing.insert(world.to_string());
+        Ok(Some(Some(Writing { keeper: self, world: world.to_string() })))
+    }
+
+    /// GM and form of a world — as last known while it is being written,
+    /// and read again now and then.
+    fn known(&self, world: &str) -> Answer<Known> {
+        let last = self.known.lock().map_err(AppError::from)?.get(world).cloned();
+        let fresh = last.as_ref().and_then(|k| k.at).is_some_and(|at| at.elapsed() < KNOWN_FOR);
+        if fresh || self.writing.lock().map_err(AppError::from)?.contains(world) {
+            return Ok(last.unwrap_or_default());
+        }
+        let gm = self.store.with_journal(world, |j| Ok(j.world_item().map(|(.., gm)| gm.clone())))?;
+        let known = Known {
+            gm: gm.as_ref().map(|g| g.name.clone()).unwrap_or_default(),
+            gm_id: gm.map(|g| g.id.to_string()).unwrap_or_default(),
+            encrypted: self.store.is_encrypted(world)?,
+            at: Some(std::time::Instant::now()),
+        };
+        self.known.lock().map_err(AppError::from)?.insert(world.to_string(), known.clone());
+        Ok(known)
+    }
+
     fn may_bring(&self, id: &str) -> Answer<bool> {
         Ok(id == self.admin || self.book()?.gms.iter().any(|g| g == id))
     }
@@ -234,7 +307,7 @@ impl Keeper {
             if closed.contains(&world) {
                 continue;
             }
-            let gm = self.store.with_journal(&world, |j| Ok(j.world_item().map(|(.., gm)| gm.name.clone()).unwrap_or_default()))?;
+            let gm = self.known(&world)?.gm;
             out.push(Offer { world, name: meta.public.name.clone(), icon: meta.icon.clone(), gm });
         }
         Ok(out)
@@ -285,6 +358,10 @@ impl Keeper {
         if world.is_empty() || self.book()?.closed.contains_key(world) {
             return Ok(Reply::NotOffered);
         }
+        // One write at a time, and nobody waits behind it.
+        let Some(_writing) = self.claim(world, writes(&ask))? else {
+            return Ok(Reply::Busy);
+        };
         if !self.store.holds(world) {
             return self.bring(world, who, ask);
         }
@@ -348,19 +425,33 @@ impl Keeper {
             // What it has, asked for: all of it.
             Ask::Swap { have, give } if give.is_empty() => Reply::Records { records: Vec::new(), wanted: have, digest: aw_store::journal::Journal::digest(&[]) },
             Ask::Swap { have, give } => {
-                self.store.receive(world, &give)?;
-                // The records have to name them GM — a world of someone else's goes again.
-                if self.store.gm_of(world)?.as_deref() != Some(id.as_str()) {
-                    self.store.delete_world(world)?;
+                if !self.take_brought(world, who, &give)? {
                     return Ok(Reply::NotOffered);
                 }
-                println!("{world}: brought by {}", who.name);
-                let here: std::collections::HashSet<String> = self.store.inventory(world)?.into_iter().collect();
+                let here: HashSet<String> = self.store.inventory(world)?.into_iter().collect();
                 let wanted = have.into_iter().filter(|r| !here.contains(r)).collect();
                 Reply::Records { records: Vec::new(), wanted, digest: aw_store::journal::Journal::digest(&here.into_iter().collect::<Vec<_>>()) }
             }
+            Ask::Give { records } if !records.is_empty() => {
+                if !self.take_brought(world, who, &records)? {
+                    return Ok(Reply::NotOffered);
+                }
+                Reply::Taken { digest: aw_store::journal::Journal::digest(&self.store.inventory(world)?) }
+            }
             _ => Reply::NotOffered,
         })
+    }
+
+    /// The first records of a world brought here. They have to name the one
+    /// bringing it GM — a world of someone else's goes again.
+    fn take_brought(&self, world: &str, who: &IdentityPublic, records: &[String]) -> Answer<bool> {
+        self.store.receive(world, records)?;
+        if self.store.gm_of(world)?.as_deref() != Some(who.id.as_str()) {
+            self.store.delete_world(world)?;
+            return Ok(false);
+        }
+        println!("{world}: brought by {}", who.name);
+        Ok(true)
     }
 
     /// Who asked to join a world here — for its GM, who decides. Those let
@@ -427,13 +518,13 @@ impl Keeper {
         let mut worlds = Vec::new();
         for meta in self.store.list_worlds()? {
             let world = meta.public.world_id.to_string();
-            let gm = self.store.with_journal(&world, |j| Ok(j.world_item().map(|(.., gm)| gm.clone())))?;
+            let known = self.known(&world)?;
             worlds.push(HeldWorld {
                 name: meta.public.name.clone(),
-                gm: gm.as_ref().map(|g| g.name.clone()).unwrap_or_default(),
-                gm_id: gm.map(|g| g.id.to_string()).unwrap_or_default(),
+                gm: known.gm,
+                gm_id: known.gm_id,
                 bytes: size(&self.store.world_dir(&world)),
-                encrypted: self.store.is_encrypted(&world)?,
+                encrypted: known.encrypted,
                 closed: book.closed.contains_key(&world),
                 world,
             });
@@ -598,6 +689,39 @@ mod tests {
             build_view(&who.store.load_articles(world).unwrap(), &held).into_iter().flat_map(|a| a.layers.into_iter().map(|l| l.title)).collect();
         out.sort();
         out
+    }
+
+    #[test]
+    fn a_world_comes_a_little_at_a_time_and_while_it_is_written_nobody_waits() {
+        let dir = tempfile::tempdir().unwrap();
+        let marla = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &marla);
+        let (eldermere, _) = world(&marla, "Eldermere");
+        let all = marla.store.inventory(&eldermere).unwrap();
+
+        // Named once, given in pieces: the first piece brings the world here.
+        let Reply::Records { wanted, .. } = keeper.answer(&eldermere, &marla.me.public(), Ask::Swap { have: all.clone(), give: Vec::new() }) else { panic!("the server wants it") };
+        let order = marla.store.in_order(&eldermere, &wanted).unwrap();
+        for piece in order.chunks(2) {
+            let records = marla.store.records(&eldermere, piece).unwrap();
+            assert!(matches!(keeper.answer(&eldermere, &marla.me.public(), Ask::Give { records }), Reply::Taken { .. }));
+        }
+        let mut there = keeper.store.inventory(&eldermere).unwrap();
+        let mut here = all;
+        there.sort();
+        here.sort();
+        assert_eq!(there, here);
+        assert_eq!(keeper.offers().unwrap().iter().map(|o| o.gm.clone()).collect::<Vec<_>>(), vec!["Marla"]);
+
+        // Being written: asked about meanwhile, the server says so at once,
+        // and lists it as it last knew it.
+        let writing = keeper.claim(&eldermere, true).unwrap().unwrap();
+        assert_eq!(keeper.answer(&eldermere, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Busy);
+        let Reply::Worlds { worlds, .. } = keeper.answer("", &marla.me.public(), Ask::Worlds) else { panic!("the worlds") };
+        assert_eq!(worlds.iter().map(|o| o.gm.clone()).collect::<Vec<_>>(), vec!["Marla"]);
+        assert!(!state(&keeper, &marla).worlds.is_empty());
+        drop(writing);
+        assert!(matches!(keeper.answer(&eldermere, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Digest { .. }));
     }
 
     #[test]

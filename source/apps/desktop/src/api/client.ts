@@ -101,7 +101,12 @@ export type NetworkView = {
   server_list: ServerEntry[];
   /** The worlds this device could offer: those it is GM of. */
   worlds: SharedWorld[];
+  /** Worlds on their way to their server, by id. */
+  uploads: Record<string, Upload>;
 };
+
+/** How far a world has come over to its server: records and image parts, [there, all]. */
+export type Upload = { records: [number, number]; images: [number, number] };
 
 /** A server as it answered last: its name (empty until it answered), whether this device is its admin, whether a world waits for the admin. */
 export type ServerEntry = {
@@ -1031,6 +1036,7 @@ export const api = {
     return worlds;
   },
   worldCreate: async (name: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_create", { name, destination })),
+  worldCopy: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_copy", { world, destination })),
   worldOpen: async (path: string, location: string) => toWorld(await invoke<Raw>("world_open", { path, location })),
   worldShare: (world: string, member: string, path: string) =>
     invoke<string>("world_share", { world, member, path }),

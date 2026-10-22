@@ -579,6 +579,66 @@ async fn world_create(app: tauri::AppHandle, name: String, destination: Destinat
     }).await.map_err(AppError::from)?
 }
 
+#[cfg(feature = "gui")]
+/// Copies a world — into a folder here (none: the usual one), or onto a
+/// server: a world of its own, with the types, documents and images, without
+/// its players and versions. Tells how far it is (`package-progress`).
+#[cfg_attr(feature = "gui", tauri::command)]
+async fn world_copy(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
+    use tauri::Emitter;
+    let store = store(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if !store.is_gm(&world) {
+            return Err(AppError("Only the GM copies a world.".into()));
+        }
+        let identity = store.load_identity()?;
+        let (target, server) = match destination {
+            Destination::Local { path } if path.is_empty() => (store.clone(), None),
+            Destination::Local { path } => (store.destination(Path::new(&path))?, None),
+            Destination::Server { server } => (store.clone(), Some(server)),
+        };
+        let meta = new_world(&target, &identity, copy_name(&store, &store.load_world_meta(&world)?.public.name)?)?;
+        let id = meta.public.world_id.to_string();
+        if let Some(server) = server {
+            network::live_on(&target, &id, Some(server))?;
+        }
+        // Everything, through a package — kept among the copy's own files meanwhile.
+        let types: Vec<String> = store.load_templates(&world)?.into_iter().map(|t| t.id).collect();
+        let choice = transfer::Choice {
+            name: meta.public.name.clone(),
+            types: types.clone(),
+            documents_of: types,
+            documents: store.load_articles(&world)?.into_iter().map(|a| a.id.to_string()).collect(),
+        };
+        let path = target.private_world_dir(&id).join("copying.awpack");
+        let copied = transfer::export(&store, &identity, &world, &choice, &path).and_then(|_| {
+            let (folder, package) = transfer::read(&path)?;
+            let tell = |done: usize, total: usize| {
+                let _ = app.emit("package-progress", (done, total));
+            };
+            transfer::import(&target, &identity, &id, &folder, &package, &tell)
+        });
+        let _ = std::fs::remove_dir_all(&path);
+        copied?;
+        world_info(&target, &target.load_world_meta(&id)?, identity.id().as_str())
+    })
+    .await
+    .map_err(AppError::from)?
+}
+
+/// "Name (copy)" — or with a number, where that is taken.
+fn copy_name(store: &Store, name: &str) -> Answer<String> {
+    let taken: Vec<String> = store.list_worlds()?.iter().map(|m| m.public.name.trim().to_lowercase()).collect();
+    let mut n = 1;
+    loop {
+        let name = if n == 1 { format!("{} (copy)", name.trim()) } else { format!("{} (copy {n})", name.trim()) };
+        if !taken.contains(&name.to_lowercase()) {
+            return Ok(name);
+        }
+        n += 1;
+    }
+}
+
 /// Creates a world with its token, keyring and its own page.
 fn new_world(store: &Store, identity: &Identity, name: String) -> Answer<WorldMeta> {
     let name = name.trim().to_string();
@@ -2008,6 +2068,7 @@ pub fn run() {
             avatar_remove,
             worlds_list,
             world_create,
+            world_copy,
             world_open,
             world_share,
             world_token_check,

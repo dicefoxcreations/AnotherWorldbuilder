@@ -1,16 +1,16 @@
 {
-  "version": "0.1.46",
+  "version": "0.1.47",
   "target": "x86_64-pc-windows-msvc",
   "portable": true,
   "buildHost": "linux",
-  "commit": "f3d9c6d933a46e0de2457c7a2520290d99a5f0e3",
+  "commit": "a20673253c6c7959bc96b0a709665586d700d5f0",
   "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
   "node": "v26.11.1",
   "packages": [
     {
       "name": "AnotherWorldbuilder.exe",
-      "bytes": 35853824,
-      "sha256": "6cfeb7864c0311ec8da3db803a79ad915623637d53bcdf4abc84f33a9c7b3cf0"
+      "bytes": 35994112,
+      "sha256": "99c4c7821791f40d66925deb1209f2944f73deef582099048bfcde5e39bcc1b2"
     }
   ]
 }

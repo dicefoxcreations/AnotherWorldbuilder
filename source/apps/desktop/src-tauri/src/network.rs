@@ -59,11 +59,62 @@ pub(crate) fn wrote_here(world: &str, added: usize) {
 const SWAP_BUDGET: usize = 32 * 1024 * 1024;
 /// Image parts per exchange, in bytes before encoding — a few parts at a time.
 const PARTS_BUDGET: usize = 24 * 1024 * 1024;
+/// A world brought over is given a little at a time: so much per ask — a
+/// slow server takes it in in seconds — and for so long per round; the next
+/// round goes on where this one stopped.
+const GIVE_BUDGET: usize = 4 * 1024 * 1024;
+const GIVE_ROUND: std::time::Duration = std::time::Duration::from_secs(20);
+/// Per world and whom it goes to: the records still to be given.
+static PENDING: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+
+fn pending() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    PENDING.get_or_init(Default::default)
+}
+
+/// How far a world has come over to the other side: records and image
+/// parts, (there, all). Gone once it is all there.
+#[derive(Clone, Default, Serialize)]
+pub struct Upload {
+    pub records: (usize, usize),
+    pub images: (usize, usize),
+}
+
+static UPLOADS: OnceLock<Mutex<HashMap<String, Upload>>> = OnceLock::new();
+
+fn uploads() -> &'static Mutex<HashMap<String, Upload>> {
+    UPLOADS.get_or_init(Default::default)
+}
+
+fn note_upload(world: &str, change: impl FnOnce(&mut Upload)) {
+    if let Ok(mut all) = uploads().lock() {
+        let upload = all.entry(world.to_string()).or_default();
+        change(upload);
+        if upload.records.0 >= upload.records.1 && upload.images.0 >= upload.images.1 {
+            all.remove(world);
+        }
+    }
+}
+
 /// Per world: the parts the host said it lacks — given with the next round.
 static WANTS: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
 fn wants() -> &'static Mutex<HashMap<String, Vec<String>>> {
     WANTS.get_or_init(Default::default)
+}
+
+/// The parts named that lie here, read only as far as one exchange carries.
+fn parts_within(store: &Store, world: &str, names: &[String]) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    let mut size = 0;
+    for name in names {
+        let Some(part) = store.parts(world, std::slice::from_ref(name)).pop() else { continue };
+        size += part.1.len();
+        if size > PARTS_BUDGET && !out.is_empty() {
+            break;
+        }
+        out.push(part);
+    }
+    out
 }
 
 /// Parts as they travel: (name, base64), as many as the budget allows.
@@ -691,6 +742,14 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
         },
         // A device lists no worlds and has no admin; a server does.
         Ask::Worlds | Ask::Manage { .. } | Ask::HostWorlds => Reply::NotOffered,
+        Ask::Give { records } => {
+            store.receive(world, &records)?;
+            if store.handed_over(world)? {
+                store.step_down(world)?;
+                republish();
+            }
+            Reply::Taken { digest: Journal::digest(&store.inventory(world)?) }
+        }
         Ask::Swap { have, give } => {
             // Whatever does not check out is simply not taken.
             store.receive(world, &give)?;
@@ -841,6 +900,8 @@ pub struct NetworkView {
     pub server_list: Vec<ServerEntry>,
     /// The worlds this app could offer: those it is game master of.
     pub worlds: Vec<SharedWorld>,
+    /// Worlds on their way to a server, by id.
+    pub uploads: HashMap<String, Upload>,
 }
 
 /// A server as it answered last.
@@ -934,6 +995,7 @@ pub(crate) fn view(store: &Store) -> Answer<NetworkView> {
             .collect(),
         servers: settings.servers,
         worlds,
+        uploads: uploads().lock().map(|u| u.clone()).unwrap_or_default(),
     })
 }
 
@@ -1126,11 +1188,47 @@ impl Via {
 }
 
 async fn ask(net: &WorldNet, via: &Via, world: &str, me: &Identity, ask: Ask) -> Answer<Reply> {
-    match via {
+    let reply = match via {
         Via::Host => net.ask(world, me, ask).await,
         Via::Server(server) => net.ask_server(server, world, me, ask).await,
     }
-    .map_err(|e| AppError(e.to_string()))
+    .map_err(|e| AppError(e.to_string()))?;
+    // Writing the world right now: like no answer — asked again later.
+    if reply == Reply::Busy {
+        return Err(AppError("The other side is busy with this world.".into()));
+    }
+    Ok(reply)
+}
+
+/// Gives the other side the records it lacks, a little at a time, for one
+/// round; what is left the next round gives (`PENDING`). Returns the
+/// digest there once all of it is there.
+async fn give(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &str, wanted: &[String]) -> Answer<Option<String>> {
+    let key = via.key(world);
+    let order = store.in_order(world, wanted)?;
+    let all = store.inventory(world)?.len();
+    let started = std::time::Instant::now();
+    let mut given = 0;
+    let mut digest = None;
+    while given < order.len() {
+        if started.elapsed() > GIVE_ROUND {
+            pending().lock().map_err(AppError::from)?.insert(key, order[given..].to_vec());
+            return Ok(None);
+        }
+        let records = within(store.records(world, &order[given..order.len().min(given + 2000)])?, GIVE_BUDGET);
+        let count = records.len();
+        match ask(net, via, world, me, Ask::Give { records }).await {
+            Ok(Reply::Taken { digest: after }) => digest = Some(after),
+            Ok(_) => return Err(AppError("The other side did not take the world.".into())),
+            Err(e) => {
+                pending().lock().map_err(AppError::from)?.insert(key, order[given..].to_vec());
+                return Err(e);
+            }
+        }
+        given += count;
+        note_upload(world, |u| u.records = (all - (order.len() - given), all));
+    }
+    Ok(digest)
 }
 
 /// Records up to `budget` bytes — at least one.
@@ -1299,9 +1397,19 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
     };
     // Read only now: taking the world over adds records of our own.
     let held = store.holds(world);
+    let key = via.key(world);
+    // Brought over several rounds: on where the last one stopped.
+    let rest = pending().lock().map_err(AppError::from)?.remove(&key);
+    if let Some(rest) = rest {
+        if let Some(digest) = give(store, net, via, me, world, &rest).await? {
+            let now = Journal::digest(&store.inventory(world)?);
+            swapped().lock().map_err(AppError::from)?.insert(key, (digest, now));
+            swap_parts(store, net, via, me, world, true).await?;
+        }
+        return Ok("updated".into());
+    }
     let have = store.inventory(world)?;
     let ours = Journal::digest(&have);
-    let key = via.key(world);
     if swapped().lock().map_err(AppError::from)?.get(&key) == Some(&(theirs, ours)) {
         let parts = swap_parts(store, net, via, me, world, false).await?;
         return Ok(if parts > 0 { "updated" } else { "current" }.into());
@@ -1312,11 +1420,10 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
     };
     let new = store.receive(world, &records)?;
     if !wanted.is_empty() {
-        // As much as one answer carries — a world new to a server comes over several rounds.
-        let give = within(store.records(world, &wanted)?, SWAP_BUDGET);
-        let asked = Ask::Swap { have: store.inventory(world)?, give };
-        if let Reply::Records { digest: after, .. } = ask(net, via, world, me, asked).await? {
-            digest = after;
+        match give(store, net, via, me, world, &wanted).await? {
+            Some(after) => digest = after,
+            // A world new to the other side comes over several rounds.
+            None => return Ok(if !held { "joined" } else { "updated" }.into()),
         }
     }
     // We handed the world over, and the other side has taken it.
@@ -1342,11 +1449,19 @@ async fn swap_parts(store: &Store, net: &WorldNet, via: &Via, me: &Identity, wor
     let mut theirs = wants().lock().map_err(AppError::from)?.remove(&key).unwrap_or_default();
     let mut want = store.missing_parts(world)?;
     let mut new = 0;
+    // Bringing one's own world to its server: how far its images are.
+    let bringing = matches!(via, Via::Server(_)) && store.is_gm(world);
+    let all = if bringing { store.wanted_parts(world)?.len().saturating_sub(want.len()) } else { 0 };
+    let started = std::time::Instant::now();
     for round in 0..256 {
         if want.is_empty() && theirs.is_empty() && !(fresh && round == 0) {
             break;
         }
-        let give = encode_parts(store.parts(world, &theirs));
+        // The rest the next round brings.
+        if round > 0 && started.elapsed() > GIVE_ROUND {
+            break;
+        }
+        let give = encode_parts(parts_within(store, world, &theirs));
         let gave = give.len();
         let ask = Ask::Parts { want: want.clone(), give };
         let Reply::Parts { parts, want: lacking } = self::ask(net, via, world, me, ask).await? else {
@@ -1357,6 +1472,9 @@ async fn swap_parts(store: &Store, net: &WorldNet, via: &Via, me: &Identity, wor
         let here = store.missing_parts(world)?;
         // Of what the host lacks, what lies here.
         theirs = lacking.into_iter().filter(|p| !here.contains(p)).collect();
+        if bringing {
+            note_upload(world, |u| u.images = (all.saturating_sub(theirs.len()), all));
+        }
         if got == 0 && gave == 0 && here == want {
             break;
         }
@@ -1670,10 +1788,11 @@ async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, waiting: &Ha
             // The GM brings a server only what they offer; a member takes
             // part where the server holds the world.
             let gm = store.is_gm(&world);
-            // A GM's world lives on its own server alone, if it has one.
+            // A GM's world goes to the server it lives on, and nowhere else:
+            // one living on this device stays here.
             let home = settings.homes.get(&world);
             let wanted = if gm {
-                settings.shared.contains(&world) && home.is_none_or(|h| *h == server.endpoint)
+                home.is_some_and(|h| *h == server.endpoint)
             } else {
                 there.contains(world.as_str()) && home.is_none_or(|h| *h == server.endpoint)
             };

@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { DeleteDialog, DeleteButton } from "../shared/ui/Delete";
 import { CloudIcon, FolderIcon, NetworkIcon, ServerIcon } from "../shared/ui/Icons";
 import { api, type NetWorld, type NetworkView, type ServerEntry, type StorageView, type WorldInfo } from "../api/client";
-import { serverName } from "../features/settings/Options";
+import { serverName, uploadText } from "../features/settings/Options";
 import { HeaderTools } from "./HeaderTools";
 
 /** The folder a path lies in. */
@@ -141,7 +141,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   const worldButton = (w: WorldInfo) => <button className="world-card" onClick={() => opened(w.id)}>
     <span className="world-icon">{w.icon}</span><strong>{w.name}</strong>
     <span className="world-location" title={w.folder}>
-      {onServer(w) ? <><ServerIcon /> {serverName(serverOf(w.server)!)}{serverOf(w.server)!.waiting_worlds.includes(w.id) ? " · waits for its admin" : w.online || w.fleeting ? " · online" : ""}</>
+      {onServer(w) ? <><ServerIcon /> {serverName(serverOf(w.server)!)}{serverOf(w.server)!.waiting_worlds.includes(w.id) ? " · waits for its admin" : uploadText(network?.uploads[w.id]) ? ` · ${uploadText(network?.uploads[w.id])}` : w.online || w.fleeting ? " · online" : ""}</>
         : shared(parentOf(w.folder)) ? <><CloudIcon /> {nameOf(parentOf(w.folder))}</> : <><FolderIcon /> Local</>}
     </span>
     <span className={`role-badge ${w.role}`}>{w.isGm ? "GM" : "Player"}</span>
