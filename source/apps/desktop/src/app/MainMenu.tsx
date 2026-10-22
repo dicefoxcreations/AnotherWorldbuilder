@@ -1,15 +1,10 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { DeleteDialog, DeleteButton } from "../shared/ui/Delete";
-import { CloudIcon, FolderIcon, NetworkIcon, ServerIcon } from "../shared/ui/Icons";
+import { NetworkIcon, ServerIcon } from "../shared/ui/Icons";
 import { api, type NetWorld, type NetworkView, type ServerEntry, type StorageView, type WorldInfo } from "../api/client";
-import { serverName, uploadText } from "../features/settings/Options";
+import { nameOf, placeOf, PlaceIcon, serverName, uploadText } from "../features/worlds/WorldPlace";
 import { HeaderTools } from "./HeaderTools";
-
-/** The folder a path lies in. */
-const parentOf = (path: string) => path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
-/** A folder's own name. */
-const nameOf = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
 
 /** One library, regardless of how a world reaches this device. */
 export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onError }: {
@@ -61,11 +56,11 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   const localPath = toServer ? storage?.worlds ?? "" : chosen;
   const known = new Set(worlds.map(w => w.id));
   const remoteNetwork = nearby.filter(w => !w.server && !known.has(w.id));
-  const here = worlds.filter(w => !onServer(w));
+  const placed = (w: WorldInfo) => placeOf(w, storage, servers);
+  // On this device: in its folder or another one here. With another device: its GM's.
+  const here = worlds.filter(w => !onServer(w) && placed(w).kind !== "host");
+  const hosted = worlds.filter(w => !onServer(w) && placed(w).kind === "host");
   const opened = (id: string) => { setDialog(null); onOpen(id); };
-  // A world in a location beside the device's own lies in a shared folder —
-  // one a cloud app keeps in step; the group meets there.
-  const shared = (path: string) => !!storage?.locations.some(l => !l.primary && l.path.replace(/[\\/]+$/, "") === path);
 
   const joinNetwork = async (w: NetWorld) => {
     setBusy(w.id);
@@ -138,15 +133,18 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   };
 
   const serverOf = (code: string) => servers.find(s => s.code === code);
-  const worldButton = (w: WorldInfo) => <button className="world-card" onClick={() => opened(w.id)}>
+  const worldButton = (w: WorldInfo) => {
+    const place = placed(w);
+    const note = serverOf(w.server)?.waiting_worlds.includes(w.id) ? "waits for its admin" : uploadText(network?.uploads[w.id]) || (w.online || w.fleeting ? "online" : "");
+    return <button className="world-card" onClick={() => opened(w.id)}>
     <span className="world-icon">{w.icon}</span><strong>{w.name}</strong>
-    <span className="world-location" title={w.folder}>
-      {onServer(w) ? <><ServerIcon /> {serverName(serverOf(w.server)!)}{serverOf(w.server)!.waiting_worlds.includes(w.id) ? " · waits for its admin" : uploadText(network?.uploads[w.id]) ? ` · ${uploadText(network?.uploads[w.id])}` : w.online || w.fleeting ? " · online" : ""}</>
-        : shared(parentOf(w.folder)) ? <><CloudIcon /> {nameOf(parentOf(w.folder))}</> : <><FolderIcon /> Local</>}
+    <span className="world-location" title={place.title}>
+      <PlaceIcon place={place} /> {place.name}{note && ` · ${note}`}
     </span>
     <span className={`role-badge ${w.role}`}>{w.isGm ? "GM" : "Player"}</span>
     <small>{w.articleCount} {w.articleCount === 1 ? "article" : "articles"}</small>
   </button>;
+  };
 
   const tile = (w: WorldInfo) => <div key={w.id} className="world-tile">
     {worldButton(w)}<DeleteButton what={w.name} onClick={() => setRemove(w)} />
@@ -163,16 +161,16 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
       <button className="ghost icon round" title="New world" onClick={() => setDialog("new")}>＋</button>
       <button className="ghost icon round" title="Open world" onClick={() => setDialog("open")}>📂</button>
     </HeaderTools>
-    <h3 className="menu-section">Local and shared folders</h3>
+    <h3 className="menu-section">On this device</h3>
     <div className="world-grid">
       {here.map(tile)}
     </div>
     {here.length === 0 && <p className="small muted">None yet — ＋ above makes one.</p>}
     {storage?.locations.some(l => !l.available) && <p className="warning">A world location is unavailable. Reconnect the drive or check Storage settings.</p>}
 
-    {remoteNetwork.length > 0 && <>
-      <h3 className="menu-section">Local network</h3>
-      <div className="world-grid">{remoteNetwork.map(w => joinTile(w, <><NetworkIcon /> Local network</>))}</div>
+    {hosted.length + remoteNetwork.length > 0 && <>
+      <h3 className="menu-section">Other devices</h3>
+      <div className="world-grid">{hosted.map(tile)}{remoteNetwork.map(w => joinTile(w, <><NetworkIcon /> Local network</>))}</div>
     </>}
 
     <h3 className="menu-section line between">Servers<button className="ghost compact" onClick={() => editServer(null)}>＋ Add server</button></h3>
@@ -213,7 +211,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
         {dialog === "new" && <label className="world-name-field">World name<input autoFocus value={fresh} onChange={e => setFresh(e.target.value)} placeholder="Name of the world" /></label>}
         <label className="world-name-field">{dialog === "new" ? "Create in" : "Import world files into"}
           <select value={dialog === "new" ? chosen : localPath} onChange={e => setLocation(e.target.value)}>
-            {storage?.locations.map(l => <option key={l.path} value={l.path} disabled={!l.available}>{l.primary ? "This device" : "Shared"} · {l.path}{l.available ? "" : " · unavailable"}</option>)}
+            {storage?.locations.map(l => <option key={l.path} value={l.path} disabled={!l.available}>{l.primary ? "This device" : `Folder · ${nameOf(l.path)}`}{l.available ? "" : " · unavailable"}</option>)}
             {dialog === "new" && servers.filter(s => s.may_bring).map(s => <option key={s.code} value={`server:${s.code}`} disabled={!s.reached}>Server · {serverName(s)}{s.reached ? "" : " · not reached"}</option>)}
           </select>
         </label>

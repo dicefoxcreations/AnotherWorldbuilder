@@ -1,6 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { listen } from "@tauri-apps/api/event";
 import { StorageArea } from "./Storage";
 import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
 import {
@@ -13,12 +12,10 @@ import {
   type NetworkView,
   type HeldWorld,
   type Person,
-  type ServerEntry,
   type ServerOrder,
   type ServerState,
   type SwitchProgress,
   type Template,
-  type Upload,
   type WorldInfo,
 } from "../../api/client";
 import { TemplateEditor } from "../templates/TemplateEditor";
@@ -36,6 +33,7 @@ import { AboutArea } from "./AboutArea";
 import { USUAL_DICE } from "../dice/DiceTray";
 import { TransferArea } from "./Transfer";
 import { KeysDialog } from "../../shared/ui/KeysDialog";
+import { PlaceArea, serverName } from "../worlds/WorldPlace";
 
 /** The areas of the options. More will follow. */
 /** The areas, in three groups: the open world's, this device's, the app's. */
@@ -180,6 +178,7 @@ export function Options({
           {world && area === "world" && (
             <>
               <InfoArea world={world} onChanged={onWorldChanged} onError={onError} />
+              <PlaceArea world={world} onChanged={onWorldChanged} onError={onError} />
               {world.isGm && <BasicsArea world={world} onChanged={onWorldChanged} onError={onError} />}
               <ReadableCopy world={world} onChanged={onWorldChanged} onError={onError} />
             </>
@@ -332,9 +331,6 @@ function Encryption({ world, onChanged, onError }: { world: WorldInfo; onChanged
           <button onClick={() => api.storageOpen(world.readable).catch(onError)}>Show</button>
         </div>
       )}
-      <Copies world={world} onChanged={onChanged} onError={onError} />
-      <LivesOn world={world} onChanged={onChanged} onError={onError} />
-      <CopyTo world={world} onChanged={onChanged} onError={onError} />
       {asking !== null && (
         <div className="dialog-backdrop" onClick={() => !busy && setAsking(null)}>
           <section className="dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -375,151 +371,6 @@ function Encryption({ world, onChanged, onError }: { world: WorldInfo; onChanged
       )}
       {keys && <KeysDialog mode="backup" onClose={() => setKeys(false)} />}
     </>
-  );
-}
-
-/**
- * Whether players get a copy of the world when it is offered — only an
- * encrypted one can be copied: each opens their part. Unencrypted, they
- * work online, with the GM's device as host.
- */
-function Copies({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
-  const [busy, setBusy] = useState(false);
-  const turn = async (copies: boolean) => {
-    setBusy(true);
-    try {
-      await api.networkCopiesSet(world.id, copies);
-      onChanged();
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <label className={world.encrypted ? "switch-row" : "switch-row off"}>
-      <input type="checkbox" checked={world.encrypted && world.copies} disabled={busy || !world.encrypted} onChange={(e) => void turn(e.target.checked)} />
-      <span>
-        <strong>Copies for players</strong>
-        <small className="small">
-          {!world.encrypted ? "only for encrypted worlds · players work online, with the host" : world.copies ? "on · players keep the world, offline too" : "off · players work online, with the host"}
-        </small>
-      </span>
-    </label>
-  );
-}
-
-/**
- * Where the world lives: on this device — offered from here — or on a
- * server, which keeps it for the players. The GM's copy stays here either way.
- */
-function LivesOn({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
-  const [servers, setServers] = useState<ServerEntry[]>([]);
-  const [upload, setUpload] = useState("");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    const look = () =>
-      api
-        .networkSettings()
-        .then((n) => {
-          setServers(n.server_list);
-          setUpload(uploadText(n.uploads[world.id]));
-        })
-        .catch(onError);
-    look();
-    // How far it is on its way there.
-    const timer = setInterval(look, 3000);
-    return () => clearInterval(timer);
-  }, [world.id]);
-  // On a server, it moves to another one; this device again only while it
-  // still waits for the admin there.
-  const there = servers.find((e) => e.code === world.server);
-  const onServer = !!there && !there.waiting_worlds.includes(world.id);
-  const choices = servers.filter((e) => e.may_bring || e.code === world.server);
-  if (!world.isGm || (choices.length === 0 && !world.server)) return null;
-  const move = async (server: string) => {
-    setBusy(true);
-    try {
-      await api.networkHome(world.id, server || null);
-      onChanged();
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <label className="line lives-on">
-      <span>
-        <strong>Lives on</strong>
-        <small className="small">
-          {!world.server
-            ? "offered from this device"
-            : onServer
-              ? upload || "the server keeps it for the players · your copy as GM stays here · moved, the old server lets it go"
-              : "waits for the server's admin"}
-        </small>
-      </span>
-      <select value={world.server} disabled={busy} onChange={(e) => void move(e.target.value)}>
-        {!onServer && <option value="">This device</option>}
-        {choices.map((e) => (
-          <option key={e.code} value={e.code}>
-            {serverName(e)}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-/** A copy of the world — a world of its own, here or on a server. */
-function CopyTo({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
-  const [servers, setServers] = useState<ServerEntry[]>([]);
-  const [progress, setProgress] = useState<[number, number] | null>(null);
-  const [made, setMade] = useState("");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    api.networkSettings().then((n) => setServers(n.server_list)).catch(onError);
-    const stop = listen<[number, number]>("package-progress", (e) => setProgress(e.payload));
-    return () => void stop.then((un) => un());
-  }, []);
-  if (!world.isGm) return null;
-  const copy = async (to: string) => {
-    setBusy(true);
-    setMade("");
-    try {
-      const copied = await api.worldCopy(world.id, to ? { kind: "server", server: to } : { kind: "local", path: "" });
-      setMade(`“${copied.name}” made`);
-      onChanged();
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
-      setProgress(null);
-    }
-  };
-  return (
-    <label className="line lives-on">
-      <span>
-        <strong>Copy</strong>
-        <small className="small">
-          {busy ? (progress ? `copying ${progress[0]} of ${progress[1]}` : "copying") : made || "a world of its own · without players and versions"}
-        </small>
-      </span>
-      <select value="-" disabled={busy} onChange={(e) => void copy(e.target.value)}>
-        <option value="-" disabled>
-          Copy to …
-        </option>
-        <option value="">This device</option>
-        {servers
-          .filter((e) => e.may_bring && e.reached)
-          .map((e) => (
-            <option key={e.code} value={e.code}>
-              {serverName(e)}
-            </option>
-          ))}
-      </select>
-    </label>
   );
 }
 
@@ -1279,7 +1130,6 @@ function NetworkArea({
   };
 
   if (!view) return null;
-  const hosting = view.enabled || view.internet || view.servers.length > 0;
   return (
     <div className="type-page">
       <h2>Network</h2>
@@ -1326,25 +1176,6 @@ function NetworkArea({
           <small className="small">{view.folders ? "on · devices of a world in a cloud folder meet there and connect directly" : "off · shared folders only swap files"}</small>
         </span>
       </label>
-
-      <h3>Hosted here</h3>
-      {view.worlds.filter((w) => !w.server).length === 0 ? (
-        <p className="small">No world of yours lives on this device.</p>
-      ) : (
-        view.worlds.filter((w) => !w.server).map((w) => (
-          <label key={w.id} className="switch-row">
-            <input type="checkbox" checked={w.shared} disabled={busy} onChange={(e) => apply(api.networkShare(w.id, e.target.checked))} />
-            <span>
-              <strong>
-                <span className="world-icon small">{w.icon}</span> {w.name}
-              </strong>
-              <small className="small">
-                {!w.shared ? "not offered" : !hosting ? "offered — switch on the local network or the internet, or add a server" : w.copies ? "players get a copy" : "players work online"}
-              </small>
-            </span>
-          </label>
-        ))
-      )}
 
       <h3>Servers and hosts</h3>
       <Servers view={view} busy={busy} onSave={(servers) => apply(api.networkServers(servers))} onError={onError} />
@@ -1447,21 +1278,6 @@ function Servers({ view, busy, onSave, onError }: { view: NetworkView; busy: boo
   );
 }
 
-/** What a server is called — its own name, or its address while it has not answered. */
-export function serverName(entry: { code: string; name: string }): string {
-  return entry.name || `Server @ ${entry.code.split("@")[1] ?? entry.code}`;
-}
-
-/** How far a world on its way to its server is — empty once it is there. */
-export function uploadText(u: Upload | undefined): string {
-  if (!u) return "";
-  const [records, all] = u.records;
-  if (records < all) return `uploading ${Math.floor((records * 100) / all)} %`;
-  const [images, every] = u.images;
-  return images < every ? `uploading images ${images} of ${every}` : "";
-}
-
-/** Size on disk, short. */
 function bytes(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;

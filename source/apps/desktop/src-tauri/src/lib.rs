@@ -122,6 +122,8 @@ pub struct WorldInfo {
     pub fleeting: bool,
     /// The server it lives on, by code — empty: this device.
     pub server: String,
+    /// The GM's: offered to players over the network.
+    pub offered: bool,
     /// The dice the world rolls with, by sides — empty for the usual set.
     pub dice: Vec<u32>,
     /// How the world counts its days.
@@ -423,6 +425,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         copies: store.copies(&id)?,
         fleeting: store.is_fleeting(&id),
         server: store.load_network()?.home_of(&id).cloned().unwrap_or_default(),
+        offered: is_gm && store.load_network()?.shared.contains(&id),
         dice: store.dice(&id)?,
         waiting: store.waiting(&id)?.len(),
         calendar: meta.calendar.clone(),
@@ -624,6 +627,39 @@ async fn world_copy(app: tauri::AppHandle, world: String, destination: Destinati
     })
     .await
     .map_err(AppError::from)?
+}
+
+#[cfg(feature = "gui")]
+/// Moves a GM's world: into another folder here — off its server, if it was
+/// on one — or onto a server, which keeps it for the players; the GM's copy
+/// stays in its folder then. Tells how far a folder is (`package-progress`).
+#[cfg_attr(feature = "gui", tauri::command)]
+async fn world_move(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
+    use tauri::Emitter;
+    let store = store(&app)?;
+    if !store.is_gm(&world) {
+        return Err(AppError("Only the GM moves a world.".into()));
+    }
+    match destination {
+        Destination::Server { server } => network::rehome(&store, &world, Some(server)).await?,
+        Destination::Local { path } => {
+            network::rehome(&store, &world, None).await?;
+            if path.is_empty() {
+                return world_info(&store, &store.load_world_meta(&world)?, store.load_identity()?.id().as_str());
+            }
+            let (moving, world) = (store.clone(), world.clone());
+            tauri::async_runtime::spawn_blocking(move || {
+                let tell = |done: usize, total: usize| {
+                    let _ = app.emit("package-progress", (done, total));
+                };
+                moving.move_world(&world, Path::new(&path), &tell)
+            })
+            .await
+            .map_err(AppError::from)??;
+        }
+    }
+    let identity = store.load_identity()?;
+    world_info(&store, &store.load_world_meta(&world)?, identity.id().as_str())
 }
 
 /// "Name (copy)" — or with a number, where that is taken.
@@ -2034,7 +2070,6 @@ pub fn run() {
             network::network_share,
             network::network_servers,
             network::server_manage,
-            network::network_home,
             network::server_host_worlds,
             network::remote_call,
             network::network_copies_set,
@@ -2069,6 +2104,7 @@ pub fn run() {
             worlds_list,
             world_create,
             world_copy,
+            world_move,
             world_open,
             world_share,
             world_token_check,

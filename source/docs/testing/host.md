@@ -13,8 +13,8 @@ So: offline copies for players exist only encrypted.
 
 ## Settings
 
-- *Options → World*: **Encrypted** and below it **Copies for players** (switchable only for encrypted worlds; off and greyed out when unencrypted) – what applies to the world.
-- *Options → Network*: how this device is reached (**Local network**, **From the internet** with a host code, **Peer to peer through shared folders**; with one of the first two on, the **Port** can be chosen – when chosen fixed, the device tells its code there on TCP like a server, and players then enter only `IP:port`), which worlds it offers (**Hosted here**, with the state from the world page) and which servers or hosts it works with (**Servers and hosts**: codes of `aw-server` and host codes of other devices).
+- *Options → World → Where it lives*: **Offered to players** (from this device, over the network) and **Copies for players** (switchable only for encrypted worlds; off and greyed out when unencrypted); further down **Encrypted** – what applies to the world.
+- *Options → Network*: how this device is reached (**Local network**, **From the internet** with a host code, **Peer to peer through shared folders**; with one of the first two on, the **Port** can be chosen – when chosen fixed, the device tells its code there on TCP like a server, and players then enter only `IP:port`), and which servers or hosts it works with (**Servers and hosts**: codes of `aw-server` and host codes of other devices).
 
 ## What the host does
 

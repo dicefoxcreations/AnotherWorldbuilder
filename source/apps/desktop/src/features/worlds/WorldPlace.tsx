@@ -1,0 +1,285 @@
+import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { api, type NetworkView, type ServerEntry, type StorageView, type Upload, type WorldInfo } from "../../api/client";
+import { CloudIcon, FolderIcon, NetworkIcon, ServerIcon } from "../../shared/ui/Icons";
+
+/** The folder a path lies in. */
+export const parentOf = (path: string) => path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+/** A folder's own name. */
+export const nameOf = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
+const same = (a: string, b: string) => a.replace(/[\\/]+$/, "") === b.replace(/[\\/]+$/, "");
+
+/** What a server is called — its own name, or its address while it has not answered. */
+export function serverName(entry: { code: string; name: string }): string {
+  return entry.name || `Server @ ${entry.code.split("@")[1] ?? entry.code}`;
+}
+
+/** How far a world on its way to its server is — empty once it is there. */
+export function uploadText(u: Upload | undefined): string {
+  if (!u) return "";
+  const [records, all] = u.records;
+  if (records < all) return `uploading ${Math.floor((records * 100) / all)} %`;
+  const [images, every] = u.images;
+  return images < every ? `uploading images ${images} of ${every}` : "";
+}
+
+/**
+ * Where a world lives — one answer for the main menu and the world's
+ * settings. On this device: in its own folder, or in another one (a drive,
+ * a cloud folder). Elsewhere: on a server, or with its GM's device; a copy
+ * here does not change that.
+ */
+export type WorldPlace = { kind: "device" | "folder" | "server" | "host"; name: string; title: string };
+
+export function placeOf(world: WorldInfo, storage: StorageView | null, servers: ServerEntry[]): WorldPlace {
+  if (world.server) {
+    const server = servers.find((s) => s.code === world.server);
+    return { kind: "server", name: server ? serverName(server) : serverName({ code: world.server, name: "" }), title: world.server };
+  }
+  const root = parentOf(world.folder);
+  const folder = storage?.locations.find((l) => !l.primary && same(l.path, root));
+  if (folder) return { kind: "folder", name: nameOf(folder.path), title: folder.path };
+  if (!world.isGm) {
+    const gm = world.members.find((m) => m.role === "gm");
+    return { kind: "host", name: gm ? `Hosted by ${gm.name}` : "Hosted by its GM", title: "" };
+  }
+  return { kind: "device", name: "This device", title: world.folder };
+}
+
+export function PlaceIcon({ place }: { place: WorldPlace }) {
+  return place.kind === "server" ? <ServerIcon /> : place.kind === "folder" ? <CloudIcon /> : place.kind === "host" ? <NetworkIcon /> : <FolderIcon />;
+}
+
+/**
+ * The world's part on where it lives. Everyone sees it; only the GM moves
+ * or copies the world, offers it and lets players keep a copy.
+ */
+export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
+  const [storage, setStorage] = useState<StorageView | null>(null);
+  const [network, setNetwork] = useState<NetworkView | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const look = () =>
+      Promise.all([api.storageStatus(), api.networkSettings()])
+        .then(([s, n]) => {
+          setStorage(s);
+          setNetwork(n);
+        })
+        .catch(onError);
+    look();
+    // How far it is on its way to a server.
+    const timer = setInterval(look, 3000);
+    return () => clearInterval(timer);
+  }, [world.id]);
+  if (!network) return null;
+  const servers = network.server_list;
+  const place = placeOf(world, storage, servers);
+  const server = servers.find((s) => s.code === world.server);
+  const status =
+    place.kind === "server"
+      ? server?.waiting_worlds.includes(world.id)
+        ? "waits for the server's admin"
+        : uploadText(network.uploads[world.id]) || (world.isGm ? "players find it there · your copy stays on this device" : world.online || world.fleeting ? "worked on online" : "a copy lies on this device")
+      : place.kind === "host"
+        ? world.online || world.fleeting
+          ? "worked on online"
+          : "a copy lies on this device"
+        : place.title;
+  const offer = async (on: boolean) => {
+    setBusy(true);
+    try {
+      await api.networkShare(world.id, on);
+      onChanged();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reached = network.enabled || network.internet;
+  return (
+    <div className="type-page">
+      <h3>Where it lives</h3>
+      <div className="line world-place">
+        <span className="world-place-icon">
+          <PlaceIcon place={place} />
+        </span>
+        <span className="grow">
+          <strong>{place.name}</strong>
+          <small className="small muted" title={place.title}>
+            {status}
+          </small>
+        </span>
+        {world.isGm && (
+          <button disabled={busy} onClick={() => setMoving(true)}>
+            Move or copy …
+          </button>
+        )}
+      </div>
+      {world.isGm && place.kind !== "server" && (
+        <label className="switch-row">
+          <input type="checkbox" checked={world.offered} disabled={busy} onChange={(e) => void offer(e.target.checked)} />
+          <span>
+            <strong>Offered to players</strong>
+            <small className="small">
+              {!world.offered ? "off · only in its folder" : reached ? "on · players find it over the network" : "on · the network is off on this device"}
+            </small>
+          </span>
+        </label>
+      )}
+      {world.isGm && <Copies world={world} onChanged={onChanged} onError={onError} />}
+      {moving && storage && (
+        <MoveDialog world={world} place={place} storage={storage} servers={servers} onDone={onChanged} onClose={() => setMoving(false)} onError={onError} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Whether players get a copy of the world when it is offered — only an
+ * encrypted one can be copied: each opens their part. Unencrypted, they
+ * work online, with the GM's device or the server as host.
+ */
+function Copies({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
+  const [busy, setBusy] = useState(false);
+  const turn = async (copies: boolean) => {
+    setBusy(true);
+    try {
+      await api.networkCopiesSet(world.id, copies);
+      onChanged();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <label className={world.encrypted ? "switch-row" : "switch-row off"}>
+      <input type="checkbox" checked={world.encrypted && world.copies} disabled={busy || !world.encrypted} onChange={(e) => void turn(e.target.checked)} />
+      <span>
+        <strong>Copies for players</strong>
+        <small className="small">
+          {!world.encrypted ? "only for encrypted worlds · players work online" : world.copies ? "on · players keep a copy, offline too" : "off · players work online"}
+        </small>
+      </span>
+    </label>
+  );
+}
+
+/**
+ * Moving or copying a world: into a folder here — its own, a drive's, a
+ * cloud folder — or onto a server. Moved, it is there and nowhere else;
+ * copied, a world of its own comes into being beside it.
+ */
+function MoveDialog({
+  world,
+  place,
+  storage,
+  servers,
+  onDone,
+  onClose,
+  onError,
+}: {
+  world: WorldInfo;
+  place: WorldPlace;
+  storage: StorageView;
+  servers: ServerEntry[];
+  onDone: () => void;
+  onClose: () => void;
+  onError: (e: unknown) => void;
+}) {
+  const [copy, setCopy] = useState(false);
+  const [to, setTo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<[number, number] | null>(null);
+  useEffect(() => {
+    const stop = listen<[number, number]>("package-progress", (e) => setProgress(e.payload));
+    return () => void stop.then((un) => un());
+  }, []);
+  // Where its folder lies — the GM's copy, on a server too.
+  const root = parentOf(world.folder);
+  const folders = storage.locations.map((l) => ({
+    value: `folder:${l.path}`,
+    label: (l.primary ? "This device" : `Folder · ${nameOf(l.path)}`) + (!world.server && same(l.path, root) ? " · now" : ""),
+    title: l.path,
+    off: !l.available || (!copy && !world.server && same(l.path, root)),
+  }));
+  const hosts = servers
+    .filter((s) => s.may_bring || s.code === world.server)
+    .map((s) => ({ value: `server:${s.code}`, label: `Server · ${serverName(s)}${s.code === world.server ? " · now" : ""}`, title: s.code, off: !s.reached || (!copy && s.code === world.server) }));
+  const choices = [...folders, ...hosts];
+  const chosen = choices.find((c) => c.value === to && !c.off) ?? choices.find((c) => !c.off);
+  const toServer = chosen?.value.startsWith("server:") ? chosen.value.slice("server:".length) : "";
+  const toFolder = chosen?.value.startsWith("folder:") ? chosen.value.slice("folder:".length) : "";
+  const leavesShared = place.kind === "folder" && !copy && !!toFolder && !same(toFolder, root);
+  const what = copy
+    ? "A world of its own, with types, documents and images — without players and versions."
+    : toServer
+      ? "It lives on the server; players find it there. Your copy as GM stays on this device."
+      : place.kind === "server"
+        ? "The server lets it go; players find it on this device again."
+        : leavesShared
+          ? "It moves there with everything — and leaves the shared folder for everyone in it."
+          : "It moves there with everything.";
+  const go = async () => {
+    if (!chosen) return;
+    setBusy(true);
+    setProgress(null);
+    try {
+      const destination = toServer
+        ? ({ kind: "server", server: toServer } as const)
+        : ({ kind: "local", path: !copy && same(toFolder, root) ? "" : toFolder } as const);
+      if (copy) await api.worldCopy(world.id, destination);
+      else await api.worldMove(world.id, destination);
+      onDone();
+      onClose();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="dialog-backdrop" onClick={() => !busy && onClose()}>
+      <section className="dialog world-location-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === "Escape" && !busy && onClose()}>
+        <h2>
+          {copy ? "Copy" : "Move"} {world.icon} {world.name}
+        </h2>
+        <div className="segmented">
+          <button className={copy ? "" : "on"} disabled={busy} onClick={() => setCopy(false)}>
+            Move
+          </button>
+          <button className={copy ? "on" : ""} disabled={busy} onClick={() => setCopy(true)}>
+            Copy
+          </button>
+        </div>
+        <label className="world-name-field">
+          To
+          <select value={chosen?.value ?? ""} disabled={busy} onChange={(e) => setTo(e.target.value)}>
+            {choices.map((c) => (
+              <option key={c.value} value={c.value} title={c.title} disabled={c.off}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="small">{what}</p>
+        {busy && (
+          <div className="switch-progress">
+            <div className="progress-bar">
+              <div style={{ width: progress ? `${Math.round((progress[0] * 100) / Math.max(1, progress[1]))}%` : "0%" }} />
+            </div>
+            <small className="small">{progress ? `${progress[0].toLocaleString()} of ${progress[1].toLocaleString()}` : copy ? "Copying …" : "Moving …"}</small>
+          </div>
+        )}
+        <div className="line">
+          <button className="primary" disabled={busy || !chosen} onClick={() => void go()}>
+            {busy ? (copy ? "Copying …" : "Moving …") : copy ? "Copy" : "Move"}
+          </button>
+          {!busy && <button onClick={onClose}>Cancel</button>}
+        </div>
+      </section>
+    </div>
+  );
+}

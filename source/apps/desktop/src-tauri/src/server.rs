@@ -330,17 +330,18 @@ impl Keeper {
                     asked,
                 });
             }
+            // Its GM takes their own world away — to another server, say; the admin too,
+            // without closing it first.
+            Ask::Manage { order: Some(Order::Delete { world }) } if self.store.holds(&world) && self.store.gm_of(&world)?.as_deref() == Some(id.as_str()) => {
+                self.store.delete_world(&world)?;
+                println!("{world}: taken away by {}", who.name);
+                return Ok(Reply::Managed { state: ServerState::default() });
+            }
             Ask::Manage { order } if id == self.admin => {
                 if let Some(order) = order {
                     self.carry_out(order)?;
                 }
                 return Ok(Reply::Managed { state: self.state()? });
-            }
-            // Its GM takes their own world away — to another server, say.
-            Ask::Manage { order: Some(Order::Delete { world }) } if self.store.holds(&world) && self.store.gm_of(&world)?.as_deref() == Some(id.as_str()) => {
-                self.store.delete_world(&world)?;
-                println!("{world}: taken away by {}", who.name);
-                return Ok(Reply::Managed { state: ServerState::default() });
             }
             Ask::Manage { .. } => return Ok(Reply::NotOffered),
             Ask::HostWorlds => {
@@ -757,6 +758,12 @@ mod tests {
         assert!(keeper.store.holds(&gone));
         assert!(matches!(keeper.answer("", &olaf.me.public(), Ask::Manage { order: Some(Order::Delete { world: gone.clone() }) }), Reply::Managed { .. }));
         assert!(!keeper.store.holds(&gone));
+        // The admin takes their own away too, without closing it first.
+        let (mine, _) = world(&marla, "Mine");
+        swap(&keeper, &marla, &mine);
+        assert!(keeper.store.holds(&mine));
+        assert!(matches!(keeper.answer("", &marla.me.public(), Ask::Manage { order: Some(Order::Delete { world: mine.clone() }) }), Reply::Managed { .. }));
+        assert!(!keeper.store.holds(&mine));
 
         // A world of someone else's is not taken in.
         let (khom, _) = world(&marla, "Khom");

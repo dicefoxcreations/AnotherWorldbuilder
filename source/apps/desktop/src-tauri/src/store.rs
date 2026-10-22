@@ -456,6 +456,39 @@ pub(crate) fn stand_ins(held: &mut HeldKeys, attributes: impl IntoIterator<Item 
 
 /// The open journals of this process, by profile and world folder. Commands come and go; the
 /// world read from its records stays.
+/// Worlds on their way to another location — the network leaves them alone meanwhile.
+fn moving_worlds() -> &'static Mutex<std::collections::HashSet<String>> {
+    static MOVING: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    MOVING.get_or_init(Default::default)
+}
+
+/// Whether a world is being moved to another location right now.
+pub fn moving(world_id: &str) -> bool {
+    moving_worlds().lock().is_ok_and(|all| all.contains(world_id))
+}
+
+/// Copies a folder with all below it, each file on disk before it counts.
+fn copy_dir(from: &Path, to: &Path, tell: &dyn Fn(usize, usize)) -> std::io::Result<()> {
+    let mut files = Vec::new();
+    let mut dirs = vec![from.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path.is_dir() { dirs.push(path) } else { files.push(path) }
+        }
+    }
+    for (done, file) in files.iter().enumerate() {
+        let target = to.join(file.strip_prefix(from).map_err(std::io::Error::other)?);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(file, &target)?;
+        std::fs::File::open(&target)?.sync_all()?;
+        tell(done + 1, files.len());
+    }
+    Ok(())
+}
+
 fn open_journals() -> &'static Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<Open>>>> {
     static OPEN: OnceLock<Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<Open>>>>> = OnceLock::new();
     OPEN.get_or_init(Default::default)
@@ -1294,6 +1327,59 @@ impl Store {
         settings.homes.remove(world_id);
         self.save_network(&settings)?;
         Ok(())
+    }
+
+    /// Moves a world's folder into another location, with all it holds. On
+    /// the same drive a rename; else copied beside it first and only then
+    /// swapped in — broken off, the world stays where it was. Tells how far
+    /// it is, in files.
+    pub fn move_world(&self, world_id: &str, root: &Path, tell: &dyn Fn(usize, usize)) -> Result<()> {
+        self.destination(root)?;
+        let from = self.world_dir(world_id);
+        if !self.is_current(&from) {
+            return Err(StoreError::NoSuchWorld(world_id.to_string()));
+        }
+        if from.parent() == Some(root) {
+            return Ok(());
+        }
+        let name = dir_name(world_id);
+        let to = root.join(&name);
+        if to.exists() {
+            return Err(StoreError::Journal("A folder of this world lies there already.".into()));
+        }
+        struct Moving(String);
+        impl Drop for Moving {
+            fn drop(&mut self) {
+                if let Ok(mut all) = moving_worlds().lock() {
+                    all.remove(&self.0);
+                }
+            }
+        }
+        moving_worlds().lock().map_err(poisoned)?.insert(world_id.to_string());
+        let _moving = Moving(world_id.to_string());
+        // Whoever writes meanwhile waits — and finds the world gone after.
+        let open = self.journal(world_id)?;
+        let _held = open.lock().map_err(poisoned)?;
+        let moved = std::fs::rename(&from, &to).or_else(|_| {
+            let beside = root.join(format!(".moving-{name}"));
+            let _ = std::fs::remove_dir_all(&beside);
+            let copied = copy_dir(&from, &beside, tell);
+            if copied.is_err() {
+                let _ = std::fs::remove_dir_all(&beside);
+            }
+            copied?;
+            let old = from.with_file_name(format!(".moved-{name}"));
+            std::fs::rename(&from, &old)?;
+            if let Err(e) = std::fs::rename(&beside, &to) {
+                let _ = std::fs::rename(&old, &from);
+                return Err(e);
+            }
+            std::fs::remove_dir_all(&old)
+        });
+        if let Ok(mut all) = open_journals().lock() {
+            all.remove(&(self.profile.clone(), from));
+        }
+        Ok(moved?)
     }
 
     // --- Avatar --------------------------------------------------------

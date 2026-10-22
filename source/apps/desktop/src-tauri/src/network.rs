@@ -428,6 +428,10 @@ impl Host for DesktopHost {
         if let Ask::Worlds = ask {
             return Reply::Worlds { worlds: offers(&store).unwrap_or_default(), host: None, admin: false, may_bring: false, asked: false };
         }
+        // On its way to another folder: asked again shortly.
+        if store::moving(world) {
+            return Reply::Busy;
+        }
         answer(&store, world, who, ask).unwrap_or(Reply::NotOffered)
     }
 }
@@ -1357,6 +1361,9 @@ fn server_worlds() -> &'static Mutex<HashMap<String, (Server, Offer)>> {
 /// `not-offered` — and `requested`: a world brought to a server waits for
 /// its admin.
 async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &str) -> Answer<String> {
+    if store::moving(world) {
+        return Ok("current".into());
+    }
     let presence = mine()
         .lock()
         .map_err(AppError::from)?
@@ -1881,11 +1888,6 @@ pub(crate) fn live_on(store: &Store, world: &str, server: Option<String>) -> Ans
             }
         }
         None => {
-            // On a server, it moves to another one; only one still waiting for
-            // the admin comes back here.
-            if settings.home_of(world).is_some_and(|code| !status(code).waiting.iter().any(|w| w == world)) {
-                return Err(AppError("A world on a server moves only to another server.".into()));
-            }
             settings.homes.remove(world);
         }
     }
@@ -1894,22 +1896,31 @@ pub(crate) fn live_on(store: &Store, world: &str, server: Option<String>) -> Ans
     Ok(())
 }
 
-#[cfg(feature = "gui")]
-/// Where a GM's world lives: on a server, by its code, or on this device.
-/// Moved from one server to another, the first one lets it go — it would
-/// keep an old copy for whoever still came there.
-#[cfg_attr(feature = "gui", tauri::command)]
-pub async fn network_home(app: tauri::AppHandle, world: String, server: Option<String>) -> Answer<NetworkView> {
-    let store = store(&app)?;
-    let before = store.load_network()?.home_of(&world).cloned();
-    live_on(&store, &world, server.clone())?;
-    if let (Some(old), Some(net)) = (before.filter(|b| Some(b) != server.as_ref()), running()) {
-        let me = store.load_identity()?;
-        if let Ok(old) = Server::parse(&old) {
-            let _ = net.ask_server(&old, "", &me, Ask::Manage { order: Some(aw_sync::world::Order::Delete { world: world.clone() }) }).await;
+/// Moves a GM's world onto a server, or off it (`None`). The server it
+/// leaves is asked once more for what players wrote there — not reached, the
+/// world stays — and then lets it go.
+pub(crate) async fn rehome(store: &Store, world: &str, server: Option<String>) -> Answer<()> {
+    let before = store.load_network()?.home_of(world).cloned();
+    if before == server {
+        return Ok(());
+    }
+    let old = before.as_deref().map(Server::parse).transpose().map_err(|e| AppError(e.to_string()))?;
+    let me = store.load_identity()?;
+    let net = running();
+    if let Some(old) = &old {
+        let accepted = !status(&old.code()).waiting.iter().any(|w| w == world);
+        if accepted {
+            let net = net.as_ref().ok_or_else(|| AppError("The network is switched off.".into()))?;
+            swap(store, net, &Via::Server(old.clone()), &me, world)
+                .await
+                .map_err(|_| AppError("Its server is not reached — what players wrote there would stay behind.".into()))?;
         }
     }
-    view(&store)
+    live_on(store, world, server)?;
+    if let (Some(old), Some(net)) = (old, net) {
+        let _ = net.ask_server(&old, "", &me, Ask::Manage { order: Some(aw_sync::world::Order::Delete { world: world.to_string() }) }).await;
+    }
+    Ok(())
 }
 
 #[cfg(feature = "gui")]
@@ -2053,6 +2064,36 @@ mod tests {
 
     fn text(store: &Store, who: &Identity, world: &str, article: &str) -> String {
         document::code_of(store, who, world, article).unwrap().code
+    }
+
+    #[test]
+    fn a_world_moves_to_another_folder_with_all_it_holds_and_is_written_there_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let (local, shared) = (dir.path().join("local"), dir.path().join("drive"));
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&shared).unwrap();
+        let store = Store::with_roots(dir.path().join("profile"), vec![local.clone(), shared.clone()]);
+        let gm = Identity::create("Marla").unwrap();
+        store.save_identity(&gm).unwrap();
+        let world = new_world(&store.destination(&local).unwrap(), &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        let page = create_page(&store, &world, "notes", "Notes", "The harbour.".into()).unwrap();
+
+        store.move_world(&world, &shared, &|_, _| {}).unwrap();
+        assert!(in_shared_folder(&store, &world));
+        assert!(!local.join(store::dir_name(&world)).exists(), "nothing stays behind");
+        assert!(!store::moving(&world));
+        assert_eq!(store.list_worlds().unwrap().len(), 1);
+        assert!(store.load_articles(&world).unwrap().iter().any(|a| a.id.to_string() == page));
+
+        // Written to afterwards: in its new place, not in the old.
+        create_page(&store, &world, "more", "More", String::new()).unwrap();
+        assert!(!local.join(store::dir_name(&world)).exists());
+        assert_eq!(store.load_articles(&world).unwrap().len(), 3);
+
+        // Where it lies already, nothing happens; elsewhere than a location, nothing either.
+        store.move_world(&world, &shared, &|_, _| {}).unwrap();
+        assert!(store.move_world(&world, &dir.path().join("elsewhere"), &|_, _| {}).is_err());
+        assert!(in_shared_folder(&store, &world));
     }
 
     #[test]

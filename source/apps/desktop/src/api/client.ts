@@ -70,6 +70,8 @@ export type WorldInfo = {
   fleeting: boolean;
   /** The server it lives on, by code — empty: this device. */
   server: string;
+  /** The GM's: offered to players over the network. */
+  offered: boolean;
   /** The dice the world rolls with, by sides — empty for the usual set. */
   dice: number[];
   /** How the world counts its days. */
@@ -497,6 +499,7 @@ const toWorld = (r: Raw): WorldInfo => ({
   copies: !!r.copies,
   fleeting: !!r.fleeting,
   server: (r.server as string | undefined) ?? "",
+  offered: !!r.offered,
   online: !!r.online,
   dice: (r.dice as number[] | undefined) ?? [],
   calendar: (r.calendar as WorldCalendar | undefined) ?? DEFAULT_CALENDAR,
@@ -1037,6 +1040,8 @@ export const api = {
   },
   worldCreate: async (name: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_create", { name, destination })),
   worldCopy: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_copy", { world, destination })),
+  /** Moves a GM's world into a folder here (empty: where its copy lies) or onto a server. */
+  worldMove: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_move", { world, destination })),
   worldOpen: async (path: string, location: string) => toWorld(await invoke<Raw>("world_open", { path, location })),
   worldShare: (world: string, member: string, path: string) =>
     invoke<string>("world_share", { world, member, path }),
@@ -1075,8 +1080,6 @@ export const api = {
   /** What a server holds and who uses it — for its admin; with an order, carried out first. */
   serverManage: (server: string, order: ServerOrder | null = null) => invoke<ServerState>("server_manage", { server, order }),
   networkShare: (world: string, shared: boolean) => invoke<NetworkView>("network_share", { world, shared }),
-  /** Where a GM's world lives: on a server, by its code, or on this device (`null`). */
-  networkHome: (world: string, server: string | null) => invoke<NetworkView>("network_home", { world, server }),
   /** Asks a server's admin to let this device bring worlds there. */
   serverHostWorlds: (server: string) => invoke<NetworkView>("server_host_worlds", { server }),
   networkWorlds: () => invoke<NetWorld[]>("network_worlds"),

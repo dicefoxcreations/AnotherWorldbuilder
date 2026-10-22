@@ -657,3 +657,17 @@ fn switch_timing() {
     }
 
 }
+
+#[test]
+fn a_folder_is_copied_file_by_file_with_how_far_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let from = dir.path().join("world");
+    std::fs::create_dir_all(from.join("media/ab")).unwrap();
+    std::fs::write(from.join("world.json"), "{}").unwrap();
+    std::fs::write(from.join("media/ab/part"), [7u8; 100]).unwrap();
+    let told = std::cell::RefCell::new(Vec::new());
+    copy_dir(&from, &dir.path().join("copy"), &|done, total| told.borrow_mut().push((done, total))).unwrap();
+    assert_eq!(std::fs::read(dir.path().join("copy/media/ab/part")).unwrap(), [7u8; 100]);
+    assert_eq!(std::fs::read_to_string(dir.path().join("copy/world.json")).unwrap(), "{}");
+    assert_eq!(told.into_inner(), [(1, 2), (2, 2)]);
+}
