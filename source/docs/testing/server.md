@@ -93,6 +93,8 @@ Automatic (`cargo test -p aw-desktop server::`):
 - `an_encrypted_world_goes_to_its_members_and_without_copies_only_while_online` – joining through the server, decided by the GM; Bob opens only his part ("Rumours", not "Truth"); without copies the world lies in `online/` and is gone after the next start, with copies it stays, and on switching it moves.
 - `an_unencrypted_world_is_read_and_written_by_the_server_in_the_members_name` – the admission stands open and without keys; Bob sees his part through the server, writes in "Rumours", not in the name (GM only); the GM gets the sentence, the version history names Bob.
 
+**Is a server answering?** `cargo run -p aw-sync --example server_probe -- <address or code> [times]` looks the server up as the app does and asks it for its worlds; `AW_LOG=1` shows how the connection goes. A connection that stands but gets no answer means the server itself is stuck, not the network.
+
 **By hand, 2026-10-21**, locally with the static program (port 7450, `AW_ADMIN` = Marla) and three fresh app profiles (Marla, Oscar, Eve):
 
 1. The server starts without keys, only with Marla's ID.
