@@ -1286,18 +1286,24 @@ function NetworkArea({
   );
 }
 
-/** The port to answer on, for a router's forwarding — empty: any. */
-function PortField({ port, busy, onSave }: { port: number | null | undefined; busy: boolean; onSave: (p: number | null) => void }) {
-  const [text, setText] = useState(port ? String(port) : "");
+/** The port to answer on, for a router's forwarding — empty: the usual one. */
+function PortField({ port, busy, onSave }: { port: number; busy: boolean; onSave: (p: number | null) => void }) {
+  const [text, setText] = useState(String(port));
+  useEffect(() => setText(String(port)), [port]);
   const save = () => {
-    const n = Number(text.trim());
-    const next = text.trim() && Number.isInteger(n) && n > 0 && n < 65536 ? n : null;
-    if (next !== (port ?? null)) onSave(next);
+    const t = text.trim();
+    const n = Number(t);
+    setText(String(port));
+    if (!t) onSave(null);
+    else if (Number.isInteger(n) && n > 0 && n < 65536 && n !== port) {
+      setText(t);
+      onSave(n);
+    }
   };
   return (
     <label className="stun-servers">
       <span className="small muted">Port</span>
-      <input value={text} disabled={busy} placeholder="any" onChange={(e) => setText(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && save()} />
+      <input value={text} disabled={busy} onChange={(e) => setText(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && save()} />
     </label>
   );
 }

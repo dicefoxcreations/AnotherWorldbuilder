@@ -3,14 +3,14 @@
   "target": "x86_64-pc-windows-msvc",
   "portable": true,
   "buildHost": "linux",
-  "commit": "9e3b5aff3e12c474bc197a29b6a1c9b163c4f42a",
+  "commit": "f3d9c6d933a46e0de2457c7a2520290d99a5f0e3",
   "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
   "node": "v26.11.1",
   "packages": [
     {
       "name": "AnotherWorldbuilder.exe",
-      "bytes": 35908608,
-      "sha256": "f5352eea0a26f44d175dbabd86919084b3e697fb3ce3e18411a9f247c93bd586"
+      "bytes": 35853824,
+      "sha256": "6cfeb7864c0311ec8da3db803a79ad915623637d53bcdf4abc84f33a9c7b3cf0"
     }
   ]
 }

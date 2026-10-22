@@ -199,7 +199,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
     {dialog === "server" && <div className="dialog-backdrop" onClick={() => !busy && setDialog(null)}>
       <section className="dialog world-location-dialog" role="dialog" aria-modal="true" aria-labelledby="add-server-title" onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Escape" && !busy) setDialog(null); }}>
         <div className="line between"><h2 id="add-server-title">{editing ? "Edit server" : "Add server"}</h2><button disabled={!!busy} onClick={() => setDialog(null)}>Close</button></div>
-        <label className="world-name-field">Address<input autoFocus value={code} onChange={e => setCode(e.target.value)} placeholder="worlds.example.org:7447" onKeyDown={e => e.key === "Enter" && code.trim() && saveServer()} /></label>
+        <label className="world-name-field">Address<input autoFocus value={code} onChange={e => setCode(e.target.value)} placeholder="worlds.example.org" onKeyDown={e => e.key === "Enter" && code.trim() && saveServer()} /></label>
         <p className="small">Its address and port, or the code it shows.</p>
         <div className="line between">
           <button className="primary" disabled={!!busy || !code.trim()} onClick={saveServer}>{busy === "server" ? "Asking …" : editing ? "Save" : "Add server"}</button>

@@ -91,8 +91,8 @@ export type NetworkView = {
   running: boolean;
   /** Peer to peer through shared folders. */
   folders: boolean;
-  /** The port asked for; none: any. */
-  port: number | null;
+  /** The port asked for. */
+  port: number;
   /** What players enter to reach this device as host — empty while nothing is reachable. */
   code: string;
   /** Servers that keep worlds for the group, by their code. */

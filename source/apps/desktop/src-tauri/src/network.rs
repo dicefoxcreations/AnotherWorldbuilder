@@ -744,16 +744,17 @@ pub(crate) async fn switch(store: &Store, settings: &NetworkSettings) -> Answer<
         stun: settings.stun.clone(),
         // The same endpoint every start: a host code stays valid.
         secret: Some(endpoint_secret(store)?),
-        port: settings.port,
+        port: Some(settings.port),
         port_required: false,
         only: None,
     };
     let net = WorldNet::start(Arc::new(DesktopHost), reach)
         .await
         .map_err(|e| AppError(format!("The network could not start: {e}")))?;
-    // On a port of one's choosing, its address is enough: the code is told
-    // on TCP there, as a server does.
-    if let (Some(port), true) = (settings.port, settings.enabled || settings.internet) {
+    // Its address is enough: the code is told on TCP at the port, as a
+    // server does.
+    if settings.enabled || settings.internet {
+        let port = settings.port;
         let mut addrs: Vec<String> = net.reachable().iter().map(|a| a.to_string()).collect();
         addrs.extend(net.home_address().map(|a| a.to_string()));
         if !addrs.is_empty() {
@@ -822,8 +823,8 @@ pub struct NetworkView {
     pub internet: bool,
     /// Peer to peer through shared folders.
     pub folders: bool,
-    /// The port asked for; none: any.
-    pub port: Option<u16>,
+    /// The port asked for.
+    pub port: u16,
     /// What players enter to reach this device as their host — empty while
     /// nothing can be reached.
     pub code: String,
@@ -980,12 +981,12 @@ pub async fn network_folders(app: tauri::AppHandle, enabled: bool) -> Answer<Net
 }
 
 #[cfg(feature = "gui")]
-/// The port to answer on — for a router's forwarding. None: any.
+/// The port to answer on — for a router's forwarding. None: the usual one.
 #[cfg_attr(feature = "gui", tauri::command)]
 pub async fn network_port(app: tauri::AppHandle, port: Option<u16>) -> Answer<NetworkView> {
     let store = store(&app)?;
     let mut settings = store.load_network()?;
-    settings.port = port.filter(|p| *p > 0);
+    settings.port = port.filter(|p| *p > 0).unwrap_or(aw_sync::world::DEFAULT_PORT);
     store.save_network(&settings)?;
     switch(&store, &settings).await?;
     view(&store)

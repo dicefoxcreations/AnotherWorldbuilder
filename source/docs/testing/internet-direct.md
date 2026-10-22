@@ -8,7 +8,7 @@ Players and GM talk to each other directly, without a server of the author's and
 
 Since 0.1.45 *Options → Network* has two separate switches (`NetworkSettings.internet` and `.folders`):
 
-- **From the internet** – this device can be reached from outside (router port, STUN, IPv6). With it a fixed port (optional, for a forwarding on the router) and a fixed endpoint (`profile/endpoint.key`); from these comes the **host code** `<endpoint>@<address:port>,…`, which players enter under *Servers and hosts* like a server code. The device then answers `Ask::Worlds` with the worlds it offers and is their host ([host mode](host.md)).
+- **From the internet** – this device can be reached from outside (router port, STUN, IPv6). With it a fixed port (7447 unless set otherwise, for a forwarding on the router; if another program holds it, any free one) and a fixed endpoint (`profile/endpoint.key`); from these comes the **host code** `<endpoint>@<address:port>,…`, which players enter under *Servers and hosts* like a server code. The device then answers `Ask::Worlds` with the worlds it offers and is their host ([host mode](host.md)).
 - **Peer to peer through shared folders** – devices of a world in a shared folder meet there and connect directly (what follows). The addresses in the note are the outside ones if *From the internet* is on, and always the home network ones.
 
 Peer to peer needs the second switch on both sides. The world must lie in a shared folder: an additional storage location kept in step by a cloud or sync app (see [folders](folder-sync.md)). The app writes and reads the notes in the world folder under `peers/` (`network.rs`, `folder_notes`) – in the background, so that a slow drive never holds up syncing. The status says:

@@ -263,9 +263,10 @@ pub struct NetworkSettings {
     /// cloud app keeps in step meet there and connect directly.
     #[serde(default)]
     pub folders: bool,
-    /// The port to answer on — for a router's forwarding. None: any.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub port: Option<u16>,
+    /// The port to answer on — for a router's forwarding. Taken by another
+    /// program, the network answers on any free one.
+    #[serde(default = "default_port")]
+    pub port: u16,
     /// Whom to ask how this device looks from outside — public STUN
     /// servers; they see the address, nothing else. Empty: only the router.
     #[serde(default = "stun_servers")]
@@ -296,12 +297,16 @@ impl Default for NetworkSettings {
             shared: Vec::new(),
             internet: false,
             folders: false,
-            port: None,
+            port: default_port(),
             stun: stun_servers(),
             servers: Vec::new(),
             homes: BTreeMap::new(),
         }
     }
+}
+
+fn default_port() -> u16 {
+    aw_sync::world::DEFAULT_PORT
 }
 
 fn stun_servers() -> Vec<String> {
