@@ -1,5 +1,7 @@
 # Documentation
 
+- [Running a server](server-setup.md): `aw-server` with Docker, on any machine or a Synology NAS.
+
 ## Development
 
 - [Project layout](development/project-layout.md): responsibilities, paths and where things go.

@@ -125,6 +125,8 @@ Normal packages contain the application without test data and without profiles. 
 
 Beside `programs/` lies `templates/`: templates to start a world with (Options → Transfer → Import). A template contains only types, short value lists (sizes, spell schools …) and the outline, no content. `templates/D&D 5e.awpack` is made with `python3 tools/import/dnd_template.py` (writes `../templates/D&D 5e.awpack`; the test bench must be running). Templates are not packed into the programs; `collect-release.mjs` stops as soon as a template contains images or sections with text.
 
+`Example-world.zip` (a release file) is *The Gullwind Coast*, a small made-up world to show what the app does: `python3 tools/import/example_world.py` writes `build/packaging/Example world.awpack` with its map, drawn from noise (needs Pillow and NumPy, and the test bench running). The screenshots in `docs/screenshots/` are of it.
+
 Content from books or online libraries (one's own import scripts, not part of the project) is meant only for the own worlds of the person who owns the library. It is never shipped with the app and never published.
 
 ## App icon
