@@ -372,6 +372,10 @@ pub struct Reach {
     /// Without `port` free, not to start at all — a server's port is its
     /// address. Otherwise any free port does.
     pub port_required: bool,
+    /// Answer only at this IPv4 address of the machine, and name no other.
+    /// A NAS has several — a second network, a VPN, containers — and a
+    /// device asked at one it cannot reach does not get through. None: all.
+    pub only: Option<Ipv4Addr>,
 }
 
 pub struct WorldNet {
@@ -440,8 +444,12 @@ impl WorldNet {
         // IPv6 too where the internet is wanted: there is no NAT there, and
         // most lines behind a carrier's NAT have it.
         let v6 = reach.internet;
+        let only = reach.only;
         let bind = |port: u16, v6: bool| -> Result<_> {
-            let b = builder().bind_addr((Ipv4Addr::UNSPECIFIED, port))?;
+            let b = match only {
+                Some(ip) => builder().bind_addr_with_opts((ip, port), iroh::endpoint::BindOpts::default().set_is_default_route(true))?,
+                None => builder().bind_addr((Ipv4Addr::UNSPECIFIED, port))?,
+            };
             Ok(if v6 { b.bind_addr((std::net::Ipv6Addr::UNSPECIFIED, 0))? } else { b })
         };
         let endpoint = match bind(port, v6)?.bind().await {
@@ -838,7 +846,8 @@ fn own_ipv6() -> Option<std::net::Ipv6Addr> {
 
 /// This device's IPv4 address in its own network, as it would send from it —
 /// nothing is sent. Not a loopback one.
-fn own_ipv4() -> Option<Ipv4Addr> {
+/// The address this machine reaches others from — on a NAS, its home network's.
+pub fn own_ipv4() -> Option<Ipv4Addr> {
     let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
     socket.connect("192.0.2.1:9").ok()?;
     let SocketAddr::V4(addr) = socket.local_addr().ok()? else { return None };

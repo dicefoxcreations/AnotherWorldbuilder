@@ -746,6 +746,7 @@ pub(crate) async fn switch(store: &Store, settings: &NetworkSettings) -> Answer<
         secret: Some(endpoint_secret(store)?),
         port: settings.port,
         port_required: false,
+        only: None,
     };
     let net = WorldNet::start(Arc::new(DesktopHost), reach)
         .await

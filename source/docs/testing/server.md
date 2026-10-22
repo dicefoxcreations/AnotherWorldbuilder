@@ -63,6 +63,7 @@ Requirement: a NAS with an x86-64 processor (the "+" models; Container Manager o
    - Network: **host** (recommended; then the address in the code is right by itself, and `AW_LAN=1` makes it findable in the home network). With "bridge": map the ports `7447/udp` and `7447/tcp` (for the address) to the same numbers and set `AW_ADDRESS`.
    - Volume: `docker/aw-server` → `/data`.
    - Environment: `AW_ADMIN` and `AW_NAME` stand there empty and are to be filled in – `AW_ADMIN=id:…` (the 16 characters alone work too); optionally `AW_PORT` (default 7447), `AW_ADDRESS=<NAS IP>:7447,<DynDNS name>:7447`, `AW_LAN=1`, `AW_NAME` (what the server is called), `AW_LOG=1` (writes to the log how connections go – only for finding faults).
+   - **One address:** the server answers only at one address of the NAS and names no other – the first address of the NAS itself in `AW_ADDRESS`, otherwise the one of its home network. A NAS has several (a second network port, VPN, containers), and an app that tries one it cannot reach gets no answer.
 5. **Start.** The log shows `aw-server on UDP port 7447 — admin id:…` and the **code**; it is also in `docker/aw-server/host-code.txt`.
 6. **Firewall:** if the NAS firewall is on, allow port 7447 for **UDP and TCP**. For players from outside: forward both to the NAS on the router (outside may use another port, e.g. 4001 → 7447) and set `AW_ADDRESS` with the public name.
 

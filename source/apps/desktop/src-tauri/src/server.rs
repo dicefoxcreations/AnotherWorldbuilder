@@ -139,6 +139,7 @@ async fn run(o: Options) -> Answer<()> {
         secret: Some(network::endpoint_secret(&store)?),
         port: Some(o.port),
         port_required: true,
+        only: home_ip(&o.addresses),
     };
     let net = WorldNet::start(keeper.clone(), reach).await.map_err(|e| AppError(format!("The network could not start: {e}")))?;
 
@@ -464,6 +465,20 @@ impl Host for Keeper {
     fn answer(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Reply {
         self.reply(world, who, ask).unwrap_or(Reply::NotOffered)
     }
+}
+
+/// The one address it answers at: the first of its own addresses it was
+/// told that belongs to this machine, otherwise its home network's.
+fn home_ip(addresses: &[String]) -> Option<std::net::Ipv4Addr> {
+    let own = |ip: &std::net::Ipv4Addr| std::net::UdpSocket::bind((*ip, 0)).is_ok();
+    addresses
+        .iter()
+        .filter_map(|a| a.parse::<std::net::SocketAddr>().ok())
+        .find_map(|a| match a.ip() {
+            std::net::IpAddr::V4(ip) if !ip.is_loopback() && own(&ip) => Some(ip),
+            _ => None,
+        })
+        .or_else(aw_sync::world::own_ipv4)
 }
 
 /// What a folder takes on disk.

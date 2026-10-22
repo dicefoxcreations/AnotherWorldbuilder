@@ -141,3 +141,21 @@ async fn met_through_the_folder_they_talk_without_the_local_network() {
     assert!(matches!(reply, Reply::Digest { .. }), "{reply:?}");
 }
 
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_server_at_one_address_answers_there_again_and_again() {
+    // Only on a machine that has a network to name.
+    let Some(ip) = aw_sync::world::own_ipv4() else { return };
+    let host = gm();
+    let bob = Identity::create("Bob").unwrap();
+    host.members.lock().unwrap().push(bob.id().to_string());
+    let server_net = WorldNet::start(host.clone(), aw_sync::world::Reach { only: Some(ip), ..Default::default() }).await.unwrap();
+    let at = server_net.home_address().unwrap();
+    assert_eq!(at.ip(), std::net::IpAddr::V4(ip));
+    let server = aw_sync::world::Server { endpoint: server_net.id(), addrs: vec![at.to_string()] };
+    let player_net = WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach::default()).await.unwrap();
+    for _ in 0..3 {
+        let reply = player_net.ask_server(&server, "world:eldermere", &bob, Ask::Digest { presence: None, rolls: Vec::new() }).await.unwrap();
+        assert!(matches!(reply, Reply::Digest { .. }), "{reply:?}");
+    }
+}
