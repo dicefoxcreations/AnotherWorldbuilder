@@ -1,0 +1,25 @@
+[package]
+publish = false
+name = "aw-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.91"
+
+[dependencies]
+aw-store.workspace = true
+aw-crypto.workspace = true
+iroh = { version = "=1.2.0", default-features = false, features = ["tls-ring"] }
+mdns-sd = "0.20"
+# Asks the router (UPnP, PCP, NAT-PMP) to open our port — no server of anyone's.
+portmapper = { version = "=0.19.3", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "net"] }
+serde.workspace = true
+serde_json.workspace = true
+hex = "0.4.3"
+getrandom = "0.4.3"
+
+[dev-dependencies]
+aw-policy.workspace = true
+aw-model.workspace = true
+tempfile = "3"

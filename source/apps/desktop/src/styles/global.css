@@ -1,0 +1,1969 @@
+:root {
+  /* Surfaces, from deepest to highest: slate with a breath of teal. */
+  --base: #0e1416;
+  --sunken: #11191c;
+  --card: #151f23;
+  --popover: #192529;
+  --field: #1a272c;
+  --raised: #1f2e34;
+  --hover: #24363d;
+  --border: #2a3b42;
+  --text: #e5eeee;
+  --muted: #91a7a8;
+  /* Titles and headings — the text's colour, unless the reader picks another. */
+  --heading: var(--text);
+  /* Teal: the app's one accent — focus, hover, what is chosen, the main action. */
+  --accent: #2fc6b2;
+  --accent-soft: #14302d;
+  --accent-line: #1f6d63;
+  --on-accent: #04201c;
+  /* The switch while off. */
+  --track: #3a4c53;
+  /* Red: deleting, errors, what only the GM sees. */
+  --warn: #d9534f;
+  --danger-soft: #2a1e1e;
+  --danger-line: #6b3a3a;
+  --danger-text: #d98f8f;
+  /* Green: open to everyone. Blue: players. */
+  --ok-line: #3f6b45;
+  --ok-text: #86c28f;
+  --info-line: #3a4f6b;
+  --info-text: #8fb4d9;
+  /* Relation lines: one colour per pair of roles, in legend order. The one
+     place with more hues than the accent — eight kinds of relation must be
+     told apart at a glance. */
+  --relation-0: #2fc6b2;
+  --relation-1: #e0a14a;
+  --relation-2: #8fb4d9;
+  --relation-3: #d9708f;
+  --relation-4: #a3c76a;
+  --relation-5: #b08fe0;
+  --relation-6: #d98f8f;
+  --relation-7: #6fc7e0;
+  --radius: 6px;
+  --radius-large: 10px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--base);
+  color: var(--text);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+}
+/* The focus shows in the border: a ring around the field is cut off
+   wherever a scrolling area ends right at it. */
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+
+/* ---------- Buttons ----------
+   One button and a few variants — nothing beside them:
+     (none)     raised, for everything that is not the main action
+     .primary   the main action of a place — one per view
+     .danger    deletes or takes away
+     .ghost     no frame until hovered: menus, navigation, the header bar
+     .compact   the small size, for actions inside lists and content
+     .icon      square, for a lone symbol; with .round a circle
+     .chip      a pill that names something and opens it
+     .on        chosen, switched on, open — the same everywhere
+   and the group .segmented: one choice among a few.
+   Hover is the teal border everywhere. A label says what happens — no
+   trailing “…”. */
+button { cursor: pointer; background: var(--raised); line-height: 1.25; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.on { border-color: var(--accent); background: var(--accent-soft); }
+
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+button.primary:hover:not(:disabled) { filter: brightness(1.1); }
+button.danger { color: var(--danger-text); border-color: var(--danger-line); }
+button.danger:hover:not(:disabled) { border-color: var(--warn); }
+button.ghost { background: transparent; border-color: transparent; }
+button.ghost:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
+button.ghost.on { background: var(--accent-soft); border-color: var(--accent); }
+button.compact { padding: 3px 9px; font-size: 13px; }
+button.icon { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; line-height: 1; }
+button.icon.compact { width: 26px; height: 26px; font-size: 13px; }
+button.round { border-radius: 50%; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; white-space: nowrap; }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); }
+.chip input { display: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+
+.listing-filter { flex-wrap: wrap; margin: 4px 0 10px; }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmented button { border: 0; border-radius: 0; padding: 5px 11px; font-size: 13px; background: transparent; color: var(--muted); }
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button:hover:not(:disabled) { color: var(--text); background: var(--hover); }
+.segmented button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+/* Text that opens something: a name in a list, a link in the running text. */
+.link-button { background: transparent; border-color: transparent; padding: 0; color: var(--text); text-align: left; }
+.link-button:hover:not(:disabled) { color: var(--accent); border-color: transparent; text-decoration: underline; }
+.link-button.accent { color: var(--accent); }
+.wikilink { background: transparent; border: 0; border-radius: 3px; padding: 0 1px; color: var(--accent); font-size: 14px; }
+.wikilink:hover { background: var(--accent-soft); }
+/* The type of what a link opens, where the spot does not say it already. */
+.wikilink[data-icon]::before { content: attr(data-icon); margin-right: 0.25em; font-size: 0.85em; }
+.chip[data-icon]::before { content: attr(data-icon); font-size: 0.85em; }
+
+/* Deleting is a red bin (.danger.icon.compact). Where it sits, the entry
+   it is in decides. */
+
+.header-bar .me { display: flex; gap: 10px; align-items: center; }
+.header-bar code { color: var(--accent); font-size: 13px; }
+
+.frame { min-height: 100vh; display: flex; flex-direction: column; }
+
+aside { display: flex; flex-direction: column; gap: 14px; }
+main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.middle { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.card.narrow { max-width: 460px; }
+.card h1 { margin: 0 0 10px; font-size: 22px; }
+.card h2 { margin: 0 0 10px; font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.card h3 { margin: 0 0 12px; font-size: 18px; }
+.card h3 small { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+
+form { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+form input, form textarea { flex: 1; min-width: 120px; }
+
+fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 12px; }
+fieldset legend { color: var(--muted); font-size: 13px; padding: 0 6px; }
+fieldset input, fieldset textarea, fieldset select { width: 100%; margin-bottom: 8px; }
+
+.level { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.level.open { border-color: var(--ok-line); color: var(--ok-text); }
+.level.sealed { border-color: var(--accent-line); color: var(--accent); }
+.level.gm-only { border-color: var(--danger-line); color: var(--danger-text); }
+
+.article { display: flex; flex-direction: column; gap: 14px; }
+.note, .small { color: var(--muted); font-size: 13px; }
+.note { padding: 20px; text-align: center; }
+
+.error { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 100; max-width: min(680px, 92vw); padding: 10px 14px; border: 1px solid var(--warn); border-radius: 8px; background: var(--danger-soft); box-shadow: 0 8px 28px rgba(0,0,0,.5); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+
+/* ---------- Main menu ---------- */
+.main-menu { padding: 28px; max-width: 1100px; margin: 0 auto; width: 100%; }
+
+.world-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.menu-section { margin: 26px 0 12px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.main-menu > .menu-section:first-child { margin-top: 0; }
+.server-section { margin-bottom: 18px; }
+.server-section h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 16px; }
+.server-section h4 small { font-weight: normal; font-size: 12px; }
+.server-section h4 button { margin-left: auto; text-transform: none; }
+.menu-section.line { display: flex; align-items: center; }
+.menu-section button { text-transform: none; letter-spacing: normal; font-size: 13px; }
+.world-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 18px; min-height: 150px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; text-align: left; }
+.world-card.dashed { border-style: dashed; background: transparent; }
+.world-card.new { gap: 10px; }
+.world-card strong { font-size: 17px; }
+.world-card small { color: var(--muted); font-size: 12px; }
+.world-card input { width: 100%; }
+.world-icon { font-size: 30px; line-height: 1; }
+.world-icon.small { font-size: 19px; }
+
+.role-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.role-badge.gm { border-color: var(--accent-line); color: var(--accent); }
+.role-badge.player { border-color: var(--info-line); color: var(--info-text); }
+
+/* ---------- Header bar inside the world ---------- */
+/* The header bar stands on every page. */
+.header-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; position: sticky; top: 0; z-index: 20; }
+/* The bar's controls are round icon buttons (.ghost.icon.round). */
+.back.placeholder { visibility: hidden; width: 34px; height: 34px; }
+.page-title { font-size: 16px; }
+.dropdown { position: relative; }
+
+.avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-weight: 700; font-size: 14px; object-fit: cover; }
+.avatar.large { width: 52px; height: 52px; font-size: 22px; }
+
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+/* The page's own switches — left of the world's icons, a hairline between
+   them. Without switches the slot takes no room. */
+.header-tools { display: flex; align-items: center; gap: 6px; }
+.header-right > .header-tools:not(:empty) { padding-right: 10px; border-right: 1px solid var(--border); }
+.header-right > .header-tools:empty { display: none; }
+.header-tools > button { position: relative; }
+.header-tools .segmented button { height: 30px; padding: 0 9px; display: grid; place-items: center; }
+.header-tools .badge { position: absolute; top: -6px; right: -7px; }
+/* A development tool — dashed, so it is never taken for part of the app. */
+.header-right > button.dev-tool { border: 1px dashed var(--track); }
+
+.eye-count { position: absolute; right: -1px; bottom: -1px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 9px; font-weight: 700; display: grid; place-items: center; }
+.header-right .dropdown > button { position: relative; }
+/* ⋮ and its menu wrap nothing on a wide screen: the tools stand in the bar. */
+.more-wrap { display: contents; }
+button.icon.more-button, .phone-only { display: none; }
+
+/* A phone, as apps do it: one row — outline, back, the page's own name,
+   the dice; everything else in the menu behind ⋮, each with its name. */
+@media (max-width: 600px) {
+  .header-bar { padding: 6px 8px; gap: 4px; flex-wrap: nowrap; min-height: 52px; }
+  .crumbs { flex: 1 1 auto; }
+  .crumb:not(:last-child) { display: none; }
+  .crumbs button { max-width: none; padding: 5px 4px; font-size: 16px; }
+  .crumbs button:disabled { font-weight: 700; }
+  .page-title { flex: 1 1 auto; }
+  .phone-only { display: contents; }
+  .phone-only:empty { display: none; }
+  button.icon.more-button { display: grid; position: relative; flex: none; font-size: 20px; }
+  .header-right {
+    display: none; position: absolute; top: calc(100% + 4px); right: 8px; z-index: 40;
+    flex-direction: column; align-items: stretch; gap: 2px; margin: 0;
+    width: min(300px, calc(100vw - 16px)); max-height: calc(100dvh - 80px); overflow-y: auto;
+    padding: 8px; background: var(--popover); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  }
+  .header-right.open { display: flex; }
+  .header-right > .header-tools:not(:empty) { flex-wrap: wrap; padding: 0 0 8px; margin-bottom: 6px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .header-right .who-is-here { padding: 4px 6px 8px; }
+  /* A row each: the button with its name beside it. */
+  .header-right > button.icon, .header-right > .dropdown > button.icon, .header-tools > button.icon {
+    width: 100%; height: 40px; border-radius: 8px; justify-content: flex-start; display: flex; align-items: center; gap: 12px; padding: 0 10px;
+  }
+  .header-right > button.icon[title]::after, .header-right > .dropdown > button.icon[title]::after, .header-tools > button.icon[title]::after {
+    content: attr(title); font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .header-right .dropdown { width: 100%; }
+  .header-right .popover { position: fixed; left: 8px; right: 8px; top: 60px; width: auto; max-height: calc(100dvh - 76px); overflow-y: auto; }
+  /* In the bar already, or no use on a phone — after the rows above, which would show them again. */
+  .header-right > button.icon[title="Dice"], .header-tools > button.icon.apart-button, .header-right > button.icon.dev-tool { display: none; }
+}
+
+.preview-banner { flex-basis: 100%; margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent-line); font-size: 13px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+
+/* ---------- Popover ---------- */
+.popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 340px; max-height: 70vh; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; padding: 14px; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+.popover.wide { width: 420px; }
+.popover.right { left: auto; right: 0; }
+.popover h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.popover section { padding: 12px 0; border-top: 1px solid var(--border); }
+.popover section:first-of-type { border-top: 0; }
+.pop-head { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.close { width: 100%; margin-top: 10px; }
+.full { width: 100%; margin-bottom: 8px; }
+.segmented.full button { flex: 1; }
+.quick-pick { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+
+.keys { margin: 0; font-size: 12px; }
+.keys dt { color: var(--muted); margin-top: 8px; }
+.keys dd { margin: 2px 0 0; }
+.keys code, .wrap { word-break: break-all; font-size: 11px; color: var(--accent); }
+
+.members { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.members > li { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.members code { font-size: 11px; color: var(--accent); }
+.members small { display: block; }
+.line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1; min-width: 0; }
+.between { justify-content: space-between; }
+.warning { color: var(--danger-text); font-size: 13px; }
+
+/* ---------- World content ---------- */
+/* Wide enough for a whole page plus padding — otherwise the area cuts off
+   the article on the right. */
+.world-body { padding: 18px; max-width: calc(var(--page-width, 1152px) + 36px); margin: 0 auto; width: 100%; }
+
+/* ---------- Transfer: packages in and out ---------- */
+.transfer-part { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; border-top: 1px solid var(--border); }
+.transfer-part h3 { margin: 0; }
+.transfer-types { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 24px; }
+.transfer-types label { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; break-inside: avoid; }
+.transfer-types small { margin-left: auto; }
+.transfer-name { width: 260px; }
+.transfer-summary { display: grid; grid-template-columns: 100px auto; gap: 4px 12px; margin: 0; }
+.transfer-summary dt { color: var(--muted); }
+.transfer-summary dd { margin: 0; }
+.transfer-progress { display: flex; align-items: center; gap: 10px; }
+.transfer-progress progress { width: 320px; }
+
+/* ---------- The outline on the left ---------- */
+/* Like the side bar on the right, below the header bar at the window's
+   edge. Beside the page on a wide window — the page moves over and centres
+   in what is left — over it on a narrow one. */
+:root { --nav-width: 250px; }
+.nav-bar { position: fixed; z-index: 14; top: var(--header-height, 53px); left: 0; bottom: 0; width: var(--nav-width); overflow-y: auto; border-right: 1px solid var(--border); background: var(--card); padding: 10px 8px 16px; display: flex; flex-direction: column; gap: 8px; }
+.frame.with-nav > .world-body {
+  width: calc(100% - var(--nav-width));
+  margin-left: calc(var(--nav-width) + max(0px, (100% - var(--nav-width) - var(--page-width, 1152px) - 36px) / 2));
+  margin-right: 0;
+}
+.frame.with-nav > .world-body:has(> .document) { margin-left: var(--nav-width); }
+.frame.nav-over .nav-bar { z-index: 18; box-shadow: 8px 0 24px rgb(0 0 0 / .35); }
+@media (max-width: 600px) { :root { --nav-width: min(320px, 86vw); } }
+.outline-head { display: flex; gap: 4px; align-items: center; padding: 0 2px; }
+.nav-find { flex: 1; min-width: 0; height: 30px; padding: 4px 9px; font-size: 13px; }
+.nav-tree, .nav-tree ul { list-style: none; margin: 0; padding: 0; }
+.nav-row { display: flex; align-items: center; gap: 2px; min-height: 28px; border-radius: var(--radius); }
+.nav-row:hover { background: var(--hover); }
+.nav-row.here { background: var(--accent-soft); }
+.nav-row.context .nav-label { opacity: 0.6; }
+.nav-row.here .nav-label { color: var(--accent); }
+.nav-fold { display: grid; place-items: center; flex: none; width: 18px; height: 22px; min-height: 0; padding: 0; border: 0; background: none; }
+.nav-fold:hover:not(:disabled) { background: none; }
+.nav-fold:hover .head-chevron { color: var(--text); }
+/* A row is text that opens something — no frame of a button. */
+.nav-label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 4px 4px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; }
+.nav-label:hover:not(:disabled) { color: var(--accent); }
+.nav-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outline-icon { flex: none; width: 18px; text-align: center; }
+.nav-entry > .nav-label { font-weight: 600; }
+.nav-entry.group > .nav-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.nav-count { flex: none; padding-right: 6px; font-size: 11px; color: var(--muted); }
+/* Only for the GM: red, as everywhere. */
+.nav-entry.gm { box-shadow: inset 2px 0 0 var(--danger-line); }
+.nav-bar.editing .nav-entry { cursor: grab; }
+.nav-entry.chosen { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-entry.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.nav-entry.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.nav-entry.drop-into { background: var(--accent-soft); }
+.nav-add { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 2px 0; border-top: 1px solid var(--border); }
+.nav-label-field { width: 100%; }
+.header-bar .nav-toggle { flex: none; }
+
+/* ---------- Template editor ---------- */
+@media (max-width: 860px) { .editor { grid-template-columns: 1fr; } }
+
+.fields { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.danger:hover:not(:disabled) { border-color: var(--warn); }
+.reference { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--card); border-radius: 6px; }
+.reference label { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+
+/* ---------- Gear and options window ---------- */
+
+/* The options window fills the screen — hence `stretch`. */
+.options-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(5,10,12,.72); display: grid; place-items: stretch; padding: 10px; }
+
+/* A dialog, on the other hand, is small and centered. Both used to share
+   one backdrop, and the delete dialog became a screen-high column at the
+   left edge. The higher stacking value is needed because a dialog can also
+   open from inside the options window. */
+.dialog-backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(5,10,12,.72); display: grid; place-items: center; padding: 16px; }
+.options { display: grid; grid-template-columns: 210px 1fr; width: 100%; height: 100%; background: var(--base); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+/* One size for every area: as wide as a page of the world (--page-width),
+   centred — the gallery and the forms in the same window, which does not
+   grow with a wide screen. Forms keep their 760px column inside it. */
+.options { width: min(100%, calc(var(--page-width, 1152px) + 88px)); justify-self: center; }
+
+.options-nav { background: var(--card); border-right: 1px solid var(--border); padding: 14px 10px; display: flex; flex-direction: column; gap: 3px; }
+.nav-head { display: flex; gap: 8px; align-items: center; padding: 4px 8px 14px; }
+.options-nav button { display: flex; align-items: center; gap: 9px; text-align: left; padding: 9px 10px; }
+.options-nav button small { margin-left: auto; font-size: 10px; color: var(--muted); }
+.nav-icon { width: 18px; text-align: center; }
+.options-nav .close { margin-top: auto; justify-content: center; }
+/* The area scrolls as a whole, so its bar stands at the window's edge — not
+   on the buttons at the right of a 760px column. */
+.options-body { overflow-x: hidden; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; min-height: 0; }
+/* Narrow — a phone: the window fills the screen, its areas a row of tabs
+   along the top that scrolls sideways, Close at its end. */
+@media (max-width: 820px) {
+  .options-backdrop { padding: 0; }
+  .options { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); border-radius: 0; border: 0; }
+  .options-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px; gap: 4px; scrollbar-width: none; }
+  .options-nav .nav-head { display: none; }
+  .options-nav button { flex: none; white-space: nowrap; padding: 7px 10px; }
+  .options-nav button small { display: none; }
+  .options-nav .close { width: 36px; flex: none; margin: 0 0 0 auto; padding: 7px 0; position: sticky; right: 0; background: var(--raised); box-shadow: -14px 0 10px var(--card); font-size: 0; }
+  .options-nav .close::after { content: "×"; font-size: 18px; line-height: 1; }
+  .options-body { padding: 14px; }
+}
+
+/* ---------- Overview of the article types ---------- */
+.type-page h2 { margin: 0 0 4px; font-size: 20px; }
+.type-page h3 { margin: 0; font-size: 16px; }
+.groups-head { margin-top: 32px; }
+.type-tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.type-tree.top { margin-top: 18px; }
+.type-tree ul.type-tree { margin: 4px 0 0 32px; }
+.type-row { display: flex; align-items: center; gap: 6px; }
+.type-fold { flex: none; color: var(--muted); }
+.type-fold:disabled { opacity: 1; cursor: default; }
+.type-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px; text-align: left; background: var(--card); }
+.type-icon { font-size: 19px; line-height: 1; width: 24px; text-align: center; }
+.type-counts { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Template editor: head ---------- */
+.editor-head { display: flex; gap: 10px; align-items: center; }
+.editor-head code { color: var(--muted); font-size: 12px; }
+
+/* Deleting worlds */
+.world-tile { position: relative; }
+.world-tile .world-card { width: 100%; }
+.world-tile > .delete-button { position: absolute; top: 10px; right: 10px; }
+/* Choosing an image: upload or pick — as wide as a few rows of previews. */
+.image-picker { width: min(720px, 94vw); max-height: 86vh; overflow: auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.image-picker h3 { margin: 0; font-size: 18px; }
+.image-upload input { flex: 1; min-width: 0; }
+.image-search { width: 100%; min-width: 0; }
+.image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.image-tile { display: flex; flex-direction: column; gap: 6px; padding: 6px; align-items: stretch; }
+.image-tile > img, .image-tile > .image-placeholder { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--sunken); display: grid; place-items: center; }
+.image-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+/* The gallery, in the options: the tree, the images, the chosen one. */
+.gallery { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.gallery-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gallery-head h2 { margin: 0 auto 0 0; font-size: 20px; }
+.gallery-head .search { width: 220px; }
+.gallery-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
+.gallery-body.with-detail { grid-template-columns: 240px minmax(0, 1fr) 300px; }
+.gallery-body.flat { grid-template-columns: minmax(0, 1fr); }
+.gallery-body.flat.with-detail { grid-template-columns: minmax(0, 1fr) 300px; }
+.folder-tree { display: flex; flex-direction: column; gap: 1px; }
+.folder-tree ul { list-style: none; margin: 0; padding: 0; }
+.folder-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px 6px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; min-height: 32px; }
+.folder-row:hover { background: var(--hover); }
+.folder-row.on { background: var(--accent-soft); color: var(--accent); }
+.folder-row.over { border-color: var(--accent); }
+.folder-row .fold { width: 14px; flex: none; color: var(--muted); font-size: 11px; text-align: center; }
+.folder-row .folder-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-row .folder-name { flex: 1; min-width: 0; padding: 2px 6px; }
+.folder-row .folder-count { font-size: 11px; color: var(--muted); }
+/* What one does with a folder shows where the pointer is. */
+.folder-row .folder-actions { display: none; gap: 2px; align-items: center; }
+.folder-row:hover .folder-actions, .folder-row:focus-within .folder-actions { display: flex; }
+.folder-row:hover .folder-count { display: none; }
+.folder-actions .icon { width: 24px; height: 24px; padding: 0; font-size: 13px; }
+.folder-tree .add-folder { align-self: flex-start; margin-top: 6px; }
+.gallery-grid-area { min-width: 0; }
+.gallery .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin: 0; }
+.gallery-tile { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 7px; align-items: stretch; border-radius: 10px; }
+.gallery-tile > img, .gallery-tile > .image-placeholder { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--sunken); display: grid; place-items: center; }
+.tile-mark { position: absolute; top: 11px; left: 11px; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--card); color: var(--muted); border: 1px solid var(--border); }
+.gallery-detail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.detail-head { display: flex; align-items: center; gap: 8px; }
+.detail-head h3 { margin: 0 auto 0 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-detail .detail-image { width: 100%; max-height: 260px; object-fit: contain; border-radius: 8px; background: var(--sunken); }
+.detail-field { display: flex; flex-direction: column; gap: 4px; }
+.detail-field input, .detail-field select { width: 100%; min-width: 0; }
+.detail-defaults { display: flex; align-items: center; gap: 8px; }
+.detail-defaults input { flex: 1; min-width: 0; }
+.detail-foot { display: flex; justify-content: flex-end; }
+.stand-in { width: 48px; height: 48px; padding: 0; overflow: hidden; display: grid; place-items: center; flex: none; }
+.stand-in > img { width: 100%; height: 100%; object-fit: cover; }
+/* A phone: the folders above the pictures — a short list that scrolls —
+   and what one picture is, below them. */
+@media (max-width: 820px) {
+  .gallery-body, .gallery-body.with-detail, .gallery-body.flat.with-detail { grid-template-columns: minmax(0, 1fr); }
+  .gallery-body > :first-child:not(.gallery-grid-area) { max-height: 180px; overflow-y: auto; border-bottom: 1px solid var(--border); }
+  .gallery-head .search { width: 100%; order: 3; }
+}
+@media (max-width: 1150px) {
+  .gallery-body.with-detail { grid-template-columns: 200px minmax(0, 1fr); }
+  .gallery-body.with-detail .gallery-detail { grid-column: 1 / -1; position: static; }
+}
+
+/* An image in the visual editor: the picture as the reader gets it — as
+   wide as the text unless it says a width, nothing smaller — with what
+   changes it below. It does not float: the text beside it is a field of its
+   own. */
+.image-card { position: relative; margin: 8px 0; width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 0; border: 1px dashed transparent; border-radius: 8px; }
+/* Over the picture, only while one points at it or works in it. */
+.image-card.left, .image-card.right { width: fit-content; max-width: 100%; }
+/* Left and right it floats, the same as `.text-image`: the text beside it. */
+.image-card.left { float: left; margin: 4px 18px 8px 0; }
+.image-card.right { float: right; margin: 4px 0 8px 18px; }
+.image-card-picture { display: block; width: 100%; padding: 0; border: 0; background: none; border-radius: 6px; overflow: hidden; }
+.image-card-picture > img { display: block; max-width: 100%; width: auto; height: auto; }
+.image-card.sized .image-card-picture > img { width: 100%; }
+/* Centred: the card as wide as its picture, in the middle — as when read. */
+.flow-surface .image-card.center { width: fit-content; max-width: 100%; margin: 0 auto; }
+.image-card-picture > .image-placeholder { display: grid; place-items: center; min-height: 120px; background: var(--sunken); }
+/* The caption reads like the one under a picture — a field only when one writes in it. */
+.image-card-caption { width: 100%; min-width: 0; contain: inline-size; border-color: transparent; background: transparent; font-size: 12px; color: var(--muted); padding: 2px 4px; }
+.image-card-caption:hover, .image-card-caption:focus { border-color: var(--border); background: var(--field); color: var(--text); }
+.image-card-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.image-card-width { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.image-card-width input { width: 80px; }
+.image-card-hidden { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.image-card-hidden input { min-width: 0; width: 220px; }
+.delete-dialog { width: min(460px, 92vw); background: var(--card); border: 1px solid var(--warn); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.delete-dialog h3 { margin: 0; font-size: 18px; }
+.delete-dialog p { margin: 0; }
+.delete-dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+
+/* Info and player sections of the options */
+.keys.wide { margin-top: 16px; display: grid; grid-template-columns: 210px 1fr; gap: 8px 16px; font-size: 13px; align-items: baseline; }
+.keys.wide dt { margin: 0; }
+.members.large { margin-top: 18px; gap: 10px; }
+.members.large > li { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+
+/* ---------- Visibility as bubbles ---------- */
+.view-picker { position: relative; }
+.bubbles { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.bubble { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--field); font-size: 12px; white-space: nowrap; }
+.bubble.all { border-color: var(--ok-line); color: var(--ok-text); }
+.bubble.gm { border-color: var(--danger-line); color: var(--danger-text); }
+.bubble.empty { color: var(--muted); font-style: italic; padding-right: 10px; }
+/* The plus needs a round button of its own: the bubble padding is narrower
+   on the right because of the × button and would have shifted the sign. */
+.bubble.plus, .small-picker .bubble.plus { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; font-size: 13px; line-height: 1; cursor: pointer; color: var(--accent); }
+.small-picker .bubble.plus { width: 19px; height: 19px; font-size: 12px; }
+.bubble-x { background: none; border: 0; padding: 0 5px; color: var(--muted); font-size: 15px; line-height: 1; border-radius: 999px; }
+.bubble-x:hover { color: var(--warn); border-color: transparent; }
+.small-picker .bubble { font-size: 11px; padding: 2px 3px 2px 8px; }
+
+.view-menu { position: fixed; z-index: 90; width: 250px; max-height: 360px; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 8px; padding: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.5); }
+.view-menu h5 { margin: 8px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.view-menu > button, .view-found > button { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; padding: 6px 8px; }
+.view-found > button.on { background: var(--hover); }
+.view-found small { margin-left: auto; color: var(--muted); font-size: 11px; }
+.view-menu .view-search { width: 100%; margin-top: 6px; height: 30px; font-size: 13px; }
+.view-found { margin-top: 4px; }
+
+/* A page of the options is a column: lines as long as they need, not as
+   wide as the window. Only what lays out many things at once — the gallery —
+   takes the room. */
+.type-page { max-width: 760px; flex: none; }
+/* Wide pages fill the area and scroll inside — a gallery, an editor. */
+.type-page.wide { max-width: none; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* Appearance: the ready-made colours as samples of themselves, then the four. */
+.schemes { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin: 14px 0 18px; }
+.scheme {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; height: auto; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-large); text-align: left; font-size: 13px;
+}
+.scheme strong { font-size: 16px; }
+.scheme.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+.color-rows { display: grid; grid-template-columns: max-content; gap: 8px; margin-bottom: 14px; }
+.color-row { display: grid; grid-template-columns: 110px 44px 110px; align-items: center; gap: 10px; }
+.color-row input[type="color"] { width: 44px; height: 32px; padding: 2px; cursor: pointer; }
+.color-hex { font-family: monospace; }
+.color-hex.wrong { border-color: var(--warn); }
+
+/* Visibility sits in the section, not in the sidebar. */
+.level-picker { padding: 2px 6px; font-size: 11px; }
+
+.mark-short { font-size: 11px; color: var(--muted); line-height: 1; }
+.mark-divider { width: 1px; height: 13px; background: var(--border); }
+
+/* ---------- Wiki navigation ---------- */
+.crumbs { display: flex; align-items: center; font-size: 14px; flex: 1 1 0; min-width: 0; overflow: hidden; }
+.crumb { display: inline-flex; align-items: center; min-width: 0; }
+/* Where the bar gets narrow, the path gives way before the page's name:
+   the path down to its icons, the name only past most of the bar. */
+.crumb:last-child { flex-shrink: 0; max-width: 75%; }
+.crumb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.crumbs .divider { color: var(--border); padding: 0 2px; }
+.crumbs button { min-width: 0; display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px; color: var(--muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumbs button:not(:disabled):hover { color: var(--text); }
+.crumbs button:disabled { opacity: 1; color: var(--text); font-weight: 600; cursor: default; }
+
+/* ---------- Fields in lists and cards ---------- */
+
+.field { display: flex; flex-direction: column; gap: 1px; font-size: 13px; min-width: 0; }
+.field-name { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+/* Until there is image storage, the type's icon stands here. */
+.tile-image { display: grid; place-items: center; background: var(--sunken); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.image-placeholder { font-size: 20px; opacity: .55; }
+/* A stand-in without an image: someone not shown yet. */
+.image-placeholder.unknown, .text-image .image-placeholder.unknown { font-weight: 700; font-size: 34px; }
+
+/* ---------- Article page ---------- */
+/* As wide as the template's grid — header row and canvas line up. */
+.article-page { width: var(--page-width, 1152px); margin: 0 auto; }
+main { overflow-x: auto; }
+.article-head h1 { margin: 0 0 14px; font-size: 28px; font-weight: 700; color: var(--heading); display: flex; gap: 12px; align-items: center; min-width: 0; }
+.article-head .type-icon { flex: 0 0 auto; display: inline-flex; align-items: center; }
+/* Many subtypes wrap to further rows, each pill whole. */
+.article-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 26px; }
+.meta-line { flex: 1; height: 1px; background: var(--border); }
+
+/* Inline: a pick may stand in the middle of a sentence — `%%Species%%, %%Class%%`. */
+.references { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.dead-link { color: var(--muted); font-size: 14px; }
+
+.backlinks { margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--border); }
+.backlinks h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.backlinks ul { list-style: none; padding: 0; margin: 0 0 8px; }
+
+/* ---------- Icon picker ---------- */
+.icon-picker { position: relative; }
+.icon-button { font-size: 18px; }
+.icon-button.large { font-size: 22px; width: 48px; height: 48px; }
+.icon-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; width: 292px; max-height: 60vh; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; padding: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.55); }
+.icon-menu h5 { margin: 8px 0 5px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; }
+.icon-grid button { padding: 7px 0; font-size: 19px; line-height: 1; }
+.icon-own { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.icon-own label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.icon-own input { font-size: 17px; text-align: center; }
+
+/* ---------- Article head: the same form in all three views ---------- */
+
+/* The name while creating looks like the heading it becomes. */
+.name-input { flex: 1; min-width: 0; font-size: 28px; font-weight: 700; padding: 2px 8px; background: transparent; border-color: transparent; color: var(--text); }
+.name-input::placeholder { color: var(--muted); font-weight: 400; }
+.name-input:hover, .name-input:focus { border-color: var(--border); background: var(--card); }
+
+/* In the builder only the placeholder for a name stands there. */
+/* A name from a pattern: the fixed part stands there, only the gap is typed. */
+.name-pattern { display: flex; align-items: baseline; flex: 1; min-width: 0; white-space: pre; }
+.name-pattern > span { display: contents; }
+.name-fixed { font-weight: 700; }
+
+.name-placeholder { color: var(--muted); font-weight: 400; font-style: italic; }
+.type-name { width: 180px; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--base); border-color: transparent; color: var(--muted); }
+.type-name:hover, .type-name:focus { border-color: var(--accent); color: var(--text); }
+
+/* ---------- Article: infobox and flowing text ---------- */
+
+/* The body has two columns when the infobox stands at the side —
+   otherwise one. No placement, no fixed heights: the text grows, and the
+   page grows with it. */
+.article-body { display: flex; gap: 24px; align-items: flex-start; }
+.article-body.align-right { flex-direction: row-reverse; }
+.article-body.align-top, .article-body.align-none { flex-direction: column; }
+/* What fits beside the text depends on the room the page has, not the
+   screen: beside the outline on a tablet there is less of it. */
+.article-page, .visual-editor { container-type: inline-size; }
+@container (max-width: 860px) {
+  .article-body { flex-direction: column !important; }
+  /* One under the other, each as wide as the page: a table scrolls inside, a map gets its width. */
+  .article-body > * { align-self: stretch; max-width: 100%; }
+}
+
+.flowing-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+
+/* The column at the side: as high as the window at most, scrolling on its
+   own, and staying in view while the page scrolls — what is kept at hand
+   there, a timeline, stays beside the text. With the infobox on the right it
+   stands right of the infobox. A sticky column needs the page to be what
+   scrolls: such a page does not scroll sideways but grows narrower. */
+.side-column { flex: 0 0 auto; gap: 18px; max-width: 50%; position: sticky; top: calc(var(--header-height, 53px) + 16px); max-height: calc(100vh - var(--header-height, 53px) - 32px); overflow-y: auto; overscroll-behavior: contain; }
+main:has(.side-column) { overflow-x: clip; }
+.article-page:has(.side-column) { max-width: 100%; }
+.article-body.align-right .side-column { order: -1; }
+.article-body:is(.align-top, .align-none) { flex-direction: row; flex-wrap: wrap; }
+.article-body:is(.align-top, .align-none) > .infobox { flex-basis: 100%; }
+.block.at-side { width: 340px; max-width: 100%; box-sizing: border-box; }
+/* Folded away sideways: a strip with its title, read from top to bottom. */
+.block.at-side.folded { width: 34px; padding: 8px 0; align-items: center; }
+.block.at-side.folded > .block-mark { writing-mode: vertical-rl; min-height: 0; }
+.block.at-side.folded :is(.head-chevron, .head-fold) { position: static; margin: 0 0 6px; }
+.block.at-side:not(.folded) > .block-mark :is(.block-fold > .head-chevron, .head-fold) { position: static; margin: 0; }
+@media (max-width: 760px) {
+  .side-column { max-width: none; max-height: none; overflow: visible; position: static; }
+  .block.at-side, .block.at-side.folded { width: 100% !important; writing-mode: initial; }
+  .block.at-side.folded > .block-mark { writing-mode: initial; }
+}
+
+/* The width comes from the content, not from a number nobody can justify.
+   It is capped anyway: without an upper bound a long value would pull the
+   box across half the page, without a lower one a box with a short word
+   would look like an accident. */
+.infobox { flex: 0 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; box-sizing: border-box; }
+.infobox.auto { width: max-content; min-width: 180px; max-width: 420px; }
+.infobox.narrow { width: 280px; }
+.infobox.wide { width: 420px; }
+.article-body.align-top .infobox, .article-body.align-none .infobox { width: 100%; }
+@media (max-width: 760px) { .infobox { width: 100% !important; } }
+/* Who sees and changes the box, like a section's — at its top right. */
+.infobox-access { display: flex; justify-content: flex-end; margin: -6px -4px 8px 0; }
+.infobox dl { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.infobox-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.infobox-row dt { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.infobox-row dd { margin: 0; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.infobox-row input, .infobox-row select, .infobox-row textarea { width: 100%; }
+/* The same alignment as in flowing text — it is the same setting. */
+.infobox-image { margin-bottom: 12px; display: grid; place-items: center; background: var(--sunken); border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-size: 26px; }
+.infobox-image.center { margin-left: auto; margin-right: auto; }
+.infobox-image.right { margin-left: auto; }
+.infobox-image.left, .infobox-image.none { margin-right: auto; }
+/* With an image the dashed frame goes; the picture fills the box it was given. */
+.infobox-image:has(> img) { border-style: solid; overflow: hidden; }
+.infobox-image > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Without a size of its own the image keeps its own proportions; empty, it is only a slot. */
+.infobox-image.natural > img { height: auto; object-fit: contain; }
+.infobox-image.natural:not(:has(> img)) { aspect-ratio: 3 / 2; }
+/* Whoever may change the document clicks the image to choose another. */
+button.infobox-image.choosable { padding: 0; cursor: pointer; font: inherit; }
+
+/* ---------- Blocks ---------- */
+
+.block { display: flex; flex-direction: column; gap: 6px; }
+.block.box { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.block.quote { border-left: 3px solid var(--border); padding-left: 14px; }
+/* ---------- Stat block ----------
+   A creature's or a character's values at a glance: a card of the app's
+   own, the name on top, sections under a teal line, the scores as tiles. */
+.block.statblock {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-large);
+  padding: 14px 18px 16px; max-width: 560px;
+}
+.block.statblock .markdown p, .block.statblock .flow-field { line-height: 1.5; }
+.block.statblock .markdown p { margin: 0 0 .45em; }
+/* `# Goblin` is the name. */
+.block.statblock h2.markdown-head, .block.statblock .flow-h2 { font-size: 22px; margin: 0; }
+/* `## Actions`: a section, as blocks are titled elsewhere. */
+.block.statblock h3.markdown-head, .block.statblock .flow-h3 {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
+  border-bottom: 1px solid var(--accent-line); padding-bottom: 3px; margin: 16px 0 8px;
+}
+.block.statblock .markdown hr, .block.statblock .flow-rule { margin: 10px 0; }
+.block.statblock .markdown strong, .block.statblock .flow-bold { font-weight: 600; }
+.block.level-gm-only { border-left: 3px solid var(--danger-line); padding-left: 14px; }
+.block.level-sealed { border-left: 3px solid var(--accent-line); padding-left: 14px; }
+
+.block-mark { display: flex; align-items: center; gap: 10px; min-height: 24px; margin-bottom: 2px; }
+/* A block's title is a heading, as large as its type says (`.head-1` … `.head-4`). */
+.block-title { font-size: inherit; font-weight: 700; line-height: 1.3; color: var(--heading); }
+/* A block's title folds it — a title still, no button to look at. */
+.block-fold {
+  display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0;
+  height: auto; min-height: 0; font: inherit; font-weight: 700; cursor: pointer; color: var(--heading); text-align: left;
+}
+.block-fold:hover { background: none; }
+.block.picked > .block-mark .block-title { color: var(--accent); }
+/* A block without a title shows its mark only under the pointer. */
+.block-mark.untitled { opacity: 0; min-height: 0; height: 14px; transition: opacity .15s; }
+.block-mark.untitled .block-title { font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.block:hover > .block-mark.untitled, .block.picked > .block-mark.untitled, .block-mark.untitled:focus-within { opacity: 1; }
+/* A block dragged by its title: where it would land. */
+.block-title[draggable="true"] { cursor: grab; }
+.block.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+.block.drop-after { box-shadow: 0 3px 0 var(--accent); }
+.block-settings .segmented button { padding: 4px 9px; font-size: 12px; }
+.block-settings select, .block-settings input { width: 100%; }
+/* A number of pixels: the field as wide as the number, its unit beside it. */
+.block-settings .width-field { display: inline-flex; align-items: center; gap: 6px; }
+.block-settings .width-field input { width: 90px; }
+.block.folded { gap: 0; }
+.block.statblock.folded, .block.box.folded { padding-top: 8px; padding-bottom: 8px; }
+/* Above or below, a block spans the page — over or under the infobox and the text. */
+.block.at-top { margin-bottom: 18px; }
+.block.at-bottom { margin-top: 18px; }
+.block.statblock:is(.at-top, .at-bottom) { max-width: none; }
+.block-view { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.block-tools { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.block:hover .block-tools, .block:focus-within .block-tools { opacity: 1; }
+
+/* The field grows with its content and cannot be dragged larger. */
+.block-text, textarea.grows { width: 100%; resize: none; overflow: hidden; line-height: 1.55; font-family: inherit; }
+.block-text { min-height: 90px; font-size: 15px; }
+/* An empty field between or after graphs: one line, until something is written. */
+.block-text.thin { min-height: 0; }
+/* A part as one flow: text, and the images and graphs standing in it. It
+   looks like a text field, and the text runs past a floating image and on
+   below it, as on the page. */
+.flow-box { position: relative; }
+/* The text as it is read: the same size, line height and width as on the
+   page — the frame lies outside it and takes no room, so lines wrap alike. */
+.flow-field.block-text { position: relative; z-index: 1; display: flow-root; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.65; min-height: 1.65em; padding: 0; border: 0; border-radius: 4px; background: transparent; outline: 1px solid var(--border); outline-offset: 6px; cursor: text; }
+.flow-field.block-text { outline-color: transparent; }
+.flow-field.block-text:hover { outline-color: var(--border); }
+/* The ring of an element in it stands outside it — and is the only ring then. */
+.flow-field.block-text { overflow: visible; }
+.flow-field.block-text:has(.surface-card:hover):not(:focus) { outline-color: transparent; }
+.flow-field.block-text:focus { outline-color: var(--accent); }
+.flow-box { margin: 6px 0; }
+/* In the document the field stands where the read text stands — no room of its own. */
+.visual-editor .block-part > .flow-box { margin: 0; }
+/* Headings, bold, italic, code as they are read (`.markdown`). */
+.flow-heading { display: block; font-weight: 700; line-height: 1.3; margin: 0 0 8px; }
+.flow-bold { font-weight: 700; }
+.flow-italic { font-style: italic; }
+/* The marks of a stretch: hidden as on the page, there while the caret is in it. */
+.flow-mark-hidden { display: none; }
+.flow-mark { color: var(--muted); font-weight: 400; font-style: normal; }
+/* A list item and a quote as the page draws them (`.markdown ul`, `blockquote`):
+   the marks one writes stand where the page has its bullet. */
+.flow-item { display: block; position: relative; padding-left: 22px; margin-bottom: 4px; }
+.flow-bullet, .flow-number, .flow-quote-mark { position: absolute; left: 0; white-space: pre; }
+.flow-bullet { width: 22px; color: transparent; }
+.flow-bullet::before { content: "•"; position: absolute; left: 7px; color: var(--text); }
+.flow-number { width: 18px; text-align: right; }
+.flow-quote { display: block; position: relative; padding-left: 14px; border-left: 3px solid var(--border); color: var(--muted); }
+.flow-quote-mark { color: transparent; width: 14px; }
+/* A link while one writes in it: its whole text, marked as a link. */
+.flow-link-open { color: var(--accent); background: var(--sunken); border-radius: 3px; }
+.flow-link { cursor: pointer; }
+.flow-code { font-family: monospace; background: var(--sunken); border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+.flow-field.empty::before { content: attr(data-placeholder); color: var(--muted); pointer-events: none; position: absolute; }
+.flow-surface { white-space: normal; cursor: default; }
+/* Floating, but as wide as the text: nothing fits beside it — it stands on
+   its own, the text below it, as the page does with it. */
+.flow-surface.image.left { float: left; margin: 4px 18px 8px 0; }
+.flow-surface.image.right { float: right; margin: 4px 0 8px 18px; }
+.flow-surface.image.full { float: none; display: block; margin: 8px 0; }
+.flow-surface.image.nowrap { float: none; display: block; margin: 8px 0; }
+.flow-surface.image.center, .flow-surface.graph { display: block; margin: 8px 0; }
+/* Without the text beside it: at its edge, the text below. */
+.flow-surface.nowrap .image-card.right { margin-left: auto; }
+.flow-surface .image-card { float: none; margin: 0; }
+.flow-diff { position: absolute; z-index: 0; pointer-events: none; border-radius: 3px; }
+.flow-diff.mark-added { background: #1f4a28; }
+.flow-diff.mark-removed { background: #5a2328; }
+/* Over a mark the field is see-through, so the mark shows behind the text. */
+.flow-box:has(> .flow-diff) > .flow-field { background: transparent; }
+
+/* ---------- Headings ----------
+   One scale for the text's headings and the blocks' titles: 1 as `#` in
+   the text, 4 the size of the text itself. */
+.head-1, .markdown h2.markdown-head, .flow-heading.flow-h2 { font-size: 22px; }
+.head-2, .markdown h3.markdown-head, .flow-heading.flow-h3 { font-size: 19px; }
+.head-3, .markdown h4.markdown-head, .flow-heading.flow-h4 { font-size: 17px; }
+.head-4, .markdown :is(h5, h6).markdown-head, .flow-heading:is(.flow-h5, .flow-h6, .flow-h7) { font-size: 15px; }
+.markdown-head, .flow-heading { color: var(--heading); font-weight: 700; }
+/* What folds has its arrow in the margin, so its title stands where the
+   text does; turned down while open. */
+.head-chevron {
+  width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; color: var(--muted); transition: transform .15s, color .15s;
+}
+.head-chevron.open { transform: rotate(90deg); }
+.block-fold:hover .head-chevron, .head-fold:hover .head-chevron, .markdown-head.foldable:hover .head-chevron { color: var(--text); }
+/* In the page's own padding (18px) — no wider, or a narrow window cuts it off. */
+.block-fold > .head-chevron, .head-fold { position: absolute; left: -20px; top: 50%; margin-top: -9px; }
+.head-fold {
+  display: grid; place-items: center; width: 18px; height: 18px; min-height: 0; padding: 0;
+  border: 0; background: none; cursor: pointer;
+}
+.head-fold:hover { background: none; }
+.block-fold > .head-chevron { left: -18px; margin-top: -7px; }
+.markdown-head.foldable { position: relative; cursor: pointer; }
+/* Where the margin is no room of the text's own — in a box, a preview —
+   the arrow stands before the title. */
+.block:is(.box, .statblock, .quote) > .block-mark :is(.head-chevron, .head-fold),
+.link-preview :is(.block-fold > .head-chevron, .head-fold) { position: static; margin: 0; }
+.link-preview .markdown-head.foldable { display: flex; align-items: center; gap: 6px; }
+@media (max-width: 760px) {
+  :is(.block-fold > .head-chevron, .head-fold) { position: static; margin: 0; }
+  .markdown-head.foldable { display: flex; align-items: center; gap: 6px; }
+}
+
+/* ---------- Markdown ---------- */
+
+.markdown { font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+/* A paragraph ends with one empty line — as the blank line in the editor. */
+.markdown p { margin: 0 0 1.65em; }
+.markdown-head { margin: 0 0 8px; line-height: 1.3; }
+.markdown ul, .markdown ol { margin: 0 0 12px; padding-left: 22px; }
+.markdown li { margin-bottom: 4px; }
+.markdown blockquote { margin: 0 0 12px; padding-left: 14px; border-left: 3px solid var(--border); color: var(--muted); }
+.markdown hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+/* A rule in the editor as the page draws it — its dashes while the caret is on the line. */
+.flow-rule { display: block; color: transparent; height: 1px; overflow: hidden; background: var(--border); margin: 18px 0; font-size: 1px; }
+.flow-rule-open { display: block; color: var(--muted); }
+
+/* ---------- Rolls ----------
+   Dice in the text and `[[…]]`: a click rolls into the tray. */
+.roll {
+  display: inline; font: inherit; color: var(--text); line-height: inherit;
+  background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 4px; padding: 0 5px;
+}
+button.roll:hover { border-color: var(--accent); }
+.flow-roll { background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 4px; padding: 0 4px; }
+.roll-bad { color: var(--danger-text); border-bottom: 1px dashed var(--danger-text); cursor: help; }
+.reckoned, .summed { border-bottom: 1px dotted var(--muted); }
+.summed { cursor: help; }
+/* `<abilities>`: STR DEX CON … as one row, each with its modifier. */
+.flow-surface.abilities { display: block; margin: 4px 0; }
+.ability-row { display: grid; grid-template-columns: repeat(var(--count, 6), minmax(0, 1fr)); gap: 6px; margin: 8px 0; text-align: center; }
+/* A score as a tile: what it is, the score, its modifier — a click rolls. */
+.ability {
+  display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0;
+  font: inherit; color: var(--text); background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; padding: 5px 2px 6px;
+}
+button.ability { cursor: pointer; }
+button.ability:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ability-name { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.ability-score { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.ability-mod { font-size: 12px; color: var(--accent); }
+.ability.empty .ability-score { color: var(--muted); }
+/* Over the scores and over the line of their saving throws: what they are. */
+.ability-caption { margin: 8px 0 -4px; font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.ability-caption.also { grid-column: 1 / -1; margin: 2px 0 -2px; display: flex; align-items: center; gap: 8px; }
+.ability-caption.also::before, .ability-caption.also::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+/* A saving throw under its score: how well, the bonus — a click rolls. */
+.ability-also-cell { min-width: 0; }
+.ability-also {
+  display: flex; align-items: center; justify-content: center; gap: 3px; width: 100%; padding: 3px 2px;
+  font: inherit; font-size: 13px; color: var(--text); background: var(--sunken); border: 1px solid var(--border); border-radius: 6px;
+}
+button.ability-also { cursor: pointer; }
+button.ability-also:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ability-marks { color: var(--accent); font-size: 0.8em; letter-spacing: -1px; }
+.ability-marks.none { opacity: 0.25; }
+.ability-also .pick-count { width: 2.2em; height: auto; padding: 0 2px; font-size: 0.85em; text-align: center; }
+/* While writing: the score's own value under the tile's total. */
+.ability-own { width: 3.4em; margin-top: 4px; padding: 1px 4px; height: 22px; text-align: center; font-size: 12px; }
+/* A value of a group's layout, changed where it stands — as small as the text around it. */
+.sheet-input { display: inline-flex; vertical-align: baseline; }
+.sheet-input .number-input input { padding: 0 6px; height: 24px; font-size: 14px; }
+/* In a line of the sheet a field is as wide as what it holds. */
+.sheet-input select { width: auto; height: auto; min-height: 0; padding: 1px 22px 1px 6px; line-height: 1.3; font: inherit; }
+.sheet-input > input { width: auto; height: 24px; min-height: 0; padding: 0 6px; font: inherit; }
+.markdown code { background: var(--sunken); border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+.codeblock { background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 0 0 12px; }
+.codeblock code { background: none; padding: 0; }
+/* An outward link is not opened — the target stands in the tooltip. */
+.external-link { color: var(--accent); border-bottom: 1px dotted var(--accent); cursor: help; }
+
+/* ---------- Template editor ---------- */
+
+.template-editor { display: flex; flex-direction: column; height: 100%; gap: 14px; min-height: 0; }
+.two-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 14px; flex: 1; min-height: 0; }
+@media (max-width: 1000px) { .two-columns { grid-template-columns: 1fr; grid-template-rows: auto auto; overflow: auto; } }
+
+.text-side { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+
+/* Numbers and field share line height and font — otherwise they drift
+   apart after a few lines. */
+.text-field { flex: 1; display: flex; min-height: 0; background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.text-field:focus-within { border-color: var(--accent); }
+.line-numbers { flex: 0 0 auto; overflow: hidden; padding: 10px 8px 10px 12px; text-align: right; background: var(--sunken); border-right: 1px solid var(--border); color: var(--muted); font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 13px; line-height: 1.7; user-select: none; }
+.line-numbers span { display: block; }
+.line-numbers span.stuck { color: var(--danger-text); font-weight: 700; }
+.template-text { flex: 1; min-width: 0; min-height: 320px; padding: 10px 12px; resize: none; background: transparent; border: 0; border-radius: 0; font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 13px; line-height: 1.7; tab-size: 2; white-space: pre; overflow: auto; }
+.template-text:focus { outline: none; border: 0; }
+
+.error-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.error-list li { display: flex; gap: 8px; align-items: baseline; font-size: 13px; color: var(--danger-text); background: var(--danger-soft); border: 1px solid var(--danger-line); border-radius: 6px; padding: 6px 9px; }
+.error-list button { flex: 0 0 auto; }
+
+.preview-side { background: var(--base); border: 1px solid var(--border); border-radius: 10px; padding: 16px; overflow: auto; min-height: 0; }
+.article-page.preview { width: 100%; }
+.filler { flex: 1; }
+.type-name.large { width: auto; flex: 0 1 260px; font-size: 15px; border-radius: 8px; }
+
+.muted { color: var(--muted); }
+
+/* ---------- Bricks: legend and right-click ---------- */
+
+.brick-menu { position: fixed; z-index: 80; width: 230px; max-height: 70vh; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; padding: 6px; box-shadow: 0 14px 34px rgba(0,0,0,.6); }
+.brick-group + .brick-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.brick-formats { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 2px 4px; }
+.brick-formats button { min-width: 30px; padding: 3px 6px; }
+.brick-menu h5 { margin: 4px 6px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.brick-menu button { display: block; width: 100%; text-align: left; padding: 4px 8px; font-size: 13px; }
+
+/* ---------- Suggestions after @ ---------- */
+
+.mention-menu { position: fixed; z-index: 85; width: 280px; max-height: 250px; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; padding: 4px; box-shadow: 0 14px 34px rgba(0,0,0,.6); }
+.mention-menu button { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; padding: 4px 8px; font-size: 13px; }
+.mention-icon { flex: none; width: 1.3em; text-align: center; }
+.mention-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-hint { flex: none; font-size: 11px; color: var(--muted); }
+.mention-label { padding: 3px 8px 5px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); margin-bottom: 3px; }
+
+/* ---------- Legend: a window of its own ---------- */
+
+/* It fills its window entirely — there is nothing else in it. */
+.legend { height: 100vh; overflow-y: auto; padding: 16px 18px 24px; display: flex; flex-direction: column; gap: 4px; }
+.legend header { position: sticky; top: -16px; z-index: 2; margin: -16px -18px 6px; padding: 16px 18px 12px; background: var(--base); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.legend h2 { margin: 0; font-size: 17px; }
+.legend p { margin: 0; }
+.legend-search { width: 100%; }
+
+/* Coloured is what gets replaced — the answer to “do I need quotes?”. */
+/* No padding: the placeholder stands in the middle of a line of code, and a
+   padding visibly tore `label="Title"` apart. */
+.placeholder { color: var(--accent); font-weight: 600; }
+
+.legend .group { display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; }
+.group-head { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 10px; padding: 7px 9px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); background: var(--card); }
+.group-head:hover { color: var(--text); }
+.group-head .arrow { width: 12px; color: var(--accent); }
+.group-head small { margin-left: auto; text-transform: none; letter-spacing: 0; opacity: .7; }
+
+.footnote { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); line-height: 1.55; }
+
+/* ---------- Image in flowing text ---------- */
+
+/* That is exactly what tags are for: an image may stand in the middle of a
+   paragraph, and the text runs past it. */
+/* The same room around an image as in the editor (`.flow-surface`). */
+.text-image { margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.markdown p:has(+ .text-image) { margin-bottom: 0; }
+/* An image keeps its own size — at most as wide as the text; with a width
+   of its own exactly that wide. Never stretched. */
+.text-image > img { max-width: 100%; width: auto; height: auto; border-radius: 6px; display: block; align-self: flex-start; }
+.text-image.center { width: fit-content; max-width: 100%; margin-left: auto; margin-right: auto; }
+.text-image.sized > img { width: 100%; }
+.inline-image { max-height: 1.6em; vertical-align: middle; border-radius: 3px; }
+.text-image.right { float: right; margin: 4px 0 8px 18px; }
+.text-image.left { float: left; margin: 4px 18px 8px 0; }
+.text-image.nowrap { float: none; width: fit-content; max-width: 100%; margin: 8px 0; }
+.text-image.nowrap.right { margin-left: auto; }
+.text-image.full { float: none; margin: 8px 0; }
+.text-image .image-placeholder { display: grid; place-items: center; aspect-ratio: 4 / 3; background: var(--sunken); border: 1px dashed var(--border); border-radius: 8px; font-size: 26px; opacity: .5; }
+.text-image figcaption { font-size: 12px; color: var(--muted); line-height: 1.4; padding: 3px 5px; }
+/* After the block, the flowing-around stops — otherwise the next section
+   slides beside it. */
+.markdown::after { content: ""; display: block; clear: both; }
+@container (max-width: 620px) { .text-image.right, .text-image.left { float: none; margin: 0 0 12px; width: 100% !important; } }
+
+.empty-note { margin: 0; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; line-height: 1.6; }
+.empty-note strong { color: var(--text); }
+
+/* A guarded part of a block — visibly set apart, because it is an encrypted
+   package of its own and not merely styled differently. */
+/* Block flow, not flex: an image floats in it as it does when reading, and
+   the text field beside it takes what room is left. */
+.block-part { display: flow-root; position: relative; }
+.block-part > * + * { margin-top: 4px; }
+/* The template editor's access of a part: over its corner, on pointing. */
+.access-slot.quiet { position: absolute; top: 2px; right: 4px; z-index: 2; opacity: 0; transition: opacity .12s; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
+.block-part:hover > .access-slot.quiet, .access-slot.quiet:focus-within { opacity: 1; }
+.access-slot.quiet .access-row { margin-bottom: 0; }
+
+/* Access that is only inherited does not stand in the way: it lies over the
+   corner of the paragraph and only appears when you look. What stays visible
+   is what really restricts something. */
+.data-values { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.data-values li { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.data-values li span:first-child { flex: 1; }
+.data-values li.note { border-style: dashed; background: none; }
+
+.value-list { padding: 4px 2px; }
+.value-list h3 { margin: 0 0 8px; font-size: 14px; }
+.value-list h3 small { margin-left: 6px; font-weight: 400; }
+
+.block-view.quiet { opacity: 0; transition: opacity .12s; }
+.block:hover .block-view.quiet, .block-view.quiet:focus-within { opacity: 1; }
+.block-part + .block-part { margin-top: 10px; }
+.block-part.guarded { padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--sunken); border-radius: 0 8px 8px 0; }
+.block-part.level-gm-only { border-left-color: var(--danger-line); }
+.block-part.level-sealed { border-left-color: var(--accent-line); }
+.block-part .block-view { margin-left: 0; }
+
+/* Click access instead of typing it — the same choice as everywhere else. */
+.access-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 2px; }
+/* Fixed width, otherwise the field sizes itself to its longest option and
+   tears a gap up to the next word. */
+.access-row .level-picker { border: 0; background: transparent; padding: 0 2px; font-size: 10px; color: var(--muted); height: 18px; width: 118px; }
+.access-row .level-picker:hover { color: var(--text); }
+/* The note that the skeleton stands again — not an error, only information.
+   Hence in the accent colour and not in red. */
+.repaired-note { margin: 8px 0 0; padding: 7px 10px; border-left: 3px solid var(--accent); background: var(--sunken); border-radius: 0 6px 6px 0; color: var(--muted); }
+.repaired-note code { color: var(--text); }
+
+/* The name carries access of its own — the row must not burst the head line. */
+.article-meta .access-row { margin-bottom: 0; }
+
+.type-name.missing { border-color: var(--danger-line); }
+.type-name.missing::placeholder { color: var(--danger-text); }
+
+/* The legend as a table: the line on the left, a sentence on the right. No
+   one looking something up while typing needs more. */
+.legend-table { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 14px; }
+.legend-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; padding: 8px 10px; background: var(--card); align-items: start; }
+.legend-row code { white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; color: var(--text); }
+.legend-row p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+@media (max-width: 560px) { .legend-row { grid-template-columns: 1fr; gap: 4px; } }
+
+/* ---------- Supertypes ---------- */
+
+/* What a type is a kind of — beside its name, because it says what it is. */
+.supertype-picker { display: flex; align-items: center; gap: 6px; }
+.supertype-picker select { padding: 5px 8px; font-size: 13px; }
+/* An inherited block is changed where it comes from — here it is only shown. */
+.block.inherited { opacity: .6; }
+.block.inherited .block-mark .small { margin-left: auto; font-style: italic; }
+.backlinks .chips { list-style: none; padding: 0; margin: 0 0 12px; }
+
+/* ---------- Pages and <list> ---------- */
+
+/* A list in the text: alphabetical, in as many columns as it asks for. */
+.listing { list-style: none; margin: 0 0 12px; padding: 0; column-gap: 24px; }
+.listing li { break-inside: avoid; padding: 2px 0; }
+/* Text styles its own lists; a listing stands flush wherever it is. */
+ul.listing.listing { padding-left: 0; }
+ul.listing.listing li { margin: 0; }
+/* A list with values: the name, and what each shows after it — a skill and its bonus. */
+.listing.with-values { column-gap: 14px; }
+.listing.with-values li { display: flex; align-items: baseline; gap: 5px; }
+.listing.with-values li > .wikilink { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.listing-value { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* `●Proficiency`: how well, as marks — faint where it is none. */
+.listing-marks { color: var(--accent); font-size: 0.8em; letter-spacing: -1px; width: 1.7em; flex: none; margin-right: -2px; }
+.listing-marks.none { opacity: 0.25; }
+/* Every document of a type with its number: those at 0 step back. */
+.every-pick { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; }
+.every-pick .pick { white-space: nowrap; color: var(--muted); }
+.every-pick .pick.set { color: var(--text); }
+/* A pick's number in a list, while writing: as small as the marks it stands for. */
+.listing .pick-count,
+.listing-inline .pick-count,
+.listing-table .pick-count {
+  flex: none;
+  width: 2.2em;
+  height: auto;
+  margin: 0 2px;
+  padding: 0 2px;
+  font-size: 0.85em;
+  line-height: 1.3;
+  text-align: center;
+}
+.listing-tree, .listing-tree ul { list-style: none; margin: 0; padding: 0; }
+.listing-tree { margin: 0 0 12px; }
+.listing-tree ul { margin-left: 11px; padding-left: 14px; border-left: 1px solid var(--border); }
+.tree-row { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 2px 0; }
+.tree-fold { flex: none; width: 20px; height: 20px; padding: 0; display: grid; place-items: center; background: none; border: 0; color: var(--muted); }
+.tree-picture { flex: none; width: 28px; height: 28px; border-radius: 6px; object-fit: cover; background: var(--sunken); }
+.tree-sign { display: grid; place-items: center; font-size: 15px; }
+.tree-count { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--sunken); color: var(--muted); }
+/* Cards: the documents as small tiles — what they show, the tag says. */
+.listing-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 0 0 14px; }
+.listing-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: left; padding: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+.listing-card:hover { border-color: var(--accent); }
+.listing-card .tile-image { width: 100%; aspect-ratio: 4 / 3; }
+.tile-image:has(> img) { position: relative; }
+.tile-image > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 25%; display: block; }
+.listing-card .image-placeholder { font-size: 30px; }
+.listing-placeholder { padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; }
+
+/* ---------- Relations: graph and family tree ---------- */
+
+.relation-graph { margin: 0 0 14px; }
+svg.graph.fit { max-width: 100%; height: auto; }
+/* Large graphs scroll inside their frame instead of widening the page. */
+/* As high as the tree; only a tree wider than the page scrolls sideways. */
+.graph-scroll { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--border); border-radius: var(--radius-large); background: var(--sunken); }
+.graph { display: block; margin: 0 auto; touch-action: none; user-select: none; }
+.graph .person rect { fill: var(--raised); stroke: var(--accent-line); stroke-width: 1.2; }
+.graph .person { cursor: pointer; }
+.graph .person:hover rect, .graph .person.target rect { stroke: var(--accent); }
+.graph .person.centre rect { stroke: var(--accent); stroke-width: 2; fill: var(--raised); }
+.graph .person.chosen rect { stroke: var(--accent); stroke-width: 2.5; }
+/* The portrait's place: initials until a character has a picture. */
+.graph .person .portrait { fill: var(--accent-soft); stroke: var(--accent-line); }
+.graph .person .initials { fill: var(--accent); font-size: 13px; font-weight: 600; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.graph .person .name { fill: var(--text); font-size: 15px; font-weight: 600; dominant-baseline: central; pointer-events: none; }
+.graph .person .subtitle { fill: var(--text); opacity: .72; font-size: 12.5px; dominant-baseline: central; pointer-events: none; }
+/* Someone this reader cannot open: there, but not who. */
+.graph .person.unknown { cursor: default; }
+.graph .person.unknown rect { fill: var(--sunken); stroke-dasharray: 4 3; }
+.graph .person.unknown .portrait { fill: var(--sunken); stroke: var(--border); }
+.graph .person.unknown .initials, .graph .person.unknown .name { fill: var(--muted); }
+.graph.editing .person:not(.unknown) { cursor: grab; }
+.graph .person.moving { cursor: grabbing; opacity: .85; }
+.graph .person.moving rect { stroke: var(--accent); stroke-dasharray: 5 3; }
+/* The dot to draw a relation from — while editing, at each card's right edge. */
+.graph .handle { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; cursor: crosshair; opacity: .55; }
+.graph .person:hover .handle { opacity: 1; }
+/* While editing the graph is a surface on a grid. */
+.graph .grid-dot { fill: var(--border); }
+.graph-scroll { position: relative; }
+.graph-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0; pointer-events: none; }
+.graph-menu form { display: flex; flex-direction: column; gap: 6px; }
+.graph-menu .brick-group { max-height: 260px; overflow-y: auto; }
+.graph .family-line { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+.graph .arrow { fill: var(--muted); }
+.graph .edge path { fill: none; stroke: var(--edge, var(--muted)); stroke-width: 1.8; }
+/* A label sits on a plate of its own, so no line runs through its words. */
+.graph .pill rect { fill: var(--sunken); stroke: var(--edge, var(--muted)); stroke-width: 1; }
+.graph .pill .role { fill: var(--text); font-size: 12px; text-anchor: middle; dominant-baseline: central; }
+.graph .edge.chosen path:not(.hit), .graph .drop.chosen path:not(.hit) { stroke-width: 3.4; }
+.graph .drop.chosen .family-line { stroke: var(--accent); }
+/* Wide and invisible: lines are easy to hit while editing. */
+.graph .hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
+.graph .drag-line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }
+/* Line colours by name — the same words as in <line color=…>. */
+.rel-grey { --edge: var(--muted); }
+.rel-teal { --edge: var(--relation-0); } .rel-amber { --edge: var(--relation-1); }
+.rel-blue { --edge: var(--relation-2); } .rel-rose { --edge: var(--relation-3); }
+.rel-green { --edge: var(--relation-4); } .rel-violet { --edge: var(--relation-5); }
+.rel-red { --edge: var(--relation-6); } .rel-cyan { --edge: var(--relation-7); }
+.graph .pill.movable { cursor: ew-resize; }
+/* A chosen line's ends: drag one to another side of its card. */
+.graph .end-handle { fill: var(--accent); stroke: var(--sunken); stroke-width: 2; cursor: move; }
+/* Where a docked line meets the line it is docked onto. */
+.graph .join-point { fill: var(--edge, var(--muted)); stroke: var(--sunken); stroke-width: 1.5; }
+.graph .join-point.target { fill: var(--accent); }
+/* On a chosen line: the dot to draw a new line from it — to someone, or onto another line. */
+.graph .line-handle { fill: var(--sunken); stroke: var(--accent); stroke-width: 2; cursor: crosshair; }
+/* Between two who have no line of their own, a stroke stands in for it. */
+.graph .edge path.stand-in { stroke: var(--muted); stroke-dasharray: 4 4; }
+.docked { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* While an end is dragged: the points along the card's edge it can dock at. */
+.graph .dock { fill: var(--accent); opacity: .55; pointer-events: none; }
+/* A card with a frame of its own colour. */
+.graph .person.framed rect { stroke: var(--edge); stroke-width: 2; }
+.card-settings { display: flex; flex-direction: column; gap: 10px; }
+.card-settings h5 { margin: 0 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.card-settings label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.graph-settings section { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.graph-settings section:last-child { border-bottom: 0; }
+.graph-settings p { margin: 0; }
+.graph-actions { flex-direction: row !important; flex-wrap: wrap; }
+.new-person { display: flex; flex-direction: column; gap: 6px; }
+.part-graph { margin: 6px 0; }
+.line-settings, .graph-settings { display: flex; flex-direction: column; gap: 8px; }
+.line-settings { border-top: 1px solid var(--border); padding-top: 8px; }
+/* One end of a line between pairs: its people's roles, and what its label says. */
+.connector-end { display: grid; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; }
+.connector-end h5 { margin: 0; }
+.connector-end h5 .muted { font-weight: normal; }
+.group-label { display: grid; gap: 4px; }
+.line-settings h5, .graph-settings h5 { margin: 0 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.line-settings label, .graph-settings label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.line-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 5px; }
+.swatch-button { width: 22px; height: 22px; padding: 0; border-radius: 999px; background: var(--edge); border: 2px solid transparent; }
+.swatch-button.on { border-color: var(--text); }
+.swatch-button.auto { width: auto; padding: 0 8px; font-size: 11px; background: var(--raised); border-color: var(--border); }
+.swatch-button.auto.on { border-color: var(--accent); }
+.graph-settings .chips { margin: 0; }
+.graph-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 8px; }
+.graph-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--muted); }
+.graph-legend li { display: flex; align-items: center; gap: 6px; }
+.graph-legend .swatch { width: 14px; height: 3px; border-radius: 2px; background: var(--edge); }
+.add-person { font-size: 13px; padding: 4px 8px; }
+/* The roles of what was clicked in a graph — in the side bar, where the
+   versions stand, and above them while open. */
+.side-panel { position: fixed; z-index: 16; top: var(--header-height, 53px); right: 0; bottom: 0; width: var(--versions-width); overflow-y: auto; border-left: 1px solid var(--border); background: var(--card); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.side-panel-head { display: flex; justify-content: space-between; align-items: center; }
+.side-panel-head h3 { margin: 0; }
+.relation-card { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); }
+.relation-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.relation-card label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.relation-card select { width: 100%; }
+.graph-error { color: var(--danger-text); margin: 6px 0 0; }
+
+/* Relations in the infobox: who, and what they are to this document. */
+.relations { display: flex; flex-direction: column; gap: 2px; }
+.relation { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.relation-role { font-size: 12px; color: var(--muted); }
+/* While editing: one line each, the roles as dropdowns. */
+.relation-rows { display: flex; flex-direction: column; gap: 6px; }
+.relation-row { display: flex; align-items: center; gap: 6px; }
+.relation-row select { min-width: 64px; flex: 1 1 0; }
+.relation-row .bubble-x { flex: none; }
+.relation-row.locked { color: var(--muted); font-size: 13px; padding: 4px 2px; }
+.relation-rows > select { align-self: flex-start; }
+/* A type's page sits under the collection's head, which already names it. */
+/* Without an infobox beside it the text takes the whole width — otherwise a
+   column layout shrinks it to its content, and cards stack one per row. */
+.article-body.align-top > .flowing-text, .article-body.align-none > .flowing-text { align-self: stretch; }
+
+/* ---------- Documents: view, edit, code ---------- */
+
+/* The switches of a document stand in the header bar: read
+   or edit; code, both or visual. */
+.document { display: flex; flex-direction: column; gap: 12px; }
+.document .article-page { width: 100%; }
+.document-columns { min-height: 60vh; }
+.document-title { margin: 0; font-size: 26px; }
+/* The code, read-only: the same face as the editor, without the field. */
+/* The visual side: the properties as a form, the sections as text fields. */
+.visual-editor { display: flex; flex-direction: column; gap: 16px; }
+.properties { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.properties > .fold { margin: -4px 0 6px -6px; }
+.properties dl { margin: 0 0 10px; display: flex; flex-direction: column; gap: 8px; }
+.property-row { display: grid; grid-template-columns: minmax(110px, 180px) 1fr; gap: 10px; align-items: start; }
+.property-row dt { font-size: 13px; color: var(--muted); padding-top: 7px; }
+.property-row dd { margin: 0; display: flex; gap: 6px; align-items: center; min-width: 0; }
+.property-row dd > input, .property-row dd > select, .property-row dd > textarea { flex: 1; min-width: 0; }
+.property-name { width: 100%; font-size: 13px; }
+
+/* ---------- Properties: data, folded away until asked for ---------- */
+
+.fold { display: inline-flex; align-items: baseline; gap: 6px; color: var(--muted); }
+.fold:hover:not(:disabled) { color: var(--text); }
+/* A property group: its properties folded under its name — open, their
+   names stand indented, their values in line with the others. */
+.property-group { display: flex; flex-direction: column; gap: 8px; }
+.property-group > .fold { align-self: flex-start; margin-left: calc((var(--depth) - 1) * 14px - 6px); color: var(--muted); }
+.property-group > .property-row > dt { padding-left: calc(var(--depth) * 14px); }
+.properties.folded { padding: 4px 8px; }
+.properties.folded > .fold { margin: 0; }
+.code-fold { align-self: flex-start; margin-bottom: 4px; }
+
+/* ---------- Properties in the text and in the editor ---------- */
+
+/* A value read with %%Name%% — in a template, which has none, its name. */
+.value-name { font-size: 12px; color: var(--accent); background: var(--sunken); border: 1px dashed var(--border); border-radius: 5px; padding: 0 5px; }
+.bound-value { font-weight: 500; }
+/* The infobox while editing: the box as it is read, its values fields that
+   look like values until one points at them. */
+/* Outline, not border: the field takes exactly the room the value takes when read. */
+.infobox.editing .infobox-row dd input, .infobox.editing .infobox-row dd select, .infobox.editing .infobox-row dd textarea {
+  width: 100%; height: auto; min-height: 0; padding: 0; margin: 0; font: inherit; font-size: 14px; line-height: inherit; color: var(--text);
+  background: transparent; border: 0; border-radius: 3px; outline: 1px solid transparent; outline-offset: 2px; }
+.infobox.editing .infobox-row dd select { appearance: none; color: var(--accent); cursor: pointer; }
+.infobox.editing .infobox-row dd :is(input, select, textarea):hover { outline-color: var(--border); }
+.infobox.editing .infobox-row dd :is(input, select, textarea):focus { outline-color: var(--accent); background: var(--sunken); }
+.number-input { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; }
+.number-input input { min-width: 0; }
+.infobox.editing .number-input input { width: auto; }
+/* Without a unit of its own the number takes the row; with one it is as wide as written, as when read. */
+.number-input:has(.unit) input { field-sizing: content; min-width: 2ch; }
+/* Several documents: each one taken out with ×, more added with ＋. */
+.multi-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.multi-pick .pick { display: inline-flex; align-items: center; gap: 2px; color: var(--accent); white-space: nowrap; }
+.multi-pick .pick-x { border: 0; background: transparent; padding: 0 3px; height: auto; min-height: 0; color: var(--muted); font-size: 13px; line-height: 1; opacity: 0; }
+.multi-pick .pick:hover .pick-x, .multi-pick .pick-x:focus { opacity: 1; }
+.multi-pick .pick-x:hover { color: var(--danger-text); }
+/* A pick's own number — the levels in a class — small, beside its name. */
+.multi-pick .pick-count, .every-pick .pick-count { width: 2.6em; min-width: 0; margin-left: 4px; padding: 0 4px; height: 22px; text-align: center; font-size: 13px; color: var(--text); }
+.multi-pick .pick-add, .infobox.editing .infobox-row dd select.pick-add { width: 26px !important; height: 22px; padding: 0; margin: 0; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 6px; background: transparent; appearance: none; cursor: pointer; }
+.multi-pick .pick-add:hover { color: var(--accent); border-color: var(--accent); }
+/* ---------- Link preview ----------
+   The whole page of a linked document, smaller, while the pointer rests on
+   the link or on the card. */
+.link-preview {
+  position: fixed; z-index: 60; width: 760px; max-width: calc(100vw - 16px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--base); border: 1px solid var(--border); border-radius: var(--radius-large);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5); padding: 12px 16px;
+}
+/* The page as it reads, laid out narrower and drawn smaller — a look, not a read. */
+.link-preview-page { zoom: .9; width: 808px; }
+.link-preview .article-page { width: 100%; margin: 0; }
+.group-preview { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
+.group-preview .property-row dt { padding-top: 0; }
+.bound-fields { margin: 6px 0 0; display: flex; flex-direction: column; gap: 8px; }
+
+/* A list as a table: the name, then one column per property. */
+/* A list in the visual editor: drawn as read; pointing at it shows how it is drawn and its tag. */
+/* A list from a property: × beside each, ＋ for more. */
+.listing-box .pick-x { display: inline-block; margin-left: 4px; padding: 0 4px; color: var(--muted); cursor: pointer; opacity: 0; font-size: 13px; }
+.listing-box li:hover .pick-x, .listing-box tr:hover .pick-x, .listing-box .listing-card:hover .pick-x, .listing-box .pick-x:focus { opacity: 1; }
+.listing-box .pick-x:hover { color: var(--danger-text); }
+select.pick-add { width: 26px; height: 22px; min-height: 0; padding: 0; text-align: center; text-align-last: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 6px; background: transparent; appearance: none; cursor: pointer; }
+select.pick-add:hover { color: var(--accent); border-color: var(--accent); }
+.listing-add { display: block; margin-top: 4px; }
+.listing-table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0; }
+.listing-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.listing-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.listing-table tr:last-child td { border-bottom: none; }
+/* A head that sorts: the head's own look, a click away. */
+.sort-head { display: inline-flex; align-items: center; gap: 4px; }
+.sort-head button { background: none; border: 0; padding: 0; height: auto; min-height: 0; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.sort-head button:hover, .sort-head button.on { color: var(--text); background: none; }
+.sort-head .sort-reset { font-size: 13px; text-transform: none; color: var(--accent); }
+.listing-table :is(th, td).number { text-align: right; font-variant-numeric: tabular-nums; }
+.listing-table th.number .sort-head { justify-content: flex-end; }
+/* Words stay whole in a cell, heads on one line: a wide table scrolls sideways. */
+.listing-scroll { overflow-x: auto; max-width: 100%; }
+.listing-table :is(th, td) { overflow-wrap: normal; word-break: normal; }
+.listing-table th { white-space: nowrap; }
+.listing-table td .wikilink { text-align: left; }
+.listing-table td .references > span { white-space: nowrap; }
+.listing-table tfoot td { border-top: 1px solid var(--border); border-bottom: none; font-weight: 600; }
+/* A table written in the text: like a list's table, scrolling sideways when wide. */
+.markdown-table { overflow-x: auto; margin: 8px 0; }
+.markdown-table table { border-collapse: collapse; font-size: 14px; }
+.markdown-table th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.markdown-table td { padding: 5px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+/* Words stay whole in a cell: a level of 10 is no “1 0”. */
+.markdown-table :is(th, td) { overflow-wrap: normal; word-break: normal; }
+.markdown-table tr:last-child td { border-bottom: none; }
+
+/* Network: badges for waiting requests, the network part of the main menu, switches. */
+.gear { position: relative; }
+.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: var(--warn); color: #fff; font-size: 11px; font-weight: 600; line-height: 1; }
+.gear .badge { position: absolute; top: -6px; right: -7px; }
+.options-nav button .badge { margin-left: auto; }
+.network-section { margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--border); }
+.network-section h3 { margin: 0 0 12px; }
+.world-card.net { border-color: var(--info-line); }
+.world-tile > .primary { width: 100%; margin-top: 6px; }
+.folder-box { margin: 10px 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.folder-box > .line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.folder-path { overflow-wrap: anywhere; }
+/* Paths are long: wider than other narrow cards. */
+.card.narrow.storage-setup { display: flex; flex-direction: column; gap: 12px; max-width: 600px; width: 100%; }
+.storage-setup h1, .storage-setup p { margin: 0; }
+.storage-setup .segmented { align-self: flex-start; }
+.storage-field { display: flex; flex-direction: column; gap: 4px; }
+.storage-field input { flex: 1; min-width: 0; }
+.storage-field .line { flex-wrap: nowrap; }
+.storage-field input[readonly] { color: var(--muted); }
+.storage-rows { display: flex; flex-direction: column; gap: 12px; margin: 8px 0 16px; }
+/* A drawn icon in front of the label. */
+button.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+/* A question with a few answers: like the delete dialog, without the red. */
+.dialog { width: min(460px, 92vw); background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.dialog h3, .dialog p { margin: 0; }
+.switch-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin: 6px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--card); cursor: pointer; }
+.switch-row > span { display: flex; flex-direction: column; gap: 2px; }
+/* No border or padding from the general input rule: the knob is placed
+   inside the border, and a 1px border would shift it off centre. */
+.switch-row input[type="checkbox"] { appearance: none; width: 36px; height: 20px; border: 0; padding: 0; margin: 0; border-radius: 10px; background: var(--track); position: relative; flex: none; cursor: pointer; transition: background .15s; }
+.switch-row input[type="checkbox"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
+.switch-row input[type="checkbox"]:checked { background: var(--accent); }
+.switch-row input[type="checkbox"]:checked::after { left: 18px; }
+.switch-row input[type="checkbox"]:disabled { opacity: .5; }
+/* A number in place of the switch: as wide as a few digits. */
+.switch-row input.version-limit { width: 64px; flex: none; text-align: right; }
+.members.requests > li { border-color: #d9534f66; }
+.members small.accent { color: var(--accent); }
+.members .line { flex-wrap: nowrap; }
+
+/* Documents: kept as typed, and their versions beside them. */
+/* The versions stand at the window's right edge, below the header bar. A
+   document always keeps their place free, open or not — so nothing moves
+   when they open. Centred where the window has room for that; otherwise it
+   moves left, then narrows. The window's minimum width (tauri.conf.json) is
+   what keeps 720px for the text: 720 + 300 + the gutters and a scrollbar. */
+:root { --versions-width: 300px; }
+.world-body:has(> .document) { max-width: none; }
+.document {
+  --doc-width: min(var(--page-width, 1152px), 100% - var(--versions-width));
+  width: var(--doc-width);
+  margin-left: max(0px, min((100% - var(--doc-width)) / 2, 100% - var(--versions-width) - var(--doc-width)));
+}
+.document-main { min-width: 0; }
+/* A phone has no room beside the text: the versions open over it. */
+@media (max-width: 900px) {
+  .document { --doc-width: 100%; margin-left: 0; }
+  .versions { width: 100%; }
+}
+.save-state { width: 18px; text-align: center; font-size: 14px; color: var(--muted); }
+/* Not kept: a red mark; what went wrong opens beside it on hover or click. */
+.save-problem { position: relative; }
+.save-problem-mark { width: 30px; height: 30px; background: var(--danger-soft); }
+.save-problem > .popover { display: none; width: 300px; top: calc(100% + 6px); }
+/* The bridge over the gap, so the pointer can move into the popover. */
+.save-problem > .popover::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; }
+.save-problem:hover > .popover, .save-problem.open > .popover { display: block; }
+.save-problem .popover h4 { color: var(--danger-text); }
+.save-problem .popover p { margin: 0 0 8px; font-size: 13px; }
+.save-problem .popover ul { margin: 0 0 8px; padding-left: 18px; font-size: 13px; }
+.versions { position: fixed; z-index: 15; top: var(--header-height, 53px); right: 0; bottom: 0; width: var(--versions-width); overflow-y: auto; border-left: 1px solid var(--border); background: var(--card); padding: 12px 14px; }
+.versions h3 { margin: 0; }
+.versions ol { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.versions li { border: 1px solid var(--border); border-radius: 8px; }
+.versions li.on { border-color: var(--accent); }
+.versions .version { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; background: transparent; border: 0; padding: 8px 10px; }
+.versions .version small { color: var(--muted); font-size: 12px; }
+.versions .overlap { font-size: 11px; color: #e6c07a; }
+.versions .late { color: var(--info-text); font-size: 11px; }
+.versions .waiting { color: var(--accent); font-size: 11px; }
+.versions .rejected { color: var(--danger-text); font-size: 11px; }
+.versions .fresh { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: #3f5f80; color: #dbe9f7; font-size: 10px; font-weight: 600; vertical-align: middle; }
+.version-actions { display: flex; gap: 6px; padding: 0 10px 8px; }
+/* Writing together: who is here, and where the others' carets stand. */
+.caret-box { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.caret-box > textarea { flex: 1; }
+.remote-caret { position: absolute; width: 0; border-left: 2px solid; pointer-events: none; z-index: 3; }
+.remote-name { position: absolute; bottom: 100%; left: -2px; padding: 0 5px; border-radius: 4px 4px 4px 0; font-size: 10px; line-height: 15px; color: #111; white-space: nowrap; }
+/* Who else is in the world — in the bar, each in their colour; writing: a ring. */
+.who-is-here { display: inline-flex; align-items: center; margin-right: 6px; }
+.here-one { width: 26px; height: 26px; min-width: 0; padding: 0; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #111; border: 2px solid var(--base); cursor: pointer; }
+.here-one + .here-one { margin-left: -6px; }
+.here-one.editing { box-shadow: 0 0 0 2px var(--accent); }
+.here-one:disabled { cursor: default; opacity: 1; }
+/* A version beside now — in the document itself — and what came in late. */
+.compare-label { margin: 0 0 6px; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.compare-pages, .compare-live { align-items: start; }
+.compare-side { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 14px; line-height: 1.55; background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.compare-side.code { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 13px; line-height: 1.7; white-space: pre; overflow: auto; min-height: 320px; }
+.mark-removed { color: #ffb4b4; background: #5a2328; text-decoration: line-through; text-decoration-color: #e07070; border-radius: 3px; }
+.mark-added { color: #c8f5c0; background: #1f4a28; border-radius: 3px; }
+/* Behind a text field the text is invisible — only the marks show. */
+.field-marks { position: absolute; z-index: 0; overflow: hidden; pointer-events: none; color: transparent; border-style: solid; border-color: transparent; box-sizing: border-box; margin: 0; }
+.field-marks mark { color: transparent; }
+.field-marks .mark-removed { text-decoration: none; }
+.caret-box > textarea { position: relative; z-index: 1; }
+fieldset.then { border: 0; margin: 0; padding: 0; min-width: 0; }
+fieldset.then textarea, fieldset.then input, fieldset.then select { opacity: 1; color: var(--text); cursor: default; }
+
+/* One world library, with explicit storage destinations. */
+.world-location { display: inline-flex; align-items: center; gap: 5px; font-size: .82rem; opacity: .8; overflow-wrap: anywhere; }
+.world-location svg { width: 14px; height: 14px; flex: none; }
+.world-location-dialog { width: min(760px, calc(100vw - 48px)); max-height: calc(100vh - 64px); overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.world-location-dialog .world-grid { margin: 0; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.world-name-field { display: flex; flex-direction: column; gap: 8px; font-weight: 600; }
+.world-name-field input, .world-name-field select { width: 100%; min-width: 0; box-sizing: border-box; min-height: 42px; padding: 10px 12px; }
+.world-location-dialog > * { flex-shrink: 0; }
+.world-location-dialog h2 { margin: 0; }
+.world-location-dialog .segmented { min-height: 38px; align-self: flex-start; }
+.world-location-dialog .segmented button { display: inline-flex; align-items: center; gap: 6px; }
+.world-location-dialog .world-card { width: 100%; }
+
+/* ---------- Calendar ---------- */
+
+.calendar-area select { appearance: none; padding-right: 28px; background: var(--field) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a9aa0' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 10px center; cursor: pointer; }
+.calendar-area > .foldout { margin-top: 12px; }
+.cal-x { border: 0; background: transparent; color: var(--muted); padding: 0 6px; min-height: 0; font-size: 16px; opacity: .35; }
+:is(li, .fold-head):hover > .cal-x, .fold-head:hover .cal-x, .cal-x:focus-visible { opacity: 1; }
+.cal-x:hover:not(:disabled) { color: var(--danger-text); border-color: transparent; }
+.cal-add { margin-top: 10px; color: var(--muted); }
+.cal-mark { font-size: 12px; font-weight: 400; padding: 1px 8px; margin-left: 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+
+.cal-fields { display: flex; flex-wrap: wrap; gap: 12px 14px; align-items: flex-end; margin: 6px 0 12px; }
+.cal-fields label { display: flex; flex-direction: column; gap: 5px; }
+.cal-fields small { font-size: 12px; color: var(--muted); }
+.cal-name { width: 220px; }
+.cal-short { width: 90px; }
+.cal-copy { width: 170px; color: var(--muted); }
+.cal-days { width: 64px; text-align: right; }
+
+.cal-months { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-template-columns: 1fr 1fr; column-gap: 28px; row-gap: 6px; }
+.cal-months li { display: grid; grid-template-columns: 24px minmax(0, 1fr) 64px 26px; align-items: center; gap: 8px; }
+.cal-weekdays { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; row-gap: 6px; }
+.cal-weekdays li { display: grid; grid-template-columns: 24px minmax(0, 1fr) 26px; align-items: center; gap: 8px; }
+.cal-n { font-size: 12px; color: var(--muted); text-align: right; }
+
+.cal-leap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cal-leap select { width: 180px; }
+.cal-toggle input[type="checkbox"] { appearance: none; width: 36px; height: 20px; border: 0; padding: 0; margin: 0; border-radius: 10px; background: var(--track); position: relative; cursor: pointer; transition: background .15s; display: block; }
+.cal-toggle input[type="checkbox"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
+.cal-toggle input[type="checkbox"]:checked { background: var(--accent); }
+.cal-toggle input[type="checkbox"]:checked::after { left: 18px; }
+
+.cal-moons { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.cal-moons li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cal-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; flex: none; overflow: hidden; }
+.cal-swatch input { opacity: 0; width: 100%; height: 100%; padding: 0; border: 0; cursor: pointer; }
+.cal-moon-name { width: 150px; }
+.calendar-area .date-pick { gap: 6px; flex-wrap: nowrap; }
+.calendar-area .date-pick .date-year { width: 7ch; }
+
+.cal-save { display: flex; align-items: center; gap: 10px; margin: 18px 0 8px; }
+.calendar-area .month-view { margin: 4px 0 0; }
+@media (max-width: 620px) {
+  .cal-months, .cal-weekdays { grid-template-columns: 1fr; grid-auto-flow: row; grid-template-rows: none !important; }
+  .foldout.level-1 > .fold-body { padding-left: 14px; }
+  .foldout.level-2 > .fold-body { padding-left: 8px; }
+  .calendar-area .date-pick { flex-wrap: wrap; }
+}
+
+/* ---------- A section that folds (Fold) ---------- */
+.foldout.level-1 { background: var(--card); border: 1px solid var(--border); border-radius: 10px; }
+.fold-head { display: flex; align-items: center; gap: 6px; }
+.fold-toggle { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; text-align: left; background: transparent; border: 0; border-radius: 10px; padding: 12px 14px; }
+.fold-toggle:hover:not(:disabled) { background: var(--hover); }
+.fold-chevron { display: inline-block; width: 12px; color: var(--muted); transition: transform .15s; flex: none; }
+.foldout.open > .fold-head .fold-chevron { transform: rotate(90deg); }
+.fold-title { font-weight: 600; white-space: nowrap; }
+.foldout.level-1 > .fold-head .fold-title { font-size: 15px; }
+.fold-summary { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold-actions { display: flex; align-items: center; gap: 4px; padding-right: 8px; }
+.foldout.level-1 > .fold-body { padding: 2px 14px 14px 36px; }
+.foldout.level-2 { border-top: 1px solid var(--border); }
+.foldout.level-2 > .fold-head .fold-toggle { padding: 10px 6px; border-radius: 6px; }
+.foldout.level-2 > .fold-body { padding: 0 0 12px 24px; }
+.fold-body > .foldout.level-2:last-of-type { border-bottom: 1px solid var(--border); }
+
+.date-pick { gap: 4px; flex-wrap: nowrap; }
+.cal-card .date-pick select[aria-label="Day"] { width: 58px; }
+.cal-card .date-pick select[aria-label="Month"] { width: 132px; }
+.cal-card .date-pick select[aria-label="Era"] { width: 72px; }
+.cal-card .date-pick .date-year { width: 6ch; }
+
+.cal-save { display: flex; align-items: center; gap: 8px; margin: 18px 0 8px; }
+.calendar-area .month-view { margin: 0; }
+
+.date-pick { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.date-pick select, .date-pick input { width: auto; }
+.date-pick .date-year { width: 6ch; text-align: right; }
+.date-pick .date-time { width: 92px; }
+.date-pick .pick-x { border: 0; background: transparent; color: var(--muted); padding: 0 3px; height: auto; min-height: 0; }
+.date-pick .pick-x:hover { color: var(--danger-text); }
+input.invalid { border-color: var(--danger-line); }
+.our-moment { width: 210px; }
+
+/* ---------- Timeline ---------- */
+
+/* The axis in the middle, the years on it, entries beside it in turn; narrow, the axis goes to the left. */
+.timeline { container-type: inline-size; margin: 6px 0 16px; }
+.timeline-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.timeline-filter .chip { display: inline-flex; align-items: center; gap: 6px; opacity: .5; }
+.timeline-filter .chip.on { opacity: 1; }
+.timeline-swatch { width: 9px; height: 9px; border-radius: 50%; background: hsl(var(--hue) 55% 52%); }
+.timeline-axis { list-style: none; margin: 0; padding: 0; position: relative; }
+.timeline-axis::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: var(--border); }
+.timeline-year { position: relative; text-align: center; margin: 14px 0 10px; }
+.timeline-year span { position: relative; display: inline-block; padding: 2px 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); font-size: 12px; font-weight: 600; letter-spacing: .03em; }
+/* A new day: smaller than the year, on the axis as well. */
+.timeline-day { position: relative; text-align: center; margin: 8px 0 6px; }
+.timeline-day span { position: relative; display: inline-block; padding: 1px 9px; border-radius: 999px; background: var(--base); border: 1px dashed var(--border); font-size: 11px; color: var(--muted); }
+.timeline-era { position: relative; text-align: center; margin: 22px 0 6px; }
+.timeline-era::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--border); }
+.timeline-era span { position: relative; padding: 3px 14px; background: var(--base); font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.timeline-entry { position: relative; width: 50%; box-sizing: border-box; margin-bottom: 10px; }
+.timeline-entry.left { padding-right: 26px; }
+.timeline-entry.right { margin-left: 50%; padding-left: 26px; }
+.timeline-dot { position: absolute; top: 16px; width: 12px; height: 12px; border-radius: 50%; background: hsl(var(--hue) 55% 52%); border: 2px solid var(--base); box-shadow: 0 0 0 1px hsl(var(--hue) 55% 52%); }
+.timeline-entry.left .timeline-dot { right: -7px; }
+.timeline-entry.right .timeline-dot { left: -7px; }
+.timeline-card { display: flex; gap: 10px; width: 100%; text-align: left; padding: 9px 11px; background: var(--card); border: 1px solid var(--border); border-left: 3px solid hsl(var(--hue) 55% 52%); border-radius: 8px; font: inherit; color: inherit; cursor: pointer; height: auto; }
+.timeline-card:hover { border-color: hsl(var(--hue) 55% 52%); }
+.timeline-image { width: 52px; height: 52px; object-fit: cover; object-position: 50% 25%; border-radius: 6px; flex: 0 0 auto; }
+.timeline-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.timeline-span { font-weight: 400; }
+.timeline-date { font-size: 11px; color: hsl(var(--hue) 50% 62%); font-weight: 600; }
+.timeline-label { color: var(--muted); font-weight: 400; }
+.timeline-text strong { font-size: 14px; }
+.timeline-icon { font-weight: 400; }
+.timeline-date .moons { margin-left: 6px; vertical-align: -1px; }
+.timeline-excerpt { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+@container (max-width: 620px) {
+  .timeline-axis::before { left: 7px; }
+  .timeline-year, .timeline-era, .timeline-day { text-align: left; }
+  .timeline-entry, .timeline-entry.left, .timeline-entry.right { width: auto; margin-left: 0; padding: 0 0 0 26px; }
+  .timeline-entry.left .timeline-dot, .timeline-entry.right .timeline-dot { left: 1px; right: auto; }
+}
+/* In the infobox the parts of a date stand in one row, each as wide as it is. */
+.infobox.editing .infobox-row dd .date-pick :is(select, input) { width: auto; }
+.infobox.editing .infobox-row dd .date-pick .date-year { width: 5ch; text-align: left; }
+.infobox.editing .infobox-row dd .date-pick .date-time { width: 64px; color: var(--muted); }
+.infobox.editing .infobox-row dd input.our-moment { width: 100%; }
+
+/* ---------- Moons and the month ---------- */
+.moons { display: inline-flex; gap: 2px; align-items: center; }
+.moon-phase { display: block; flex: 0 0 auto; }
+.month-view { margin: 6px 0 16px; }
+.month-head { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+.month-head strong { min-width: 14ch; text-align: center; }
+.month-grid { display: grid; gap: 3px; }
+.month-weekday { font-size: 11px; color: var(--muted); text-align: center; padding-bottom: 2px; }
+.month-day { min-height: 54px; padding: 3px 4px; border-radius: 6px; background: var(--card); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.month-day.busy { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.month-day-head { display: flex; align-items: center; justify-content: space-between; gap: 2px; }
+.month-day-n { font-size: 11px; color: var(--muted); }
+.month-entry { display: block; width: 100%; text-align: left; font: inherit; font-size: 11px; line-height: 1.25; padding: 1px 4px; height: auto; min-height: 0; border: 0; border-left: 2px solid hsl(var(--hue) 55% 52%); border-radius: 3px; background: hsl(var(--hue) 40% 50% / .14); color: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.month-entry:hover { background: hsl(var(--hue) 40% 50% / .28); }
+
+/* ---------- A timeline's settings, by click ---------- */
+.time-settings { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.time-setting { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; }
+.time-setting select { width: 200px; height: 30px; min-height: 0; padding: 2px 8px; font-size: 13px; }
+.time-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.time-chips .chip { height: auto; min-height: 0; font: inherit; font-size: 12px; padding: 2px 9px; cursor: pointer; background: transparent; color: inherit; }
+.time-chips .chip.on { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- Windows apart ---------- */
+/* A part opens in a window of its own from its title — offered on pointing. */
+.block-mark { position: relative; }
+/* The part a window was opened at, shown once. */
+.block.flash { animation: flash 1.6s ease-out; border-radius: 8px; }
+@keyframes flash { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 2px transparent; } }
+.block { scroll-margin-top: calc(var(--header-height, 53px) + 16px); }
+
+/* ---------- Picking from many by typing (SearchPick) ---------- */
+.search-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.search-pick-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 4px 2px 9px; }
+.search-pick-chip .pick-x { border: 0; background: transparent; color: var(--muted); padding: 0 4px; height: auto; min-height: 0; }
+.search-pick-chip .pick-x:hover { color: var(--danger-text); }
+.search-pick-field { position: relative; }
+.search-pick-field input { width: 170px; height: 28px; padding: 3px 9px; font-size: 13px; }
+.search-pick-list { position: fixed; z-index: 40; min-width: 220px; overflow-y: auto; list-style: none; margin: 0; padding: 4px; background: var(--popover); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 22px rgba(0,0,0,.4); }
+.search-pick-list button { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; border: 0; background: transparent; padding: 5px 8px; font-size: 13px; border-radius: 6px; }
+.search-pick-list button.on, .search-pick-list button:hover:not(:disabled) { background: var(--hover); }
+.search-pick-list small { margin-left: auto; color: var(--muted); font-size: 11px; }
+
+/* A list's conditions: property, value, × — one per line. */
+.list-filters { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.list-filter { display: flex; align-items: center; gap: 6px; }
+.list-filter :is(select, input) { width: 170px; height: 30px; min-height: 0; padding: 2px 8px; font-size: 13px; }
+.list-filter .pick-x { border: 0; background: transparent; color: var(--muted); }
+.time-settings .segmented button { font-size: 12px; padding: 4px 10px; }
+
+/* ---------- The inspector: what is chosen, set in the side bar ---------- */
+/* An element in the text — an image, a list, a timeline, a calendar, a
+   graph — looks the same everywhere while editing: on pointing a soft halo
+   with its name on the frame; chosen, a firm accent ring. Outline and
+   shadow take no room: nothing moves. */
+.surface-card { position: relative; border-radius: 10px; outline: 1px solid transparent; outline-offset: 6px; cursor: pointer; transition: outline-color .12s, box-shadow .12s; }
+.surface-card:hover { outline-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 8%, transparent); }
+.surface-card.chosen { outline: 2px solid var(--accent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 9%, transparent); cursor: auto; }
+/* Its name sits on the frame at the right — headings stand at the left, above it. */
+.surface-card::after { content: attr(data-label); position: absolute; top: -16px; right: 12px; z-index: 4; padding: 1px 9px; font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; border-radius: 999px; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line); opacity: 0; transition: opacity .12s; pointer-events: none; }
+.surface-card:hover::after, .surface-card.chosen::after { opacity: 1; }
+.surface-card.chosen::after { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+/* Inside a graph one drags and points at cards — no hand over all of it. */
+.relation-graph.surface-card { cursor: auto; }
+.surface-card.image-card { margin: 8px 0; padding: 0; }
+.image-card-figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+/* The part whose access the side bar shows. */
+.block-part.inspected:not(.guarded) { box-shadow: -3px 0 0 var(--accent-line); }
+
+.inspector { gap: 14px; }
+.inspector-section { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.inspector-section h5 { margin: 0; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.inspector-section > * { max-width: 100%; }
+.inspector-access { display: grid; grid-template-columns: 62px minmax(0, 1fr); align-items: center; gap: 6px 8px; width: 100%; }
+.inspector-access .level-picker { width: 120px; height: 28px; min-height: 0; padding: 2px 6px; font-size: 12px; }
+.inspector-code { width: 100%; font-family: var(--mono, monospace); font-size: 12px; resize: vertical; }
+.inspector-remove { align-self: flex-start; margin-top: 4px; }
+.inspector .time-settings { border: 0; padding: 0; margin: 0; background: none; width: 100%; }
+.inspector .time-setting { grid-template-columns: 56px minmax(0, 1fr); }
+.inspector .time-setting select, .inspector .list-filter :is(select, input) { width: 100%; max-width: 100%; }
+/* A condition in the side bar: the property over its value, × beside both. */
+.inspector .list-filters { width: 100%; }
+.inspector .list-filter { display: grid; grid-template-columns: minmax(0, 1fr) 24px; gap: 4px; width: 100%; padding: 6px; border: 1px solid var(--border); border-radius: 8px; }
+.inspector .list-filter > :first-child, .inspector .list-filter > :nth-child(3) { grid-column: 1; }
+.inspector .list-filter > .muted { display: none; }
+.inspector .list-filter > .pick-x { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.inspector .search-pick-field input { width: 150px; }
+.inspector .image-card-hidden input { width: 100%; }
+/* Choices in the side bar look alike: flat, of one height, with one arrow. */
+.side-panel select { appearance: none; height: 32px; min-height: 0; padding: 4px 28px 4px 10px; font-size: 13px; background: var(--field) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a9aa0' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 10px center; cursor: pointer; }
+.side-panel .inspector-access .level-picker { height: 28px; padding: 2px 26px 2px 8px; font-size: 12px; }
+
+/* ---------- Dice ----------
+   The table: a canvas over the whole window while dice roll — clicks go through. */
+.dice-table { position: fixed; inset: 0; z-index: 300; pointer-events: none; transition: opacity .45s; }
+.dice-table.fading { opacity: 0; }
+/* The side bar: a line to roll, the dice, the favourites, the log. */
+.dice-panel { gap: 10px; }
+.dice-input { display: flex; gap: 6px; }
+.dice-input input { flex: 1; min-width: 0; font-family: monospace; }
+.dice-pick { display: flex; flex-wrap: wrap; gap: 4px; }
+.dice-pick button { padding: 3px 7px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.dice-favorites { display: flex; flex-wrap: wrap; gap: 4px; }
+.dice-favorite { display: inline-flex; align-items: center; padding: 0; overflow: hidden; }
+.dice-favorite button { padding: 2px 8px; height: auto; min-height: 0; border: 0; border-radius: 0; }
+.dice-favorite button + button { padding: 2px 6px; color: var(--muted); }
+.dice-panel .dice-log { flex: 1; max-height: none; min-height: 0; }
+/* Rolled while the side bar is shut: the last roll, for a moment. */
+.dice-toast { position: fixed; z-index: 40; right: 16px; bottom: 16px; width: 280px; cursor: pointer; list-style: none; }
+.dice-toast .dice-entry { box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+.dice-try { display: flex; gap: 8px; }
+/* The third-party licenses: long, plain, to scroll through. */
+.about-head { display: flex; align-items: center; gap: 14px; }
+.about-head h2 { margin: 0; }
+.licenses { max-height: 60vh; overflow: auto; white-space: pre-wrap; font-size: 12px; background: var(--sunken); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+/* The world's dice, in Basics. */
+.world-dice { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin: 6px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.world-dice-own { width: 64px; padding: 2px 8px; font-family: monospace; }
+.world-dice-add { display: inline-flex; align-items: center; gap: 4px; }
+/* A long folder in the bar: the way to the rest. */
+.nav-more .nav-label { color: var(--muted); font-style: italic; }
+/* The rest of a long list, drawn as one scrolls near. */
+.listing-more { padding: 10px 4px; text-align: center; }
+.keys-dialog input { width: 100%; }
+.saved-roll-own { width: 170px; padding: 2px 8px; font-family: monospace; }
+.dice-favorite-name { padding: 2px 4px 2px 10px; }
+/* A document the player waits on the GM's app for. */
+.chip.waiting { border-style: dashed; color: var(--muted); cursor: default; }
+/* A choice beside its name, as wide as it needs. */
+.setting-row { display: grid; grid-template-columns: 110px auto; align-items: center; gap: 10px; }
+.setting-row .segmented { justify-self: start; }
+
+/* ---------- Dice tray (log lines) ----------
+   What was rolled, one's own and the session's: bottom right, over the page. */
+.dice-head { display: flex; align-items: center; gap: 8px; }
+.dice-head > :last-child { margin-left: auto; }
+.dice-title { font-size: 16px; }
+.dice-log { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
+.dice-entry { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 5px 8px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--border); }
+.dice-entry.mine { border-color: var(--accent-line); }
+.dice-what { display: flex; flex-direction: column; min-width: 0; }
+.dice-who { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dice-label { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dice-detail { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dice-total { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+.dice-entry.crit .dice-total { color: var(--ok-text); }
+.dice-entry.fumble .dice-total { color: var(--danger-text); }
+.dice-entry.success .dice-judged { color: var(--ok-text); }
+.dice-entry.failure .dice-judged { color: var(--danger-text); }
+.dice-judged { font-size: 0.6em; margin-left: 4px; vertical-align: middle; }
+.dice-problem { margin: 6px 0 0; font-size: 12px; color: var(--danger-text); }
+
+/* A map: a picture to drag and zoom, its pins on it — see `features/wiki/MapView.tsx`. */
+.map-view { position: relative; margin: 8px 0 14px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--sunken); }
+.map-box { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
+.map-box:active { cursor: grabbing; }
+.map-view.adding .map-box { cursor: crosshair; }
+.map-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.map-layer img { display: block; width: 100%; height: 100%; pointer-events: none; }
+.map-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+/* A pin: anchored at its point, its marker the same size at every zoom. */
+.map-pin { position: absolute; width: 0; height: 0; transform-origin: 0 0; cursor: pointer; }
+.map-pin-mark {
+  position: absolute; left: -9px; top: -24px; width: 18px; height: 18px;
+  background: var(--edge, var(--accent)); border: 2px solid var(--sunken); border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.map-pin.leads .map-pin-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--sunken); }
+.map-pin-label {
+  position: absolute; left: 12px; top: -26px; white-space: nowrap; padding: 1px 6px; border-radius: 6px;
+  font-size: 12px; color: var(--text); background: color-mix(in srgb, var(--sunken) 85%, transparent); border: 1px solid var(--border);
+}
+.map-pin:hover .map-pin-label, .map-pin.chosen .map-pin-label { border-color: var(--edge, var(--accent)); }
+.map-pin.chosen .map-pin-mark { outline: 2px solid var(--text); outline-offset: 1px; }
+.map-view.writing .map-pin { cursor: move; }
+.map-controls { position: absolute; left: 8px; right: 8px; top: 8px; display: flex; gap: 4px; align-items: center; pointer-events: none; }
+.map-controls > * { pointer-events: auto; }
+.map-controls .compact { background: color-mix(in srgb, var(--card) 90%, transparent); }
+.map-spacer { flex: 1; pointer-events: none; }
+.map-level { font-weight: 600; }
+.map-colours { display: flex; flex-wrap: wrap; gap: 4px; }
+.map-colour { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid var(--border); background: var(--edge, var(--accent)); }
+.map-colour.on { border-color: var(--text); }
+/* Regions: shapes on the picture — faint until the pointer is over one. */
+.map-areas { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.map-area {
+  pointer-events: visible; cursor: pointer;
+  fill: var(--edge, var(--accent)); fill-opacity: 0;
+  stroke: var(--edge, var(--accent)); stroke-opacity: 0.35; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round;
+  transition: fill-opacity 0.12s, stroke-opacity 0.12s;
+}
+.map-area:hover, .map-area.chosen { fill-opacity: 0.28; stroke-opacity: 1; stroke-width: 3; }
+.map-view.writing .map-area { stroke-opacity: 0.7; stroke-dasharray: 6 4; }
+.map-view.writing .map-area.chosen { stroke-dasharray: none; }
+.map-draft { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.map-area-label { position: absolute; width: 0; height: 0; transform-origin: 0 0; pointer-events: none; }
+.map-area-label span {
+  position: absolute; transform: translate(-50%, -50%); white-space: nowrap; padding: 2px 8px; border-radius: 6px;
+  font-weight: 600; color: var(--text); background: color-mix(in srgb, var(--sunken) 85%, transparent); border: 1px solid var(--border);
+}
+/* A region's corners while writing: to drag; the first closes one being drawn. */
+.map-corner { position: absolute; width: 0; height: 0; transform-origin: 0 0; cursor: move; }
+.map-corner::before {
+  content: ""; position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--sunken); border: 2px solid var(--accent);
+}
+.map-corner.draft { cursor: crosshair; }
+.map-corner.closes { cursor: pointer; }
+.map-corner.closes::before { background: var(--accent); width: 14px; height: 14px; left: -7px; top: -7px; }
+.map-view.adding-area .map-box, .map-view.adding-area .map-area { cursor: crosshair; }
+/* A marker with a sign: a round badge centred on its point. */
+.map-pin-badge {
+  position: absolute; left: -13px; top: -13px; width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--edge, var(--accent)); color: var(--sunken); border: 2px solid var(--sunken); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.map-pin.icon .map-pin-label { left: 16px; top: -12px; }
+/* Where the name stands (`label-at`): right of it unless it says otherwise —
+   or only under the pointer. */
+.map-pin.label-left .map-pin-label { left: auto; right: 12px; }
+.map-pin.label-top .map-pin-label { left: 0; top: -50px; transform: translateX(-50%); }
+.map-pin.label-bottom .map-pin-label { left: 0; top: 2px; transform: translateX(-50%); }
+.map-pin.icon.label-left .map-pin-label { right: 16px; }
+.map-pin.icon.label-top .map-pin-label { top: -40px; }
+.map-pin.icon.label-bottom .map-pin-label { top: 16px; }
+.map-pin.label-hover .map-pin-label { display: none; z-index: 2; }
+.map-pin.label-hover:hover .map-pin-label, .map-pin.label-hover.chosen .map-pin-label { display: block; }
+.map-pin:hover { z-index: 3; }
+/* Seen by fewer than the map: faint, with a dashed ring — the GM's, still to reveal. */
+.map-pin.secret :is(.map-pin-mark, .map-pin-badge) { opacity: .6; outline: 2px dashed var(--text); outline-offset: 2px; }
+.map-pin.secret .map-pin-label { font-style: italic; border-style: dashed; }
+.map-area.secret { stroke-dasharray: 3 4; }
+.map-pin.icon.chosen .map-pin-badge { outline: 2px solid var(--text); outline-offset: 1px; }
+.map-label-at { display: flex; flex-wrap: wrap; gap: 6px; }
+.map-list-secret { color: var(--muted); font-size: 12px; }
+.map-markers { display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 4px; }
+.map-marker-choice { display: flex; align-items: center; justify-content: center; height: 30px; padding: 0; color: var(--muted); }
+.map-marker-choice.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+/* The side bar's list of what is on the map. */
+.map-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.map-list-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; text-align: left; background: none; border: 1px solid transparent; }
+.map-list-item:hover { background: var(--accent-soft); }
+.map-list-item.on { border-color: var(--accent); }
+.map-list-sign { display: flex; flex: none; color: var(--edge, var(--accent)); }
+.map-list-sign.area { width: 14px; height: 10px; border: 2px solid var(--edge, var(--accent)); border-radius: 3px; }
+.map-list-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Between two corners of the region chosen: drag to make one there. */
+.map-corner.between { cursor: copy; }
+.map-corner.between::before { left: -4px; top: -4px; width: 8px; height: 8px; background: var(--accent); border-color: var(--sunken); opacity: 0.7; }
+/* A region's name under the pointer: above everything, beside the pointer — never under a marker. */
+.map-hover-label {
+  position: absolute; z-index: 5; pointer-events: none; white-space: nowrap; transform: translate(-50%, calc(-100% - 14px));
+  padding: 3px 9px; border-radius: 6px; font-weight: 600; color: var(--text);
+  background: color-mix(in srgb, var(--sunken) 90%, transparent); border: 1px solid var(--accent); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.map-hover-label.below { transform: translate(-50%, 18px); }
+.map-controls { z-index: 6; }
+.popup-menu { position: fixed; z-index: 90; }
+/* How well, as small circles: full, half, or an empty ring for none. */
+.dots { display: inline-flex; align-items: center; gap: 2px; font-size: inherit; opacity: 1; }
+.dots .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); border: 1px solid var(--accent); box-sizing: border-box; }
+.dots .dot.half { background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+.dots .dot.none { background: none; border-color: var(--muted); opacity: 0.5; }
+
+/* What a player is assigned to — under their name. */
+.assigned { margin-top: 8px; }
+
+/* The editor's head: who sees, who changes — one line, as the read view's mark. */
+.head-access { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.switch-row.sub-switch { margin-left: 30px; max-width: 730px; }
+.switch-row.off { opacity: .55; }
+.switch-progress { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 12px; }
+.progress-bar { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.progress-bar > div { height: 100%; background: var(--accent); transition: width .4s ease; }
+.readable-copy { max-width: 760px; gap: 8px; margin: 0 0 12px 30px; }
+.readable-copy code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.servers { display: flex; flex-direction: column; gap: 6px; max-width: 760px; }
+.server-row { display: flex; align-items: center; gap: 8px; }
+.server-row code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-row .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.server-row .grow strong, .server-row .grow small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lives-on { justify-content: space-between; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; margin-top: 8px; }
+.lives-on > span { display: flex; flex-direction: column; }
+.server-admin { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 10px 14px; border-left: 2px solid var(--border); }
+.server-admin h4 { margin: 8px 0 0; }
+.server-admin input { max-width: 320px; }
+.stun-servers { display: flex; align-items: center; gap: 8px; max-width: 760px; margin: 0 0 12px 30px; }
+.stun-servers input { flex: 1; height: 30px; font-size: 13px; }
+/* A bubble with nothing to take away: as wide on both sides. */
+.bubble.plain { padding-right: 10px; }
+.small-picker .bubble.plain { padding-right: 8px; }
+.access-sign { display: inline-flex; color: var(--muted); }
+.access-sign svg { width: 14px; height: 14px; }
+.head-access .view-picker + .access-sign { margin-left: 6px; }
+
+/* ---------- Another page, embedded ---------- */
+/* Its name a heading that leads to it; its arrow in the margin, as a block's. */
+.embedded { margin: 0 0 20px; }
+.embed-head { position: relative; display: flex; align-items: center; gap: 8px; }
+.embed-name { background: none; border: 0; padding: 0; height: auto; min-height: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.embed-name:hover { color: var(--accent); background: none; }
+.embedded.folded .embed-head { margin-bottom: 0; }
+.side-column .embed-head .head-fold, .block:is(.box, .statblock, .quote) .embed-head .head-fold { position: static; margin: 0; }
+
+/* Reading: an image enlarges on a click — choosing another is editing. */
+img.zoomable { cursor: zoom-in; }
+.image-zoom { position: fixed; inset: 0; z-index: 80; background: rgba(5,10,12,.88); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+.image-zoom > img { max-width: calc(100vw - 48px); max-height: calc(100vh - 48px); width: auto; height: auto; object-fit: contain; box-shadow: 0 8px 40px rgba(0,0,0,.6); }
+
+/* Editing: bold, italic, a link … for the field written in last. Only as wide as its buttons, it stays in reach while scrolling. */
+.edit-toolbar { position: fixed; z-index: 30; display: inline-flex; gap: 2px; padding: 3px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.edit-toolbar button { min-width: 30px; }
+.brick-menu .link-choice { display: flex; justify-content: space-between; gap: 8px; }
+.brick-menu .link-choice .small { color: var(--muted); white-space: nowrap; }
+.brick-note { margin: 2px 8px 4px; }
+.brick-filter { width: 100%; margin: 2px 0 4px; }
+.brick-types { max-height: 220px; overflow-y: auto; }
+.folder-tile .folder-sign { width: 100%; aspect-ratio: 1; display: grid; place-items: center; font-size: 46px; border-radius: 6px; background: var(--sunken); }
+.folder-tile.over { outline: 2px solid var(--accent); }
+.image-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 13px; color: var(--muted); }
+.image-grid .folder-tile { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 7px; }
+.brick-menu .brick-formats { display: flex; flex-wrap: wrap; gap: 2px; }
+.brick-menu .brick-formats button { display: inline-block; width: auto; min-width: 30px; text-align: center; }
+.listing-search { display: block; width: 220px; margin: 0 0 10px; }
+.shortcut-table { border-collapse: collapse; margin: 6px 0 18px; }
+.shortcut-table td { padding: 5px 14px 5px 0; vertical-align: middle; }
+kbd { display: inline-block; min-width: 22px; padding: 1px 7px; font: 12px/1.6 var(--mono, monospace); text-align: center; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; background: var(--card); }
+.shortcut-new .shortcut-key { width: 150px; }
+.shortcut-new select { width: 220px; }
+.find-bar { position: fixed; top: 60px; right: 16px; z-index: 90; display: flex; align-items: center; gap: 4px; padding: 5px 6px; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; box-shadow: 0 10px 28px rgba(0,0,0,.5); }
+.find-bar input { width: 220px; }
+.find-count { min-width: 44px; text-align: center; }
+::highlight(find) { background-color: rgba(250, 204, 21, .35); color: inherit; }
+::highlight(find-current) { background-color: rgba(250, 160, 21, .9); color: #111; }
+.find-here { outline: 2px solid rgba(250, 160, 21, .95); outline-offset: 1px; border-radius: 3px; }
+.options-group { margin: 12px 10px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.options-group:first-of-type { margin-top: 4px; }
+@media (max-width: 700px) { .options-group { display: none; } }
+.quick-open { position: fixed; top: 12vh; left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); max-height: 70vh; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--popover); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.6); }
+.quick-open > input { width: 100%; font-size: 15px; }
+.quick-hits { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.quick-hits button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 6px 8px; }
+.quick-hits button.on { background: var(--sunken); }
+.quick-snippet { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.quick-none { padding: 6px 8px; }
+.keys-help h3 { margin: 4px 4px 0; }

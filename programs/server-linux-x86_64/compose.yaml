@@ -1,0 +1,25 @@
+# aw-server on a NAS — e.g. Synology Container Manager → Project, or
+#   docker compose -f compose.yaml up -d
+# Image from Docker Hub; without internet: docker load -i aw-server-<version>-docker.tar
+#   and use image: aw-server:latest
+services:
+  aw-server:
+    image: dicefoxcreations/anotherworldbuilder-server:latest
+    container_name: aw-server
+    restart: unless-stopped
+    # The NAS's own network: its address goes into the code, and the local
+    # network can find it (AW_LAN). With a bridge network instead, map
+    # "7447:7447/udp" and "7447:7447/tcp" (the app asks for the code there)
+    # and set AW_ADDRESS.
+    network_mode: host
+    volumes:
+      - /volume1/docker/aw-server:/data
+    environment:
+      # The GM who manages it: their id, under Profile in the app. No keys —
+      # the server holds none.
+      AW_ADMIN: "id:0000000000000000"
+      AW_PORT: "7447"
+      # How it is reached, e.g. "nas.example.org:7447" (DynDNS), comma-separated.
+      # Empty: what the server finds itself.
+      AW_ADDRESS: ""
+      AW_LAN: "1"

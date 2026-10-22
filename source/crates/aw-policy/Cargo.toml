@@ -1,0 +1,16 @@
+[package]
+publish = false
+name = "aw-policy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aw-crypto.workspace = true
+aw-model.workspace = true
+hex = "0.4.3"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }

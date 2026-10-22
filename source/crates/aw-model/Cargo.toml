@@ -1,0 +1,14 @@
+[package]
+publish = false
+name = "aw-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pulldown-cmark = { version = "0.13.4", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ulid = "3.0.0"

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AnotherWorldbuilder",
+  "version": "0.1.45",
+  "identifier": "com.dicefoxcreations.anotherworldbuilder",
+  "build": {
+    "frontendDist": "../../../build/frontend"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "AnotherWorldbuilder",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 1080,
+        "minHeight": 520
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/doc/anotherworldbuilder/THIRD-PARTY-NOTICES.txt": "../../../build/public/licenses.txt"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+# Which licenses the app may ship code under — `cargo about` refuses any other.
+# Only permissive ones, and MPL-2.0 (file-level: its files stay available as
+# published). No GPL, no LGPL in what is linked into the program.
+accepted = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+]
+# What is shipped: the Linux and the Windows build.
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# Our own crates are not third parties.
+ignore-transitive-dependencies = false
+private = { ignore = true }

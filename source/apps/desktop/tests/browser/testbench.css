@@ -1,0 +1,16 @@
+/* For the test bench only. Visibly different from the app, so a screenshot
+   shows at once that this is not the application. */
+.testbench { min-height: 100vh; display: flex; flex-direction: column; }
+
+.bench-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 7px 12px; background: var(--sunken); border-bottom: 1px solid var(--accent-line);
+  position: sticky; top: 0; z-index: 50;
+}
+.bench-bar strong { color: var(--accent); font-size: 13px; letter-spacing: .06em; text-transform: uppercase; }
+.bench-bar button { padding: 4px 10px; font-size: 13px; }
+.bench-bar .filler { flex: 1; }
+.bench-error { color: #d98f8f; font-size: 13px; max-width: 50ch; }
+
+.bench-stage { flex: 1; min-height: 0; }
+.bench-stage > .body-wrap { padding: 18px; max-width: 1100px; margin: 0 auto; }

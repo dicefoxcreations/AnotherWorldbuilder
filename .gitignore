@@ -1,0 +1,32 @@
+# Generated while building: compiler output, frontend, caches
+/source/build/
+**/node_modules/
+**/dist/
+**/target/
+/source/apps/desktop/src-tauri/gen/
+.DS_Store
+*.log
+
+# Never commit by accident: local identity and world tokens
+identity.json
+*.key
+/worlds
+
+__pycache__/
+
+# Local browser QA artifacts
+/source/apps/desktop/tests/browser/private/
+
+# Test profiles, test worlds and their tools
+/testdata/
+
+# Local Claude Code settings
+/.claude/
+
+# The programs themselves go to GitHub Releases (too big for git);
+# programs/ keeps checksums, notices and the server's compose file.
+/programs/**/*.AppImage
+/programs/**/*.deb
+/programs/**/*.exe
+/programs/**/*.tar
+/programs/server-linux-x86_64/aw-server
