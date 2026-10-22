@@ -183,7 +183,8 @@ fn with_needs(all: &[Template], wanted: impl IntoIterator<Item = String>) -> BTr
     out
 }
 
-pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: &Path) -> Answer<Summary> {
+/// Tells how far it is: `documents`, then `images`, each with done and total.
+pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: &Path, progress: &dyn Fn(&str, usize, usize)) -> Answer<Summary> {
     if !store.is_gm(world) {
         return Err(AppError("Only the GM exports.".into()));
     }
@@ -216,7 +217,9 @@ pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: 
     let mut package = Package { format: FORMAT.into(), version: VERSION, name: choice.name.clone(), ..Package::default() };
     package.types = templates.iter().filter(|t| types.contains(&t.id)).cloned().collect();
     let mut images = BTreeSet::new();
-    for a in stored.iter().filter(|a| documents.contains(&a.id.to_string())) {
+    let total = stored.iter().filter(|a| documents.contains(&a.id.to_string())).count();
+    for (n, a) in stored.iter().filter(|a| documents.contains(&a.id.to_string())).enumerate() {
+        progress("documents", n, total);
         let mut doc: Option<PackedDocument> = None;
         let mut parts = Vec::new();
         for layer in &a.layers {
@@ -267,7 +270,9 @@ pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: 
     let folder = folder_of(path);
     std::fs::create_dir_all(folder.join(IMAGES))?;
     let gallery: HashMap<String, store::GalleryImage> = store.gallery(world, me)?.into_iter().map(|g| (g.id.clone(), g)).collect();
-    for id in images {
+    let total = images.len();
+    for (n, id) in images.into_iter().enumerate() {
+        progress("images", n, total);
         let Ok((bytes, mime)) = store.image_bytes(world, &id, false) else { continue };
         let extension = mime.rsplit('/').next().unwrap_or("bin").replace("jpeg", "jpg");
         let file = format!("{IMAGES}/{}.{extension}", id.trim_start_matches("img:"));
@@ -517,7 +522,7 @@ pub async fn package_export(app: tauri::AppHandle, world: String, path: String, 
     let store = store(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let me = store.load_identity()?;
-        export(&store, &me, &world, &choice, Path::new(&path))
+        export(&store, &me, &world, &choice, Path::new(&path), &|_, _, _| {})
     })
     .await
     .map_err(AppError::from)?
@@ -714,7 +719,7 @@ mod tests {
         meta.calendar.eras[0].months[0].name = "Hammer".into();
         from.store.save_world_meta(&meta).unwrap();
         let folder = from.dir.join("Goblins.awpack");
-        let exported = export(&from.store, &from.gm, &from.id, &Choice { name: "Goblins".into(), documents_of: vec!["monster".into()], ..Choice::default() }, &folder).unwrap();
+        let exported = export(&from.store, &from.gm, &from.id, &Choice { name: "Goblins".into(), documents_of: vec!["monster".into()], ..Choice::default() }, &folder, &|_, _, _| {}).unwrap();
         assert_eq!((exported.types_new, exported.documents_new, exported.images_new), (1, 1, 1));
 
         let to = world("to", "Tim");

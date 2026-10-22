@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { api, type NetworkView, type ServerEntry, type StorageView, type Upload, type WorldInfo } from "../../api/client";
 import { CloudIcon, FolderIcon, NetworkIcon, ServerIcon } from "../../shared/ui/Icons";
 
@@ -130,7 +131,7 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
       )}
       {world.isGm && <Copies world={world} onChanged={onChanged} onError={onError} />}
       {moving && storage && (
-        <MoveDialog world={world} place={place} storage={storage} servers={servers} onDone={onChanged} onClose={() => setMoving(false)} onError={onError} />
+        <MoveDialog world={world} place={place} storage={storage} servers={servers} onStorage={setStorage} onDone={onChanged} onClose={() => setMoving(false)} onError={onError} />
       )}
     </div>
   );
@@ -167,6 +168,14 @@ function Copies({ world, onChanged, onError }: { world: WorldInfo; onChanged: ()
   );
 }
 
+/** What a long copy or move is doing, step by step. */
+const STEPS: Record<string, string> = {
+  documents: "1 of 3 · reading documents",
+  images: "2 of 3 · packing images",
+  writing: "3 of 3 · writing the copy",
+  moving: "moving files",
+};
+
 /**
  * Moving or copying a world: into a folder here — its own, a drive's, a
  * cloud folder — or onto a server. Moved, it is there and nowhere else;
@@ -177,6 +186,7 @@ function MoveDialog({
   place,
   storage,
   servers,
+  onStorage,
   onDone,
   onClose,
   onError,
@@ -185,6 +195,8 @@ function MoveDialog({
   place: WorldPlace;
   storage: StorageView;
   servers: ServerEntry[];
+  /** A folder chosen here becomes one of Storage's world locations. */
+  onStorage: (s: StorageView) => void;
   onDone: () => void;
   onClose: () => void;
   onError: (e: unknown) => void;
@@ -192,9 +204,9 @@ function MoveDialog({
   const [copy, setCopy] = useState(false);
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<[number, number] | null>(null);
+  const [progress, setProgress] = useState<[string, number, number] | null>(null);
   useEffect(() => {
-    const stop = listen<[number, number]>("package-progress", (e) => setProgress(e.payload));
+    const stop = listen<[string, number, number]>("copy-progress", (e) => setProgress(e.payload));
     return () => void stop.then((un) => un());
   }, []);
   // Where its folder lies — the GM's copy, on a server too.
@@ -212,9 +224,21 @@ function MoveDialog({
   const chosen = choices.find((c) => c.value === to && !c.off) ?? choices.find((c) => !c.off);
   const toServer = chosen?.value.startsWith("server:") ? chosen.value.slice("server:".length) : "";
   const toFolder = chosen?.value.startsWith("folder:") ? chosen.value.slice("folder:".length) : "";
+  const pick = async () => {
+    try {
+      const path = await open({ directory: true, multiple: false });
+      if (typeof path !== "string") return;
+      if (!storage.locations.some((l) => same(l.path, path))) {
+        onStorage(await api.storageLocations([...storage.locations.filter((l) => !l.primary).map((l) => l.path), path]));
+      }
+      setTo(`folder:${path}`);
+    } catch (e) {
+      onError(e);
+    }
+  };
   const leavesShared = place.kind === "folder" && !copy && !!toFolder && !same(toFolder, root);
   const what = copy
-    ? "A world of its own, with types, documents and images — without players and versions."
+    ? "A new world of its own, with types, documents and images — without players and versions."
     : toServer
       ? "It lives on the server; players find it there. Your copy as GM stays on this device."
       : place.kind === "server"
@@ -256,21 +280,23 @@ function MoveDialog({
         </div>
         <label className="world-name-field">
           To
-          <select value={chosen?.value ?? ""} disabled={busy} onChange={(e) => setTo(e.target.value)}>
+          <select value={chosen?.value ?? ""} disabled={busy} onChange={(e) => (e.target.value === "pick" ? void pick() : setTo(e.target.value))}>
             {choices.map((c) => (
               <option key={c.value} value={c.value} title={c.title} disabled={c.off}>
                 {c.label}
               </option>
             ))}
+            <option value="pick">Another folder …</option>
           </select>
         </label>
+        {toFolder && <small className="small muted folder-path">{toFolder}</small>}
         <p className="small">{what}</p>
         {busy && (
           <div className="switch-progress">
             <div className="progress-bar">
-              <div style={{ width: progress ? `${Math.round((progress[0] * 100) / Math.max(1, progress[1]))}%` : "0%" }} />
+              <div style={{ width: progress ? `${Math.round((progress[1] * 100) / Math.max(1, progress[2]))}%` : "0%" }} />
             </div>
-            <small className="small">{progress ? `${progress[0].toLocaleString()} of ${progress[1].toLocaleString()}` : copy ? "Copying …" : "Moving …"}</small>
+            <small className="small">{progress ? `${STEPS[progress[0]] ?? progress[0]} ${progress[1].toLocaleString()} of ${progress[2].toLocaleString()}` : copy ? "Copying …" : "Moving …"}</small>
           </div>
         )}
         <div className="line">

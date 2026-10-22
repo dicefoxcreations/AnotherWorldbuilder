@@ -539,6 +539,9 @@ fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<serde_json::Value>> {
     let me = store.load_identity()?.id().to_string();
     let mut out = Vec::new();
     for meta in store.list_worlds()? {
+        if unfinished_copy(&store, meta.public.world_id.as_str()) {
+            continue;
+        }
         out.push(serde_json::to_value(world_info(&store, &meta, &me)?)?);
     }
     // Worked on online: as their host last showed them — and where it is.
@@ -585,7 +588,8 @@ async fn world_create(app: tauri::AppHandle, name: String, destination: Destinat
 #[cfg(feature = "gui")]
 /// Copies a world — into a folder here (none: the usual one), or onto a
 /// server: a world of its own, with the types, documents and images, without
-/// its players and versions. Tells how far it is (`package-progress`).
+/// its players and versions. Tells how far it is (`copy-progress`). Broken
+/// off, the half copy goes again — at once, or at the next start.
 #[cfg_attr(feature = "gui", tauri::command)]
 async fn world_copy(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
     use tauri::Emitter;
@@ -602,6 +606,7 @@ async fn world_copy(app: tauri::AppHandle, world: String, destination: Destinati
         };
         let meta = new_world(&target, &identity, copy_name(&store, &store.load_world_meta(&world)?.public.name)?)?;
         let id = meta.public.world_id.to_string();
+        let _copying = Copying::start(&id);
         if let Some(server) = server {
             network::live_on(&target, &id, Some(server))?;
         }
@@ -614,13 +619,19 @@ async fn world_copy(app: tauri::AppHandle, world: String, destination: Destinati
             documents: store.load_articles(&world)?.into_iter().map(|a| a.id.to_string()).collect(),
         };
         let path = target.private_world_dir(&id).join("copying.awpack");
-        let copied = transfer::export(&store, &identity, &world, &choice, &path).and_then(|_| {
+        let packing = |what: &str, done: usize, total: usize| {
+            let _ = app.emit("copy-progress", (what, done, total));
+        };
+        let copied = transfer::export(&store, &identity, &world, &choice, &path, &packing).and_then(|_| {
             let (folder, package) = transfer::read(&path)?;
             let tell = |done: usize, total: usize| {
-                let _ = app.emit("package-progress", (done, total));
+                let _ = app.emit("copy-progress", ("writing", done, total));
             };
             transfer::import(&target, &identity, &id, &folder, &package, &tell)
         });
+        if copied.is_err() {
+            let _ = target.delete_world(&id);
+        }
         let _ = std::fs::remove_dir_all(&path);
         copied?;
         world_info(&target, &target.load_world_meta(&id)?, identity.id().as_str())
@@ -632,7 +643,7 @@ async fn world_copy(app: tauri::AppHandle, world: String, destination: Destinati
 #[cfg(feature = "gui")]
 /// Moves a GM's world: into another folder here — off its server, if it was
 /// on one — or onto a server, which keeps it for the players; the GM's copy
-/// stays in its folder then. Tells how far a folder is (`package-progress`).
+/// stays in its folder then. Tells how far a folder is (`copy-progress`).
 #[cfg_attr(feature = "gui", tauri::command)]
 async fn world_move(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
     use tauri::Emitter;
@@ -650,7 +661,7 @@ async fn world_move(app: tauri::AppHandle, world: String, destination: Destinati
             let (moving, world) = (store.clone(), world.clone());
             tauri::async_runtime::spawn_blocking(move || {
                 let tell = |done: usize, total: usize| {
-                    let _ = app.emit("package-progress", (done, total));
+                    let _ = app.emit("copy-progress", ("moving", done, total));
                 };
                 moving.move_world(&world, Path::new(&path), &tell)
             })
@@ -660,6 +671,37 @@ async fn world_move(app: tauri::AppHandle, world: String, destination: Destinati
     }
     let identity = store.load_identity()?;
     world_info(&store, &store.load_world_meta(&world)?, identity.id().as_str())
+}
+
+/// Copies being made in this run, by the new world's id.
+fn copying() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static COPYING: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    COPYING.get_or_init(Default::default)
+}
+
+struct Copying(String);
+
+impl Copying {
+    fn start(id: &str) -> Self {
+        if let Ok(mut all) = copying().lock() {
+            all.insert(id.to_string());
+        }
+        Copying(id.to_string())
+    }
+}
+
+impl Drop for Copying {
+    fn drop(&mut self) {
+        if let Ok(mut all) = copying().lock() {
+            all.remove(&self.0);
+        }
+    }
+}
+
+/// A copy left half made — the app closed while copying: it goes.
+fn unfinished_copy(store: &Store, world: &str) -> bool {
+    let left = store.private_world_dir(world).join("copying.awpack").exists() && !copying().lock().is_ok_and(|c| c.contains(world));
+    left && store.delete_world(world).is_ok()
 }
 
 /// "Name (copy)" — or with a number, where that is taken.
