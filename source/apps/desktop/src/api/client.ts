@@ -56,7 +56,7 @@ export type WorldInfo = {
   waiting: number;
   /** How many versions of each document stay. */
   versionLimit: number;
-  /** Encrypted: views and rights count. Without, whoever has the world reads and edits all of it. */
+  /** Encrypted: the keys keep views and rights. Without, the host keeps them for players online; whoever has the folder reads all of it. */
   encrypted: boolean;
   /** Where this device keeps the readable copy — empty: nowhere. */
   readable: string;
@@ -152,6 +152,9 @@ export type StorageView = {
 
 /** One folder for both, or each on its own. */
 export type StorageChoice = { base: string } | { profile: string; worlds: string; additional?: string[] };
+/** What a server holds of a GM's world, measured against this device. */
+export type WorldCheck = { records: number; missing: number; new: number; parts: number; intact: number; lacking: number; repaired: number };
+
 export type WorldDestination = { kind: "local"; path: string } | { kind: "server"; server: string };
 
 /** A world held here, and whether it is offered or kept somewhere. */
@@ -1040,6 +1043,8 @@ export const api = {
   },
   worldCreate: async (name: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_create", { name, destination })),
   worldCopy: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_copy", { world, destination })),
+  /** Whether all of a GM's world is on its server: entries by name, image parts by their bytes. */
+  worldCheck: (world: string) => invoke<WorldCheck>("world_check", { world }),
   /** Moves a GM's world into a folder here (empty: where its copy lies) or onto a server. */
   worldMove: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_move", { world, destination })),
   worldOpen: async (path: string, location: string) => toWorld(await invoke<Raw>("world_open", { path, location })),

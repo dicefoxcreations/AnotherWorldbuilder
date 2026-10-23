@@ -1199,9 +1199,24 @@ async fn ask(net: &WorldNet, via: &Via, world: &str, me: &Identity, ask: Ask) ->
     .map_err(|e| AppError(e.to_string()))?;
     // Writing the world right now: like no answer — asked again later.
     if reply == Reply::Busy {
-        return Err(AppError("The other side is busy with this world.".into()));
+        return Err(AppError(BUSY.into()));
     }
     Ok(reply)
+}
+
+const BUSY: &str = "The other side is busy with this world.";
+
+/// Asks, and while the other side is busy writing the world, waits and
+/// asks again — for a check, which should not end on the usual sync.
+#[cfg(feature = "gui")]
+async fn ask_waiting(net: &WorldNet, via: &Via, world: &str, me: &Identity, question: Ask) -> Answer<Reply> {
+    for _ in 0..120 {
+        match ask(net, via, world, me, question.clone()).await {
+            Err(e) if e.0 == BUSY => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+            other => return other,
+        }
+    }
+    Err(AppError(BUSY.into()))
 }
 
 /// Gives the other side the records it lacks, a little at a time, for one
@@ -1921,6 +1936,85 @@ pub(crate) async fn rehome(store: &Store, world: &str, server: Option<String>) -
         let _ = net.ask_server(&old, "", &me, Ask::Manage { order: Some(aw_sync::world::Order::Delete { world: world.to_string() }) }).await;
     }
     Ok(())
+}
+
+/// What a server holds of a GM's world, measured against this device.
+#[derive(Serialize, Default)]
+pub struct Check {
+    /// Entries here.
+    pub records: usize,
+    /// Of these, not on the server.
+    pub missing: usize,
+    /// On the server and not here — taken in now.
+    pub new: usize,
+    /// Image parts the world needs.
+    pub parts: usize,
+    /// Came back from the server whole: their bytes are what their names say.
+    pub intact: usize,
+    /// Not on the server, or not whole there — given again.
+    pub lacking: usize,
+    /// Of these, whole on the server now.
+    pub repaired: usize,
+}
+
+#[cfg(feature = "gui")]
+/// Whether all of a GM's world is on its server. Entries by name — each was
+/// checked against its name when the server took it; image parts by their
+/// bytes: every part comes back and is checked. Parts missing there, or no
+/// longer whole, are given again — the usual sync only asks for missing
+/// ones. Entries missing there follow with the next sync. Tells how far it
+/// is (`copy-progress`, `checking`).
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn world_check(app: tauri::AppHandle, world: String) -> Answer<Check> {
+    use tauri::Emitter;
+    let store = store(&app)?;
+    if !store.is_gm(&world) {
+        return Err(AppError("Only the GM checks a world.".into()));
+    }
+    let code = store.load_network()?.home_of(&world).cloned().ok_or_else(|| AppError("It lives on no server.".into()))?;
+    let via = Via::Server(Server::parse(&code).map_err(|e| AppError(e.to_string()))?);
+    let net = running().ok_or_else(|| AppError("The network is switched off.".into()))?;
+    let me = store.load_identity()?;
+    let mut check = Check::default();
+
+    let have = store.inventory(&world)?;
+    check.records = have.len();
+    let Reply::Records { records, wanted, .. } = ask_waiting(&net, &via, &world, &me, Ask::Swap { have, give: Vec::new() }).await? else {
+        return Err(AppError("The server does not hold it.".into()));
+    };
+    check.missing = wanted.len();
+    check.new = store.receive(&world, &records)?;
+
+    let mut pending: std::collections::VecDeque<String> = store.wanted_parts(&world)?.into_iter().collect();
+    let mut lacking = Vec::new();
+    check.parts = pending.len();
+    while !pending.is_empty() {
+        let want: Vec<String> = pending.iter().take(64).cloned().collect();
+        let Reply::Parts { parts, .. } = ask_waiting(&net, &via, &world, &me, Ask::Parts { want: want.clone(), give: Vec::new() }).await? else {
+            return Err(AppError("The server does not hold it.".into()));
+        };
+        let got = decode_parts(parts);
+        let names: HashSet<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+        // In order, up to the last that came: the rest did not fit this time.
+        let settled = want.iter().rposition(|n| names.contains(n.as_str())).map_or(want.len(), |i| i + 1);
+        for (name, bytes) in &got {
+            if aw_store::journal::record_id(bytes) == *name { check.intact += 1 } else { lacking.push(name.clone()) }
+        }
+        lacking.extend(want[..settled].iter().filter(|n| !names.contains(n.as_str())).cloned());
+        pending.drain(..settled);
+        let _ = app.emit("copy-progress", ("checking", check.parts - pending.len(), check.parts));
+    }
+    check.lacking = lacking.len();
+    // Given again, a few at a time, then asked for once more.
+    for batch in lacking.chunks(4) {
+        let give = encode_parts(store.parts(&world, batch));
+        ask_waiting(&net, &via, &world, &me, Ask::Parts { want: Vec::new(), give }).await?;
+        let Reply::Parts { parts, .. } = ask_waiting(&net, &via, &world, &me, Ask::Parts { want: batch.to_vec(), give: Vec::new() }).await? else {
+            continue;
+        };
+        check.repaired += decode_parts(parts).iter().filter(|(name, bytes)| aw_store::journal::record_id(bytes) == *name).count();
+    }
+    Ok(check)
 }
 
 #[cfg(feature = "gui")]

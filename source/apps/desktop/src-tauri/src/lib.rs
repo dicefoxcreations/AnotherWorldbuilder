@@ -2147,6 +2147,7 @@ pub fn run() {
             world_create,
             world_copy,
             world_move,
+            network::world_check,
             world_open,
             world_share,
             world_token_check,

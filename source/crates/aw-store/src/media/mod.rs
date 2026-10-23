@@ -407,13 +407,14 @@ pub fn has_part(world_dir: &Path, name: &str) -> bool {
     part_path(world_dir, name).is_some_and(|p| p.exists())
 }
 
-/// Keeps a part — only if its bytes are what its name says.
+/// Keeps a part — only if its bytes are what its name says. One lying here
+/// already stays, unless it is no longer whole.
 pub fn put_part(world_dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
     let path = part_path(world_dir, name).ok_or("not a part's name")?;
     if record_id(bytes) != name {
         return Err("a part whose bytes do not match its name".into());
     }
-    if !path.exists() {
+    if !path.exists() || read_part(world_dir, name).is_none() {
         crate::durable::write(&path, bytes)?;
     }
     Ok(())
@@ -453,6 +454,20 @@ pub fn open_image(world_dir: &Path, image: &ImageRef, preview: bool) -> Result<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_part_no_longer_whole_is_not_read_and_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"a part of an image".to_vec();
+        let name = record_id(&bytes);
+        put_part(dir.path(), &name, &bytes).unwrap();
+        let path = part_path(dir.path(), &name).unwrap();
+        std::fs::write(&path, b"a part of an imagX").unwrap();
+        assert!(has_part(dir.path(), &name));
+        assert_eq!(read_part(dir.path(), &name), None, "broken: not handed out");
+        put_part(dir.path(), &name, &bytes).unwrap();
+        assert_eq!(read_part(dir.path(), &name), Some(bytes));
+    }
 
     fn png(width: u32, height: u32) -> Vec<u8> {
         let img = image::RgbaImage::from_fn(width, height, |x, y| image::Rgba([(x % 256) as u8, (y % 256) as u8, 90, 255]));

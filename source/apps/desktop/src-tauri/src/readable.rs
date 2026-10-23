@@ -59,6 +59,11 @@ struct Doc {
 /// Worlds whose copy is being written right now.
 static WRITING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
+/// Whether the copy of a world is being written right now.
+pub(crate) fn writing(world: &str) -> bool {
+    WRITING.get_or_init(Default::default).lock().is_ok_and(|w| w.contains(world))
+}
+
 /// Brings the copy up to date in the background — once at a time per world.
 pub(crate) fn refresh_soon(store: &Store, world: &str) {
     let writing = WRITING.get_or_init(Default::default);
@@ -144,7 +149,7 @@ fn export(
     })?;
     let mut taken: HashSet<String> = written.images.values().cloned().collect();
     for (image, meta) in &images {
-        if store.switching(world) {
+        if store.switching(world) || crate::store::moving(world) {
             return Err(AppError("The world is being switched.".into()));
         }
         let path = match written.images.get(image) {
@@ -170,7 +175,7 @@ fn export(
     let here: HashSet<&str> = views.iter().filter(|v| !v.pending).map(|v| v.id.as_str()).collect();
     for view in views.iter().filter(|v| !v.pending) {
         // Switching began: nothing more in the clear — the switch decides what stays.
-        if store.switching(world) {
+        if store.switching(world) || crate::store::moving(world) {
             return Err(AppError("The world is being switched.".into()));
         }
         let before = written.docs.get(&view.id).cloned();
@@ -379,6 +384,32 @@ pub(crate) fn set_own(store: &Store, world: &str, on: bool) -> Answer<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_world_deleted_while_its_copy_is_written_is_gone_without_a_trace() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().join("profile"));
+        let gm = Identity::create("Marla").unwrap();
+        store.save_identity(&gm).unwrap();
+        let world = new_world(&store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        store.set_encrypted(&world, false).unwrap();
+        for n in 0..400 {
+            crate::create_page(&store, &world, &format!("page-{n}"), &format!("Page {n}"), "Words. ".repeat(200)).unwrap();
+        }
+        let _ = std::fs::remove_dir_all(place(&store, &world).unwrap().unwrap());
+        let _ = std::fs::remove_file(store.private_world_dir(&world).join(KEPT));
+        refresh_soon(&store, &world);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        assert!(writing(&world), "the copy is being written");
+        store.delete_world(&world).unwrap();
+        while writing(&world) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!store.world_dir(&world).exists());
+        assert!(!store.private_world_dir(&world).exists());
+        assert!(store.list_worlds().unwrap().is_empty());
+    }
 
     #[test]
     fn the_copy_follows_the_world_and_the_world_the_copy() {

@@ -2885,6 +2885,45 @@ mod tests {
         eprintln!("to the page: {:?}, {} MB", started.elapsed(), json.len() / 1_000_000);
     }
 
+    /// Where opening one document as code spends its time, in a real profile
+    /// (`AW_BENCH_DIR` with `profile/` and `worlds/`, `AW_BENCH_DOC` its id).
+    #[test]
+    #[ignore]
+    fn open_timing() {
+        let (Some(dir), Some(article)) = (std::env::var_os("AW_BENCH_DIR"), std::env::var("AW_BENCH_DOC").ok()) else { return };
+        let store = Store::new(PathBuf::from(dir));
+        let id = store.list_worlds().unwrap().into_iter().next().unwrap().public.world_id.to_string();
+        for round in 0..4 {
+            if round == 3 {
+                // Past the full look at every folder.
+                std::thread::sleep(std::time::Duration::from_secs(31));
+            }
+            let started = std::time::Instant::now();
+            let identity = store.load_identity().unwrap();
+            let t_identity = started.elapsed();
+            let held = store.view_keys(&id, &identity).unwrap();
+            let t_keys = started.elapsed();
+            let articles = store.load_articles(&id).unwrap();
+            let t_load = started.elapsed();
+            let opened = open(&store, &id, &article, &held, &articles).unwrap();
+            let t_open = started.elapsed();
+            code_from(&store, &id, &articles, opened).unwrap();
+            let t_code = started.elapsed();
+            let started = std::time::Instant::now();
+            store.with_journal(&id, |_| Ok(())).unwrap();
+            let t_journal = started.elapsed();
+            let layers = &articles.iter().find(|a| a.id.to_string() == article).unwrap().layers;
+            let mut each = Vec::new();
+            for l in layers {
+                let at = std::time::Instant::now();
+                store.layer_state(&id, l.id).unwrap();
+                each.push(at.elapsed());
+            }
+            eprintln!("  journal alone {t_journal:?}, layer_state each {each:?}");
+            eprintln!("round {round}: identity {t_identity:?}, keys {:?}, load {:?}, open {:?}, code {:?}", t_keys - t_identity, t_load - t_keys, t_open - t_load, t_code - t_open);
+        }
+    }
+
     #[test]
     fn the_infobox_has_access_of_its_own() {
         let w = world("infobox");

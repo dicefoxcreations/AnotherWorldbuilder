@@ -104,6 +104,8 @@ Automatic (`cargo test -p aw-desktop server::`):
 
 **Is a server answering?** `cargo run -p aw-sync --example server_probe -- <address or code> [times]` looks the server up as the app does and asks it for its worlds; `AW_LOG=1` shows how the connection goes. A connection that stands but gets no answer means the server itself is stuck, not the network.
 
+**Is all of a world there?** *Options → World → Where it lives → Check* (GM, world on a server, `network::world_check`): the server names which entries it lacks (those follow with the next sync), and every image part comes back and is measured against its name; parts missing or no longer whole are given again and asked for once more. While the server writes the world (the usual sync), it answers `Busy` — the check waits and asks again instead of stopping.
+
 **By hand, 2026-10-21**, locally with the static program (port 7450, `AW_ADMIN` = Marla) and three fresh app profiles (Marla, Oscar, Eve):
 
 1. The server starts without keys, only with Marla's ID.

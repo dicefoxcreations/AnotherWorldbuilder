@@ -4,6 +4,6 @@ The door keeper of a group's worlds — on a NAS, in a container. It holds no wo
 
 - Build: `python3 tools/build/server-image.py` → `programs/server-linux-x86_64/` beside `source/` (static binary and a Docker image archive).
 - Run: `docker load -i aw-server-<version>-docker.tar`, then `compose.yaml` with `AW_ADMIN` set.
-- Details and Synology steps (German): `docs/testing/server.md`.
+- Setting it up, with Docker or on a Synology NAS: `docs/server-setup.md`; how it works: `docs/testing/server.md`.
 
 The code is the desktop app's (`apps/desktop/src-tauri`, `src/server.rs`), built without its window: `cargo build -p aw-desktop --no-default-features --bin aw-server`.

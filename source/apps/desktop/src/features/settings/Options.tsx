@@ -321,7 +321,13 @@ function Encryption({ world, onChanged, onError }: { world: WorldInfo; onChanged
         <input type="checkbox" checked={world.encrypted} disabled={busy} onChange={(e) => setAsking(e.target.checked)} />
         <span>
           <strong>Encrypted</strong>
-          <small className="small">{world.encrypted ? "on · views and rights count" : "off · everyone with the world reads and edits everything"}</small>
+          <small className="small">
+            {world.encrypted
+              ? "on · views and rights hold everywhere"
+              : world.server
+                ? "off · the server keeps views and rights · it reads everything"
+                : "off · the host keeps views and rights · whoever has the folder reads everything"}
+          </small>
         </span>
       </label>
       {world.readableInWorld && (
@@ -346,7 +352,8 @@ function Encryption({ world, onChanged, onError }: { world: WorldInfo; onChanged
             ) : (
               <>
                 <h2>Turn encryption off?</h2>
-                <p>Everything lies in the world's folder as it is — GM parts, secrets, all of it. Whoever has the folder reads and edits everything; views and rights no longer count.</p>
+                <p>Everything lies in the world's folder as it is — GM parts, secrets, all of it. Whoever has the folder reads and edits everything: on a server, the server and its admin; in a shared folder, everyone in it.</p>
+                <p className="small">Players working online still get only what views and rights allow — the host keeps them.</p>
                 <p className="small">A readable copy appears beside it: a text per document, the images as image files.</p>
               </>
             )}

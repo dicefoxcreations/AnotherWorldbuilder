@@ -456,15 +456,52 @@ pub(crate) fn stand_ins(held: &mut HeldKeys, attributes: impl IntoIterator<Item 
 
 /// The open journals of this process, by profile and world folder. Commands come and go; the
 /// world read from its records stays.
-/// Worlds on their way to another location — the network leaves them alone meanwhile.
+/// Worlds on their way to another location, or out — the network and what
+/// writes in the background leave them alone meanwhile.
 fn moving_worlds() -> &'static Mutex<std::collections::HashSet<String>> {
     static MOVING: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
     MOVING.get_or_init(Default::default)
 }
 
-/// Whether a world is being moved to another location right now.
+/// Whether a world is being moved or deleted right now.
 pub fn moving(world_id: &str) -> bool {
     moving_worlds().lock().is_ok_and(|all| all.contains(world_id))
+}
+
+/// A world noted as moving while this lives.
+struct Away(String);
+
+impl Away {
+    fn start(world_id: &str) -> Result<Self> {
+        moving_worlds().lock().map_err(poisoned)?.insert(world_id.to_string());
+        Ok(Away(world_id.to_string()))
+    }
+}
+
+impl Drop for Away {
+    fn drop(&mut self) {
+        if let Ok(mut all) = moving_worlds().lock() {
+            all.remove(&self.0);
+        }
+    }
+}
+
+/// A folder gone with all below it — tried again while something still
+/// writes there; one already gone is fine.
+fn remove_tree(dir: &Path) -> std::io::Result<()> {
+    for _ in 0..10 {
+        if !dir.exists() {
+            return Ok(());
+        }
+        if std::fs::remove_dir_all(dir).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    match std::fs::remove_dir_all(dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
 }
 
 /// Copies a folder with all below it, each file on disk before it counts.
@@ -1316,10 +1353,17 @@ impl Store {
         if !dir.exists() {
             return Err(StoreError::NoSuchWorld(world_id.to_string()));
         }
+        let _away = Away::start(world_id)?;
         self.close(world_id);
-        std::fs::remove_dir_all(dir)?;
-        let private = self.private_world_dir(world_id);
-        if private.exists() { std::fs::remove_dir_all(private)?; }
+        // What writes in the background stops at its next file; then it goes.
+        for _ in 0..300 {
+            if !crate::readable::writing(world_id) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        remove_tree(&dir)?;
+        remove_tree(&self.private_world_dir(world_id))?;
         // Kept in a folder, or noted to fetch again, it would come right back.
         self.note_fleeting(world_id, false)?;
         let mut settings = self.load_network()?;
@@ -1347,16 +1391,7 @@ impl Store {
         if to.exists() {
             return Err(StoreError::Journal("A folder of this world lies there already.".into()));
         }
-        struct Moving(String);
-        impl Drop for Moving {
-            fn drop(&mut self) {
-                if let Ok(mut all) = moving_worlds().lock() {
-                    all.remove(&self.0);
-                }
-            }
-        }
-        moving_worlds().lock().map_err(poisoned)?.insert(world_id.to_string());
-        let _moving = Moving(world_id.to_string());
+        let _away = Away::start(world_id)?;
         // Whoever writes meanwhile waits — and finds the world gone after.
         let open = self.journal(world_id)?;
         let _held = open.lock().map_err(poisoned)?;
@@ -1517,6 +1552,9 @@ impl Store {
     }
 
     fn write_projection(&self, world_id: &str, mut prints: BTreeMap<String, String>, articles: &[StoredArticle]) {
+        if moving(world_id) {
+            return;
+        }
         let kept = Projection {
             version: 1,
             articles: articles.iter().filter_map(|a| Some((a.id.to_string(), (prints.remove(&a.id.to_string())?, a.clone())))).collect(),

@@ -837,3 +837,28 @@ fn a_members_proposal_reaches_the_gm_sealed_for_the_two_of_them() {
     assert_eq!(t.bob_journal.proposals().count(), 0);
     assert!(!t.bob_journal.dir.join("proposals").join(format!("{id}.json")).exists());
 }
+
+#[test]
+fn what_another_device_writes_into_a_known_folder_is_picked_up() {
+    let mut t = table();
+    let (_, _, story) = t.article(("players", "players", "Zero.", Level::Open));
+    let mut other = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.join("other"), &t.token.public()).unwrap();
+    other.set_keys(t.ring.everything());
+    assert_eq!(text_of(&mut other, story), "Zero.");
+    assert!(!other.refresh().unwrap(), "nothing changed, nothing to pick up");
+    // Written beside it, into the folder it already listed.
+    t.gm_journal.edit(story, 1, &[], &plain("", "Zero. One."), &t.gm, "s-1", 1).unwrap();
+    let version = t.gm_journal.close("s-1", &t.gm).unwrap().remove(0);
+    assert!(other.refresh().unwrap());
+    assert_eq!(text_of(&mut other, story), "Zero. One.");
+    // Its file deleted there: gone here too.
+    let path = std::fs::read_dir(t.gm_journal.dir.join("articles"))
+        .unwrap()
+        .flatten()
+        .map(|folder| folder.path().join(format!("{version}.json")))
+        .find(|p| p.exists())
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    other.refresh().unwrap();
+    assert!(!other.versions.contains_key(&version));
+}

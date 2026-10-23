@@ -814,8 +814,9 @@ pub enum Added {
     Waiting,
 }
 
-/// How often every folder is read again regardless of its time.
-const FULL_SCAN: std::time::Duration = std::time::Duration::from_secs(30);
+/// How often every folder is read again regardless of its time — for what
+/// a folder's time does not show. A large world takes a moment for it.
+const FULL_SCAN: std::time::Duration = std::time::Duration::from_secs(300);
 
 pub struct Journal {
     /// The world's folder.
@@ -999,7 +1000,7 @@ impl Journal {
     fn folders(&self) -> Vec<PathBuf> {
         let mut out = vec![self.dir.join("control"), self.dir.join("media"), self.dir.join("proposals")];
         if let Ok(entries) = std::fs::read_dir(self.dir.join("articles")) {
-            out.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()));
+            out.extend(entries.filter_map(|e| e.ok()).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()));
         }
         out.push(self.drafts_dir.clone());
         out
@@ -1016,8 +1017,19 @@ impl Journal {
         if full {
             self.full_scan = Some(std::time::Instant::now());
         }
-        for folder in self.folders() {
-            let stamp = std::fs::metadata(&folder).and_then(|m| m.modified()).ok();
+        let folders: Vec<(PathBuf, Option<std::time::SystemTime>)> =
+            self.folders().into_iter().map(|f| { let stamp = std::fs::metadata(&f).and_then(|m| m.modified()).ok(); (f, stamp) }).collect();
+        // No folder came, went or changed since the last look: nothing to pick up.
+        if !full
+            && folders.iter().filter(|(_, stamp)| stamp.is_some()).count() == self.listings.len()
+            && folders.iter().all(|(folder, stamp)| stamp.is_none_or(|stamp| self.listings.get(folder).is_some_and(|(was, _)| *was == stamp)))
+        {
+            return Ok(false);
+        }
+        // A folder gone is listed no more.
+        let there: HashSet<&PathBuf> = folders.iter().filter(|(_, stamp)| stamp.is_some()).map(|(f, _)| f).collect();
+        self.listings.retain(|f, _| there.contains(f));
+        for (folder, stamp) in folders {
             if let (false, Some(stamp), Some((was, ids))) = (full, stamp, self.listings.get(&folder)) {
                 if *was == stamp {
                     present.extend(ids.iter().cloned());

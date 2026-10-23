@@ -442,13 +442,15 @@ impl Store {
     }
 
     /// Keeps parts from elsewhere — only those an image here needs, and only
-    /// if their bytes are what their names say.
+    /// if their bytes are what their names say. One lying here that is no
+    /// longer whole is replaced.
     pub fn take_parts(&self, world_id: &str, parts: &[(String, Vec<u8>)]) -> Result<usize> {
         let needed = self.wanted_parts(world_id)?;
         let dir = self.world_dir(world_id);
         let mut new = 0;
         for (name, bytes) in parts {
-            if needed.contains(name) && !media::has_part(&dir, name) && media::put_part(&dir, name, bytes).is_ok() {
+            let whole = media::has_part(&dir, name) && media::read_part(&dir, name).is_some();
+            if needed.contains(name) && !whole && media::put_part(&dir, name, bytes).is_ok() {
                 new += 1;
             }
         }

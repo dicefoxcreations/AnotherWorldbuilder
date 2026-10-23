@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, type NetworkView, type ServerEntry, type StorageView, type Upload, type WorldInfo } from "../../api/client";
+import { api, type NetworkView, type ServerEntry, type StorageView, type Upload, type WorldCheck, type WorldInfo } from "../../api/client";
 import { CloudIcon, FolderIcon, NetworkIcon, ServerIcon } from "../../shared/ui/Icons";
 
 /** The folder a path lies in. */
@@ -22,6 +22,16 @@ export function uploadText(u: Upload | undefined): string {
   if (records < all) return `uploading ${Math.floor((records * 100) / all)} %`;
   const [images, every] = u.images;
   return images < every ? `uploading images ${images} of ${every}` : "";
+}
+
+/** What a check found, in a line. */
+export function checkText(c: WorldCheck): string {
+  const n = (x: number) => x.toLocaleString();
+  const parts = c.lacking - c.repaired;
+  const fixed = c.repaired > 0 ? ` · ${n(c.repaired)} given again` : "";
+  if (c.missing === 0 && parts === 0) return `all there · ${n(c.records)} entries · ${n(c.intact + c.repaired)} image parts intact${fixed}`;
+  const lack = [c.missing > 0 && `${n(c.missing)} entries`, parts > 0 && `${n(parts)} image parts`].filter(Boolean).join(" and ");
+  return `${lack} not there yet${fixed}`;
 }
 
 /**
@@ -60,6 +70,12 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
   const [network, setNetwork] = useState<NetworkView | null>(null);
   const [moving, setMoving] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState<[number, number] | null>(null);
+  const [checked, setChecked] = useState<WorldCheck | null>(null);
+  useEffect(() => {
+    const stop = listen<[string, number, number]>("copy-progress", (e) => e.payload[0] === "checking" && setChecking([e.payload[1], e.payload[2]]));
+    return () => void stop.then((un) => un());
+  }, []);
   useEffect(() => {
     const look = () =>
       Promise.all([api.storageStatus(), api.networkSettings()])
@@ -77,11 +93,14 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
   const servers = network.server_list;
   const place = placeOf(world, storage, servers);
   const server = servers.find((s) => s.code === world.server);
+  const waiting = !!server?.waiting_worlds.includes(world.id);
+  const uploading = uploadText(network.uploads[world.id]);
   const status =
     place.kind === "server"
-      ? server?.waiting_worlds.includes(world.id)
+      ? waiting
         ? "waits for the server's admin"
-        : uploadText(network.uploads[world.id]) || (world.isGm ? "players find it there · your copy stays on this device" : world.online || world.fleeting ? "worked on online" : "a copy lies on this device")
+        : uploading ||
+          (checking ? `checking images ${checking[0].toLocaleString()} of ${checking[1].toLocaleString()}` : checked ? checkText(checked) : "") || (world.isGm ? "players find it there · your copy stays on this device" : world.online || world.fleeting ? "worked on online" : "a copy lies on this device")
       : place.kind === "host"
         ? world.online || world.fleeting
           ? "worked on online"
@@ -95,6 +114,19 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
     } catch (e) {
       onError(e);
     } finally {
+      setBusy(false);
+    }
+  };
+  const check = async () => {
+    setBusy(true);
+    setChecked(null);
+    setChecking([0, 0]);
+    try {
+      setChecked(await api.worldCheck(world.id));
+    } catch (e) {
+      onError(e);
+    } finally {
+      setChecking(null);
       setBusy(false);
     }
   };
@@ -112,6 +144,11 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
             {status}
           </small>
         </span>
+        {world.isGm && place.kind === "server" && !waiting && !uploading && (
+          <button disabled={busy || !server?.reached} title="Whether all of it is on the server, every image checked" onClick={() => void check()}>
+            {checking ? "Checking …" : "Check"}
+          </button>
+        )}
         {world.isGm && (
           <button disabled={busy} onClick={() => setMoving(true)}>
             Move or copy …
