@@ -297,7 +297,7 @@ fn worlds(store: &Store) -> Routed {
         .map_err(fail)?
         .into_iter()
         .filter(|m| store.is_gm(m.public.world_id.as_str()))
-        .map(|m| serde_json::json!({ "id": m.public.world_id.to_string(), "name": m.public.name, "icon": m.icon }))
+        .map(|m| serde_json::json!({ "id": m.public.world_id.to_string(), "name": m.public.name, "icon": m.icon, "members": m.members.len() }))
         .collect();
     Ok(serde_json::Value::Array(led))
 }
