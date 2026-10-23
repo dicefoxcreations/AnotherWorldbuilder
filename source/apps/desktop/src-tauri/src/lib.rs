@@ -20,6 +20,8 @@ mod transfer;
 mod host;
 mod keys;
 mod backup;
+#[cfg(feature = "gui")]
+mod browser;
 mod readable;
 pub mod server;
 
@@ -2161,6 +2163,7 @@ pub fn run() {
         .setup(|app| {
             network::start(app.handle()).map_err(|e| std::io::Error::other(e.0))?;
             backup::start(app.handle());
+            browser::start(app.handle());
             if let Some(w) = app.get_webview_window("main") {
                 window_state::on_start(app.handle().clone(), w);
             }
@@ -2290,6 +2293,10 @@ pub fn run() {
             keys::keys_restore,
             navigation_load,
             transfer::package_export,
+            browser::browser_settings,
+            browser::browser_enable,
+            browser::browser_pair,
+            browser::browser_forget,
             transfer::package_read,
             transfer::package_import,
             navigation_set,

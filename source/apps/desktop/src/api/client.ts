@@ -83,6 +83,17 @@ export type WorldInfo = {
 };
 
 /** What this device does on the local network. */
+/** The door for browser extensions (`browser.rs`). */
+export type BrowserView = {
+  enabled: boolean;
+  open: boolean;
+  port: number;
+  problem: string | null;
+  /** The code to type into the extension, while it holds. */
+  code: string | null;
+  browsers: { id: string; name: string; since: number }[];
+};
+
 export type NetworkView = {
   enabled: boolean;
   /** Direct over the internet, met through the shared folder. */
@@ -1099,6 +1110,11 @@ export const api = {
     invoke<string>("gm_handover_file", { world, member, path }),
 
   networkSettings: () => invoke<NetworkView>("network_settings"),
+  browserSettings: () => invoke<BrowserView>("browser_settings"),
+  browserEnable: (enabled: boolean) => invoke<BrowserView>("browser_enable", { enabled }),
+  /** A code to pair a browser extension with — six digits, five minutes. */
+  browserPair: () => invoke<BrowserView>("browser_pair"),
+  browserForget: (id: string) => invoke<BrowserView>("browser_forget", { id }),
   networkEnable: (enabled: boolean) => invoke<NetworkView>("network_enable", { enabled }),
   networkInternet: (enabled: boolean, stun: string[]) => invoke<NetworkView>("network_internet", { enabled, stun }),
   networkFolders: (enabled: boolean) => invoke<NetworkView>("network_folders", { enabled }),

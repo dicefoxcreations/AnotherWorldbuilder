@@ -1728,6 +1728,7 @@ input.invalid { border-color: var(--danger-line); }
    The table: a canvas over the whole window while dice roll — clicks go through. */
 .dice-table { position: fixed; inset: 0; z-index: 300; pointer-events: none; transition: opacity .45s; }
 .dice-table.fading { opacity: 0; }
+.pair-code { font-size: 22px; letter-spacing: .18em; padding: 4px 10px; }
 /* The side bar: a line to roll, the dice, the favourites, the log. */
 .dice-panel { gap: 10px; }
 .dice-input { display: flex; gap: 6px; }

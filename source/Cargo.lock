@@ -230,6 +230,7 @@ dependencies = [
  "aw-store",
  "aw-sync",
  "base64 0.23.1",
+ "blake3",
  "hex",
  "image",
  "serde",

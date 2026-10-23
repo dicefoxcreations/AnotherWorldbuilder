@@ -30,6 +30,7 @@ import { CalendarArea } from "./CalendarArea";
 import { AppearanceArea } from "./Appearance";
 import { DiceArea, SavedRolls } from "./DiceArea";
 import { AboutArea } from "./AboutArea";
+import { BrowserArea } from "./BrowserArea";
 import { USUAL_DICE } from "../dice/DiceTray";
 import { TransferArea } from "./Transfer";
 import { KeysDialog } from "../../shared/ui/KeysDialog";
@@ -49,6 +50,7 @@ const AREAS = [
   { id: "layout", icon: "🎨", name: "Appearance", group: "device" },
   { id: "keys", icon: "⌨", name: "Shortcuts", group: "device" },
   { id: "network", icon: "🌐", name: "Network", group: "device" },
+  { id: "browser", icon: "🧩", name: "Browser", group: "device" },
   { id: "storage", icon: "💾", name: "Storage", group: "device" },
   { id: "about", icon: "ℹ", name: "About", group: "app" },
 ] as const;
@@ -145,6 +147,7 @@ export function Options({
 
         <div className="options-body">
           {area === "network" && <NetworkArea onChanged={onNetworkChanged} onError={onError} />}
+          {area === "browser" && <BrowserArea onError={onError} />}
           {area === "storage" && <StorageArea onMoved={onStorageChanged} onError={onError} />}
           {area === "layout" && <AppearanceArea />}
           {area === "dice" && (
