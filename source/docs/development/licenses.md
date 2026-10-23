@@ -19,6 +19,8 @@ The project has no open-source license: `LICENSE` at the top of the repository r
 - **CDLA-Permissive-2.0:** `webpki-roots` (root certificates), permissive with a notice requirement.
 - **r-efi** is MIT, Apache-2.0 or LGPL at choice; MIT/Apache is chosen.
 
+**Sound:** the dice sound (`features/dice/dice-roll.mp3`) is a throw from “2 dice roll (29 throws)” by RPG on OpenGameArt (https://opengameart.org/content/2-dice-roll-29-throws), CC0 — no notice required; filtered, compressed and cut to 1.5 s.
+
 ## Notice requirement
 
 MIT, Apache, BSD and the others require copyright notices and license texts to come with every copy. For that, `tools/licenses/notices.mjs` generates `licenses.txt` on every build (through `cargo about` for Rust, from `node_modules` for JavaScript). The file is inside the app itself and can be read under *Options → About → Third-party licenses*; so it also travels with an EXE passed on by itself.

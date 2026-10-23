@@ -5,6 +5,7 @@ import { rollFormula, type Lookup } from "../../shared/Dice";
 import { useSideBar } from "../../shared/ui/SideBar";
 import type { DiceTable } from "./Dice3D";
 import { loadDice } from "./DiceLook";
+import { sound } from "./DiceSound";
 
 /**
  * The dice: whatever is rolled — from a document, or typed in the side bar
@@ -75,21 +76,29 @@ let table: Promise<DiceTable> | null = null;
 /** The table, loaded with the first throw — three.js is large, and not needed before. */
 const theTable = () => (table ??= import("./Dice3D").then((m) => new m.DiceTable()));
 
-/** Throws the dice onto the window, as this device likes them. */
-function throwDice(dice: [number, number][]) {
+/**
+ * Throws the dice onto the window, as this device likes them; they sound as
+ * the first one lands. Without 3D they only sound.
+ */
+function throwDice(dice: [number, number][], mine: boolean) {
   const look = loadDice();
-  if (look.show === "off") return;
+  const shown = look.show === "all" || (look.show === "mine" && mine);
+  if (!shown) {
+    if (look.sound && mine) sound();
+    return;
+  }
   theTable()
-    .then((t) => t.throw(dice.map(([sides, value]) => ({ sides, value })), look))
+    .then((t) => {
+      const landing = t.throw(dice.map(([sides, value]) => ({ sides, value })), look);
+      if (look.sound) sound(landing ?? 0);
+    })
     // No 3D here (no WebGL): the log says what was rolled all the same.
-    .catch(() => {});
+    .catch(() => look.sound && sound());
 }
 
 /** For the options: a throw to see the colours by. */
 export function tryDice() {
-  theTable()
-    .then((t) => t.throw([4, 6, 8, 10, 12, 20].map((sides) => ({ sides, value: sides })), loadDice()))
-    .catch(() => {});
+  throwDice([4, 6, 8, 10, 12, 20].map((sides) => [sides, sides]), true);
 }
 
 export function DiceTray({ world, children }: { world: WorldInfo; children: ReactNode }) {
@@ -124,7 +133,7 @@ export function DiceTray({ world, children }: { world: WorldInfo; children: Reac
       known.current.add(r.id);
       api.diceLogAdd(world.id, r).then(setLog).catch(() => {});
       if (r.mark === "clear") return;
-      if (!mine && loadDice().show === "all") throwDice(r.dice);
+      if (!mine) throwDice(r.dice, false);
       if (!openRef.current) {
         if (!mine) setUnseen((n) => n + 1);
         setToast(r);
@@ -159,7 +168,7 @@ export function DiceTray({ world, children }: { world: WorldInfo; children: Reac
         at: Date.now(),
         ...(hidden ? { secret: true } : {}),
       };
-      throwDice(entry.dice);
+      throwDice(entry.dice, true);
       take(entry, true);
       if (!hidden) api.diceRoll(world.id, entry).catch(() => {});
     },

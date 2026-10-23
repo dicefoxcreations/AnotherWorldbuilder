@@ -12,8 +12,8 @@ const SHOWN: [DiceSettings["show"], string][] = [
 ];
 
 /**
- * How dice look on this device: whose roll across the window, and in which
- * colours — the die and its numbers.
+ * How dice look on this device: whose roll across the window, in which
+ * colours — the die and its numbers — and whether they sound.
  */
 export function DiceArea({ world, rolls }: { world?: React.ReactNode; rolls?: React.ReactNode }) {
   const [dice, setDice] = useState<DiceSettings>(loadDice);
@@ -35,6 +35,16 @@ export function DiceArea({ world, rolls }: { world?: React.ReactNode; rolls?: Re
             {SHOWN.map(([v, t]) => (
               <button key={v} className={dice.show === v ? "on" : ""} onClick={() => change({ ...dice, show: v })}>
                 {t}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="setting-row">
+          <span>Sound</span>
+          <div className="segmented">
+            {([true, false] as const).map((v) => (
+              <button key={String(v)} className={dice.sound === v ? "on" : ""} onClick={() => change({ ...dice, sound: v })}>
+                {v ? "On" : "Off"}
               </button>
             ))}
           </div>

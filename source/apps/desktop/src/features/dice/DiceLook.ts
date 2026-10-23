@@ -2,12 +2,12 @@ import type { DiceLook } from "./Dice3D";
 
 /**
  * How dice look on this device, and whose tumble across the window: none,
- * one's own, or everyone's in the session. Kept with the device's colours
+ * one's own, or everyone's in the session — and whether they sound. Kept with the device's colours
  * (`shared/Theme`) — a reader's taste, for every world.
  */
-export type DiceSettings = DiceLook & { show: "off" | "mine" | "all" };
+export type DiceSettings = DiceLook & { show: "off" | "mine" | "all"; sound: boolean };
 
-export const DEFAULT_DICE: DiceSettings = { die: "#ece4d2", number: "#1f1b16", show: "all" };
+export const DEFAULT_DICE: DiceSettings = { die: "#ece4d2", number: "#1f1b16", show: "all", sound: true };
 
 const KEY = "aw:dice";
 
