@@ -206,8 +206,20 @@ function Drawn({
       related.set(a, [...(related.get(a) ?? []), b]);
       related.set(b, [...(related.get(b) ?? []), a]);
     }
-    return { at: withPlaces(auto, places, related), auto };
-  }, [graph, around, places]);
+    // Someone this reader cannot open stands where the GM put them: the
+    // stored card names them by id, which is all the reader learns.
+    const all = new Map(places);
+    const taken = new Set<string>();
+    for (const n of graph.nodes) {
+      if (n.article || !n.hidden || taken.has(n.hidden)) continue;
+      const card = (query.people ?? []).find((p) => p.who === n.hidden);
+      if (card) {
+        all.set(n.id, { x: card.x, y: card.y });
+        taken.add(n.hidden);
+      }
+    }
+    return { at: withPlaces(auto, all, related), auto };
+  }, [graph, around, places, query.people]);
 
   // Lines with a line at an end: the relations they stand for.
   const connectors = useMemo(() => {

@@ -112,7 +112,8 @@ export function findRole(roles: ArticleView[], idOrName: string): ArticleView | 
 // --- The graph --------------------------------------------------------------
 
 /** A person in the graph. `article` is missing for one this reader cannot open. */
-export type GraphNode = { id: string; article?: ArticleView };
+/** `hidden`: for `???`, the document behind it — never shown, only where its card was put. */
+export type GraphNode = { id: string; article?: ArticleView; hidden?: string };
 
 /**
  * A line between two people — every entry about them merged, from both
@@ -170,7 +171,7 @@ export function buildGraph(
     let other = entry.with;
     if (!byId.has(other)) {
       other = `unknown:${from}:${field.key}:${index}`;
-      unknown.push({ id: other });
+      unknown.push({ id: other, hidden: entry.with });
     }
     const [a, b] = from < other ? [from, other] : [other, from];
     const id = `${a}|${b}`;

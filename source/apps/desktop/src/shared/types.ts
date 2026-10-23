@@ -172,6 +172,8 @@ export function sortWritten(type: Template | undefined, written: string[]): Sort
     const desc = /\s+desc$/i.test(w);
     const name = w.replace(/\s+(desc|asc)$/i, "").trim();
     if (name.toLowerCase() === "name") return [{ key: "name", desc }];
+    // `Type`: by the name of each document's own type — a subtype's.
+    if (name.toLowerCase() === "type" && !propertyNamed(type, name)) return [{ key: "type", desc }];
     const field = propertyNamed(type, name);
     return field ? [{ key: field.key, desc }] : [];
   });
@@ -206,7 +208,8 @@ export function orderBy(
   if (keys.length === 0 || depth > 2) return byName;
   const byId = new Map(articles.map((a) => [a.id, a]));
   const picked = (v: unknown) => (typeof v === "string" ? byId.get(v) : Array.isArray(v) && typeof v[0] === "string" ? byId.get(v[0]) : undefined);
-  const valueOf = (a: ArticleView, key: string): unknown => (key === "name" ? a.name : propertyValues(a)[key]);
+  const valueOf = (a: ArticleView, key: string): unknown =>
+    key === "name" ? a.name : key === "type" ? (findType(all, a.articleType)?.name ?? "") : propertyValues(a)[key];
   const has = (v: unknown) => typeof v === "number" || (typeof v === "string" && v !== "") || (Array.isArray(v) && v.length > 0);
   const nested = new Map<string, (a: ArticleView, b: ArticleView) => number>();
   const orderOf = (typeId: string) => {

@@ -36,8 +36,8 @@ import { makeDocument } from "./Article";
 
 type ListingNode = Extract<Node, { kind: "listing" }>;
 
-/** From how many entries a list has a search field. */
-const SEARCH_FROM = 13;
+/** From how many entries a list has a search field — every list, so they all work alike. */
+const SEARCH_FROM = 1;
 
 /**
  * While a document is edited, a list from one of its properties picks into
@@ -482,7 +482,11 @@ function Drawn({
   if (node.style === "table") {
     // The columns are properties of the listed type — by key, as stored.
     const listed = type ? typeOf(templates, type.id) : undefined;
-    const columns = node.show.map((s) => ({ key: s, label: propertyNamed(listed, s)?.label ?? headOf(s), by: propertyNamed(listed, s)?.key }));
+    // `Type` is no property: it sorts by the name of each document's type.
+    const columns = node.show.map((s) => {
+      const field = propertyNamed(listed, s);
+      return { key: s, label: field?.label ?? headOf(s), by: field?.key ?? (s.toLowerCase() === "type" ? "type" : undefined) };
+    });
     return (
       <div className="listing-scroll">
       <table className="listing-table">
