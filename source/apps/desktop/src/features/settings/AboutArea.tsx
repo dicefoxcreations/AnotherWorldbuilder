@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import logo from "../../assets/logo.png";
 
 /**
- * The app itself: what it is called, its version, its license — and the
+ * The app itself: what it is called, its version, who holds it — and the
  * libraries it is built from, each with its license text, as they must be
  * shipped with it (`tools/licenses/notices.mjs`).
  */
@@ -27,7 +27,7 @@ export function AboutArea() {
         <img src={logo} alt="" width={96} height={96} />
         <h2>AnotherWorldbuilder{version && <small className="small"> {version}</small>}</h2>
       </div>
-      <p className="small">Free software under the GNU Affero General Public License, version 3 or later.</p>
+      <p className="small">© 2026 DiceFox Creations. All rights reserved.</p>
       {notices === null ? (
         <button className="compact" onClick={show}>
           Third-party licenses
