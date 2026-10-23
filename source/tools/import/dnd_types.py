@@ -205,6 +205,9 @@ CAMPAIGN_DATA = {
     "Quest status": ("🚩", ["Open", "Active", "Done", "Failed", "Declined"]),
     "Accuracy": ("🎯", ["True", "Good", "Mediocre", "False"]),
     "Kill kind": ("☠️", ["Boss", "Major", "Minion"]),
+    "Gender": ("⚧️", ["Male", "Female", "Diverse"]),
+    "Language": ("🗣️", ["Common", "Common Sign Language", "Draconic", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc",
+                         "Abyssal", "Celestial", "Deep Speech", "Druidic", "Infernal", "Primordial", "Sylvan", "Thieves' Cant", "Undercommon"]),
 }
 for name, (icon, _) in CAMPAIGN_DATA.items():
     T.add(data_type_id(name), name, icon)
@@ -230,8 +233,8 @@ def campaign_text(props, shown, blocks, sort="", players=False, name=""):
 
 
 CHARACTER_SHOWN = ["<image bind=Image>", "<text bind=Aliases>", "<select bind=Species>", "<text bind=Lineage>", "<select bind=Class>", "<select bind=Subclass>",
-                   "<text bind=Gender>", "<text bind=Pronouns>", "<number bind=Age>", '<select bind="Life status">', "<select bind=Home>", "<select bind=Location>",
-                   "<select bind=Organizations>", "<text bind=Languages>"]
+                   "<select bind=Gender>", "<text bind=Pronouns>", "<number bind=Age>", '<select bind="Life status">', "<select bind=Home>", "<select bind=Location>",
+                   "<select bind=Organizations>", "<select bind=Languages>"]
 T.add("character", "Character", "🧑", campaign_text(
     """Image: image
 Aliases: text
@@ -239,10 +242,10 @@ Species: @@Species@@
 Lineage: text
 Class: @@Class@@
 Subclass: @@Subclass@@
-Gender: text
+Gender: @@Gender@@
 Pronouns: text
 Age: number
-Languages: text
+Languages: @@Language@@ multiple
 Life status: @@Life status@@
 Home: @@Location@@
 Location: @@Location@@
@@ -251,8 +254,8 @@ Spells: @@Spell@@ multiple
 """,
     CHARACTER_SHOWN,
     ['<block title="Appearance">', '<block title="Personality">', '<block title="Biography">', '<block title="Relationships">', '<block title="Motivation">', '<block title="Notes">',
-     '<block title="Items" bottom fold=folded>\n      <list type=Item where="Owner=self" style=table show="Type, Rarity">',
-     '<block title="Kills" bottom fold=folded>\n      <list type=Kill where="Killer=self" style=table show="Kind, Enemy, With, How, Session">'],
+     '<block title="Items" bottom fold=folded>\n      <list type=Item where="Owner=self" style=table show="Type, Rarity, Attunement, Acquired">',
+     '<block title="Kills" bottom fold=folded>\n      <list type=Kill where="Killer=self" style=table show="Session, Kind, Enemy, With, How" sort=Session>'],
 ))
 # Who someone is at the table: a player's character, the GM's people, those
 # who travel along — and the people of a character's own story, below them.

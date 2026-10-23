@@ -952,7 +952,7 @@ function PlayersArea({
                 <strong>{m.name}</strong>{" "}
                 <span className={`role-badge ${m.role}`}>{m.role === "gm" ? "GM" : "Player"}</span>
                 <small className="small">{m.fingerprint}</small>
-                {world.isGm && m.role !== "gm" && (
+                {world.isGm && (m.role !== "gm" || m.id === me.id) && (
                   <Assigned
                     world={world}
                     templates={templates}

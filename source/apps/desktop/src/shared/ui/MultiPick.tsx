@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { ArticleView } from "../../api/client";
 
 /**
@@ -42,28 +43,64 @@ export function MultiPick({
           </button>
         </span>
       ))}
-      {open.length > 0 && (
-        <select
-          className="pick-add"
-          value=""
-          title="Add"
-          onChange={(e) => {
-            const picked = open.find((c) => c.id === e.target.value);
-            if (picked) onAdd(picked);
-          }}
-        >
-          <option value="">＋</option>
-          {open.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      )}
+      {open.length > 0 && <AddPick open={open} onAdd={onAdd} />}
     </span>
   );
 }
 
+
+/**
+ * ＋ and what may be added: a search over the names, the matches below it —
+ * Enter takes the first, Escape closes. One after another, it stays open.
+ */
+function AddPick({ open, onAdd }: { open: ArticleView[]; onAdd: (a: ArticleView) => void }) {
+  const [shown, setShown] = useState(false);
+  const [text, setText] = useState("");
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!shown) return;
+    const away = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setShown(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [shown]);
+  const needle = text.trim().toLowerCase();
+  const matches = open.filter((c) => !needle || c.name.toLowerCase().includes(needle)).slice(0, 50);
+  const take = (c: ArticleView) => {
+    onAdd(c);
+    setText("");
+  };
+  return (
+    <span className="pick-add" ref={box}>
+      <button className="compact" title="Add" onClick={() => setShown((s) => !s)}>
+        ＋
+      </button>
+      {shown && (
+        <span className="pick-menu">
+          <input
+            autoFocus
+            value={text}
+            placeholder="Search"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && matches[0]) take(matches[0]);
+              if (e.key === "Escape") setShown(false);
+            }}
+          />
+          <span className="pick-options">
+            {matches.map((c) => (
+              <button key={c.id} className="ghost" onClick={() => take(c)}>
+                {c.name}
+              </button>
+            ))}
+            {matches.length === 0 && <small className="small muted">nothing</small>}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
 
 /**
  * Every document of a type, each with its number — skills and how well.

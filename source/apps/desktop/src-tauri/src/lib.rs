@@ -1241,10 +1241,12 @@ fn member_attributes_set(app: tauri::AppHandle, world: String, member: String, a
         return Err(AppError("Only the GM assigns players.".into()));
     }
     let mut meta = store.load_world_meta(&world)?;
-    let Some(m) = meta.members.iter_mut().find(|m| m.identity.id.as_str() == member && m.role == Role::Player) else {
-        return Err(AppError("There is no such player.".into()));
+    // The GM too may note whom they play: they see everything anyway, but
+    // handing the world over, what they play stays theirs as a player.
+    let Some(m) = meta.members.iter_mut().find(|m| m.identity.id.as_str() == member) else {
+        return Err(AppError("There is no such member.".into()));
     };
-    let mut wanted = vec!["players".to_string(), "all".to_string()];
+    let mut wanted = if m.role == Role::Gm { vec!["gm".to_string(), "players".to_string(), "all".to_string()] } else { vec!["players".to_string(), "all".to_string()] };
     for a in attributes {
         let a = a.trim().to_string();
         a.parse::<Attribute>().map_err(AppError::from)?;
