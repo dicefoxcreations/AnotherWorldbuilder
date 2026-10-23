@@ -62,3 +62,8 @@ test("rolls and rules are drawn as read", () => {
 test("bold italic, as a stat block names an action", () => {
   assert.equal(flat(runs("***Scimitar.*** *Melee:* hit")), "bold italic(mark-hidden:***|Scimitar.|mark-hidden:***)| |italic(mark-hidden:*|Melee:|mark-hidden:*)| hit");
 });
+
+test("an anchor closing a line is drawn on its own, faint", () => {
+  assert.equal(flat(runs("They plan.   ^2f9e17\nTim comes in.")), "They plan.|anchor:   ^2f9e17|\nTim comes in.");
+  assert.equal(flat(runs("x^2 is ^big here")), "x^2 is ^big here");
+});

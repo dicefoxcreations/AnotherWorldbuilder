@@ -2568,6 +2568,60 @@ mod tests {
     }
 
     #[test]
+    fn who_comes_after_a_removal_reads_what_was_written_before() {
+        let (dir, gm_store, gm, player_store, bob) = stores();
+        let meta = new_world(&gm_store, &gm, "Eldermere".into()).unwrap();
+        let world = meta.public.world_id.to_string();
+        let carla = Identity::create("Carla").unwrap();
+        admit(&gm_store, &world, carla.public(), Vec::new()).unwrap();
+        gm_store.remove_member(&world, carla.id().as_str()).unwrap();
+        // Bob comes after the keys turned over: the start page is older.
+        admit(&gm_store, &world, bob.public(), Vec::new()).unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+        assert!(!text(&player_store, &bob, &world, &meta.home).is_empty(), "the page from before the removal opens");
+        drop(dir);
+    }
+
+    #[test]
+    fn a_new_id_takes_a_players_place_with_what_was_theirs() {
+        let (dir, gm_store, gm, _old_store, anna) = stores();
+        let world = new_world(&gm_store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        admit(&gm_store, &world, anna.public(), vec!["doc:ANNASCHARACTER".into()]).unwrap();
+        let secret = crate::NewLayer { title: String::new(), text: "What only Anna knows.".into(), policy: "gm OR doc:ANNASCHARACTER".into(), level: "open".into(), section: "text".into(), edit: "gm".into(), fields: serde_json::json!({}), parent: None };
+        let doc = crate::create_document(&gm_store, &world, String::new(), "diary".into(), "Diary".into(), "all".into(), vec![secret]).unwrap();
+
+        // Her device was set up anew: the same Anna, another id — let in ahead of time.
+        let new_store = Store::new(dir.path().join("anna-new"));
+        let anna_new = Identity::create("Anna").unwrap();
+        new_store.save_identity(&anna_new).unwrap();
+        crate::replace_member(&gm_store, &world, anna.id().as_str(), anna_new.id().as_str()).unwrap();
+        assert!(gm_store.load_world_meta(&world).unwrap().member(anna.id().as_str()).is_some(), "the old id stays until the new one shows up");
+        swap_here(&gm_store, &new_store, &anna_new, &world);
+        let meta = gm_store.load_world_meta(&world).unwrap();
+        assert!(meta.member(anna.id().as_str()).is_none(), "the old id left");
+        assert!(meta.member(anna_new.id().as_str()).unwrap().attributes.contains(&"doc:ANNASCHARACTER".to_string()));
+        assert!(gm_store.takeovers(&world).unwrap().is_empty());
+        swap_here(&gm_store, &new_store, &anna_new, &world);
+        assert!(text(&new_store, &anna_new, &world, &doc).contains("What only Anna knows."));
+
+        // Someone let in already takes over at once.
+        let bob = Identity::create("Bob").unwrap();
+        let bob_new = Identity::create("Bob").unwrap();
+        admit(&gm_store, &world, bob.public(), vec!["class:rogue".into()]).unwrap();
+        admit(&gm_store, &world, bob_new.public(), Vec::new()).unwrap();
+        crate::replace_member(&gm_store, &world, bob.id().as_str(), bob_new.id().as_str()).unwrap();
+        let meta = gm_store.load_world_meta(&world).unwrap();
+        assert!(meta.member(bob.id().as_str()).is_none());
+        assert!(meta.member(bob_new.id().as_str()).unwrap().attributes.contains(&"class:rogue".to_string()));
+        assert!(crate::replace_member(&gm_store, &world, gm.id().as_str(), bob.id().as_str()).is_err(), "the GM is no player");
+        // Thought better of: the new id taken out again, nobody takes anyone's place.
+        let carla = Identity::create("Carla").unwrap();
+        crate::replace_member(&gm_store, &world, bob_new.id().as_str(), carla.id().as_str()).unwrap();
+        gm_store.remove_member(&world, carla.id().as_str()).unwrap();
+        assert!(gm_store.takeovers(&world).unwrap().is_empty());
+    }
+
+    #[test]
     fn a_removed_player_gets_nothing_more() {
         let (_dir, gm_store, gm, player_store, bob) = stores();
         let world = new_world(&gm_store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();

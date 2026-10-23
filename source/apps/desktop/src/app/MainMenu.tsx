@@ -132,6 +132,17 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
     finally { setBusy(null); }
   };
 
+  const restoreBackup = async () => {
+    setBusy("import");
+    try {
+      const path = await open({ multiple: false, filters: [{ name: "Backup", extensions: ["awbackup"] }] });
+      if (typeof path !== "string") return;
+      const world = await api.backupRestore(path);
+      onChanged(); opened(world.id);
+    } catch (e) { onError(e); }
+    finally { setBusy(null); }
+  };
+
   const serverOf = (code: string) => servers.find(s => s.code === code);
   const worldButton = (w: WorldInfo) => {
     const place = placed(w);
@@ -224,6 +235,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
         {dialog === "open" && <>
           <div className="world-grid">{worlds.map(w => <div key={w.id}>{worldButton(w)}</div>)}</div>
           <button disabled={!!busy || !localPath} onClick={importWorld}>Import a world file …</button>
+          <button disabled={!!busy} onClick={restoreBackup}>Restore a backup …</button>
         </>}
         {dialog === "new" && <button className="primary" disabled={!!busy || !fresh.trim() || (!toServer && (!localPath || !storage?.locations.some(l => l.path === localPath && l.available)))} onClick={create}>{busy === "create" ? "Creating …" : "Create world"}</button>}
       </section>

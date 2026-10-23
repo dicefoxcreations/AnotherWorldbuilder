@@ -21,6 +21,8 @@ const RULE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*(\n|$)/;
 /** A roll: `[[…]]`, or dice as written — `2d6 + 3`, `1W20` — as Rust cuts them out. */
 const DICE = String.raw`(?<![\p{L}\p{N}_])\d{0,3}[dDwW]\d{1,4}(?:[ ]*[+-][ ]*(?:\d{0,3}[dDwW]\d{1,4}|\d{1,4})(?![\p{L}\p{N}_]))*(?![\p{L}\p{N}_])`;
 const ROLL = String.raw`\[\[(?:(?!\]\])[^\n])+\]\]`;
+/** `^2f9e17` closing a line: where a link leads to (`shared/Anchors`). */
+const ANCHOR = /(\s+\^[A-Za-z0-9-]{1,64})(\s*)$/;
 // A link first: what stands between its marks is its own, not bold or italic.
 const INLINE = new RegExp(
   String.raw`(@@(?:(?!@@)[^\n])+?@@|${ROLL}|\*\*\*[^*\n]+\*\*\*|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|\x60[^\x60\n]+\x60|${DICE})`,
@@ -46,7 +48,10 @@ export function runs(text: string, open = -1): Run[] {
   };
   const mark = (t: string, shown: boolean): Run => ({ text: t, look: shown ? "mark" : "mark-hidden" });
   /** The stretches of a piece of a line that starts at `from` in the text. */
-  const inline = (into: Run[], t: string, from: number) => {
+  const inline = (into: Run[], piece: string, from: number) => {
+    // Drawn faint, at the line's end: the page shows nothing there.
+    const anchor = ANCHOR.exec(piece);
+    const t = anchor ? piece.slice(0, anchor.index) : piece;
     let at = 0;
     for (const m of t.matchAll(INLINE)) {
       plain(into, t.slice(at, m.index));
@@ -70,6 +75,10 @@ export function runs(text: string, open = -1): Run[] {
       at = m.index! + whole.length;
     }
     plain(into, t.slice(at));
+    if (anchor) {
+      into.push({ text: anchor[1], look: "anchor" });
+      plain(into, anchor[2]);
+    }
   };
   let rest = text;
   // Where the line being cut starts in the text.

@@ -1,6 +1,7 @@
 import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api, type Node, type Place, type Rule, type Template } from "../../api/client";
 import { idOf, type Resolve } from "../../shared/Links";
+import { anchorDrawn, leadTo } from "../../shared/Anchors";
 import { Listing, ListEditing } from "./Listing";
 import { MapBlock } from "./MapView";
 import { TallyMarks } from "../../shared/ui/TallyMarks";
@@ -211,6 +212,7 @@ function Element({
   const valueOf = useContext(Values);
   const world = useWorldData();
   const readable = useContext(ReadableParts);
+  const current = useContext(CurrentDocument);
 
   switch (node.kind) {
     case "mark":
@@ -370,14 +372,32 @@ function Element({
       return <CreateButton of={node.of} label={node.label} />;
     case "embed":
       return <Embed of={node.of} fold={node.fold} title={node.title} />;
+    case "anchor":
+      return <Anchor id={node.id} />;
     case "wikilink": {
       // Resolved only here: only at this spot is it known which articles
       // this reader could decrypt at all.
       const link = { of: node.of ?? "", name: node.target };
-      const target = resolve(link);
+      const target = node.target ? resolve(link) : undefined;
       // Text of its own is shown as written; otherwise the current name.
       // An id this reader cannot open reveals nothing — not even a name.
       const own = node.text !== node.target;
+      // `#^2f9e17`: a line of the target, or of this document without a name.
+      if (node.property.startsWith("^")) {
+        const doc = node.target ? target : world?.articles.find((a) => a.id === current);
+        const shown = node.text || (doc?.name ?? "???");
+        if (!doc) return <span className="dead-link">{shown}</span>;
+        return (
+          <DocLink
+            id={doc.id}
+            articleType={doc.articleType}
+            templates={world?.templates ?? []}
+            onOpen={() => leadTo(doc.id, node.property.slice(1), current, () => onPlace({ kind: "article", id: doc.id }))}
+          >
+            {shown}
+          </DocLink>
+        );
+      }
       // `#Status`: the value of that property of the target — as it is now.
       if (node.property && !own) {
         const type = world && target ? typeOf(world.templates, target.articleType) : undefined;
@@ -405,6 +425,13 @@ function Element({
       );
     }
   }
+}
+
+/** Where a link leads to: nothing to see, but a place to scroll to. */
+function Anchor({ id }: { id: string }) {
+  const current = useContext(CurrentDocument);
+  useEffect(() => anchorDrawn(current, id), [current, id]);
+  return <span className="anchor" data-anchor={id} />;
 }
 
 /**

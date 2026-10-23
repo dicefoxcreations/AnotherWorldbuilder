@@ -156,8 +156,10 @@ impl Keyring {
         Ok(ring)
     }
 
-    /// Wraps the current keys of the named attributes for a member. The
-    /// result goes into the control document.
+    /// Wraps the keys of the named attributes for a member — of every epoch
+    /// up to the current one: whoever comes after a revocation reads what
+    /// was written before it, as those who stayed do. The result goes into
+    /// the control document.
     pub fn grant(
         &self,
         member: &IdentityPublic,
@@ -167,13 +169,16 @@ impl Keyring {
         let mut out = Vec::new();
         for attribute in attributes {
             let current = self
-                .current(attribute)
+                .current_epoch(attribute)
                 .ok_or_else(|| PolicyKeyError::UnknownAttribute(attribute.to_string()))?;
-            let as_content = ContentKey::from_bytes(current.key);
-            out.push(GrantedKey {
-                at: current.at.to_string(),
-                wrapped: seal_key(&recipient, &as_content)?,
-            });
+            for epoch in 1..=current {
+                let at = AttributeAt::new(attribute.clone(), epoch);
+                let Some(key) = self.key_at(&at) else { continue };
+                out.push(GrantedKey {
+                    at: at.to_string(),
+                    wrapped: seal_key(&recipient, &ContentKey::from_bytes(key))?,
+                });
+            }
         }
         Ok(out)
     }

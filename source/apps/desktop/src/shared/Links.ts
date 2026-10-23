@@ -7,8 +7,9 @@ import { ancestors, findType } from "./types";
  *
  * The same notation as `aw_model::link` in Rust. `@@` opens a link, a second
  * `@@` closes it. The type stands in front, divided by a colon; after a `#`
- * a property of the target, whose value is then shown; after a `|` the text
- * shown in its place: `@@Species:Elves|Elf@@`, `@@Character:Tim#Status@@`.
+ * a property of the target, whose value is then shown — or after `#^` an
+ * anchor in its text (`shared/Anchors`); after a `|` the text shown in its
+ * place: `@@Species:Elves|Elf@@`, `@@Character:Tim#Status@@`, `@@#^2f9e17|the inn@@`.
  */
 
 export type Link = { of: string; name: string; property: string; text: string };
@@ -40,7 +41,9 @@ export function linkIn(inner: string): Link | null {
   const colon = target.indexOf(":");
   const of = colon >= 0 ? target.slice(0, colon).trim() : "";
   const name = (colon >= 0 ? target.slice(colon + 1) : target).trim();
-  return name ? { of, name, property, text: text || name } : null;
+  // Without a name only an anchor in the same document: `@@#^2f9e17|the inn@@`.
+  if (!name) return !of && property.length > 1 && property.startsWith("^") ? { of, name, property, text: text || property.slice(1) } : null;
+  return { of, name, property, text: text || name };
 }
 
 /** Splits a piece of text into plain text and links. */

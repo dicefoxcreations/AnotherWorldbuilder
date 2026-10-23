@@ -21,6 +21,8 @@
 - [Stat blocks, dice and bonuses](architecture/stat-blocks.md): `style=statblock`, `<abilities>`, `[[…]]` and dice in the text, dice tray with log and favourites, 3D dice, `adds`.
 - [Maps](architecture/maps.md): `<map>` to pan and zoom, pins with a name and a target, layers that switch to the map of another document.
 - [Assigning players](architecture/assignment.md): documents, types and attributes per player, `view=self` for what belongs to the assigned player.
+- [Links](architecture/links.md): `@@Type:Name@@`, a property's value, anchors in the text (`@@#^c70ff9|the inn@@`).
+- [Backups](architecture/backups.md): a world backed up by hand, daily or weekly, how many stay, its keys sealed for the GM; restoring.
 
 ## Testing
 
@@ -29,4 +31,5 @@
 - [Directly over the internet](testing/internet-direct.md): router port, STUN, meeting through the shared folder, hole punching without a relay.
 - [Host mode](testing/host.md): players work online against the GM's device, without their own copy; the host enforces views and rights.
 - [Server on a NAS](testing/server.md): `aw-server` – a door keeper without keys for the worlds of several GMs, with an admin; Docker image for Synology.
+- [Players: a new id](testing/players.md): a player's new id takes the old one's place, with what was assigned to them.
 - [Browser test bench](testing/browser-testbench.md): checking the UI with real components and the Rust parser.

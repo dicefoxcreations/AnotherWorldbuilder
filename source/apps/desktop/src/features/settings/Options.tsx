@@ -33,6 +33,7 @@ import { AboutArea } from "./AboutArea";
 import { USUAL_DICE } from "../dice/DiceTray";
 import { TransferArea } from "./Transfer";
 import { KeysDialog } from "../../shared/ui/KeysDialog";
+import { BackupArea } from "../worlds/Backups";
 import { PlaceArea, serverName } from "../worlds/WorldPlace";
 
 /** The areas of the options. More will follow. */
@@ -179,6 +180,7 @@ export function Options({
             <>
               <InfoArea world={world} onChanged={onWorldChanged} onError={onError} />
               <PlaceArea world={world} onChanged={onWorldChanged} onError={onError} />
+              <BackupArea world={world} onError={onError} />
               {world.isGm && <BasicsArea world={world} onChanged={onWorldChanged} onError={onError} />}
               <ReadableCopy world={world} onChanged={onWorldChanged} onError={onError} />
             </>
@@ -807,6 +809,10 @@ function PlayersArea({
   const [id, setId] = useState("");
   const [remove, setRemove] = useState<{ id: string; name: string } | null>(null);
   const [handover, setHandover] = useState<MemberInfo | null>(null);
+  const [newId, setNewId] = useState<MemberInfo | null>(null);
+  /** Who takes whose place: new id → old id. */
+  const takes = world.takeovers;
+  const nameOf = (id: string) => world.members.find((m) => m.id === id)?.name ?? id;
 
   // `world.requests` changes when someone new asks — then the list is read again.
   useEffect(() => {
@@ -918,6 +924,7 @@ function PlayersArea({
                 <div>
                   <strong>{r.name}</strong>
                   <small className="small">{r.fingerprint}</small>
+                  {takes[r.id] && <small className="accent">Takes {nameOf(takes[r.id])}'s place</small>}
                 </div>
                 <div className="line">
                   <button className="primary compact" onClick={() => run(api.joinAnswer(world.id, r.id, true))}>
@@ -955,6 +962,9 @@ function PlayersArea({
                 {world.handover === m.id && (
                   <small className="accent">Becomes GM as soon as they connect.</small>
                 )}
+                {Object.entries(takes).filter(([, old]) => old === m.id).map(([fresh]) => (
+                  <small key={fresh} className="accent">Moves to {fresh} as soon as it connects.</small>
+                ))}
               </div>
               {m.id !== me.id && (
                 <div className="line">
@@ -973,6 +983,11 @@ function PlayersArea({
                     <button className="compact" onClick={() => setHandover(m)}>Make GM</button>
                   )}
                   <button className="compact" onClick={() => handOver(m.id, m.name)}>World file</button>
+                  {m.role !== "gm" && (
+                    <button className="compact" title="For a device set up anew without its keys" onClick={() => setNewId(m)}>
+                      New ID
+                    </button>
+                  )}
                   <DeleteButton what={m.name} onClick={() => setRemove({ id: m.id, name: m.name })} />
                 </div>
               )}
@@ -983,6 +998,7 @@ function PlayersArea({
           <li key={i}>
             <div>
               <code>{i}</code> <span className="role-badge">Invited</span>
+              {takes[i] && <small className="accent">Takes {nameOf(takes[i])}'s place</small>}
             </div>
             <DeleteButton what={i} onClick={() => run(api.memberRemove(world.id, i))} />
           </li>
@@ -1018,6 +1034,18 @@ function PlayersArea({
         />
       )}
 
+      {newId && (
+        <NewIdDialog
+          member={newId}
+          onCancel={() => setNewId(null)}
+          onGive={(fresh) => {
+            const old = newId.id;
+            setNewId(null);
+            void run(api.memberReplace(world.id, old, fresh));
+          }}
+        />
+      )}
+
       {handover && (
         <HandoverDialog
           world={world}
@@ -1040,6 +1068,38 @@ function PlayersArea({
  * network it happens when they next connect; a file is sealed for them
  * alone, and this device steps down at once.
  */
+/** A player's new id: what was theirs goes to it, the old one leaves. */
+function NewIdDialog({ member, onCancel, onGive }: { member: MemberInfo; onCancel: () => void; onGive: (id: string) => void }) {
+  const [id, setId] = useState("");
+  const valid = /^id:[0-9a-fA-F]{16}$/.test(id.trim());
+  return (
+    <div className="dialog-backdrop" onClick={onCancel}>
+      <div className="delete-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <h3>New ID for {member.name}</h3>
+        <p className="small">
+          What is assigned to {member.name} goes to the new ID. The old one leaves the world.
+        </p>
+        <label>
+          The new ID
+          <input
+            autoFocus
+            value={id}
+            placeholder="id:…"
+            onChange={(e) => setId(e.target.value)}
+            onKeyDown={(e) => (e.key === "Escape" ? onCancel() : e.key === "Enter" && valid && onGive(id.trim()))}
+          />
+        </label>
+        <div className="line">
+          <button className="primary" disabled={!valid} onClick={() => onGive(id.trim())}>
+            Give
+          </button>
+          <button onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HandoverDialog({
   world,
   member,

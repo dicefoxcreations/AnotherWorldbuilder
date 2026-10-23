@@ -19,6 +19,7 @@ mod media;
 mod transfer;
 mod host;
 mod keys;
+mod backup;
 mod readable;
 pub mod server;
 
@@ -100,6 +101,8 @@ pub struct WorldInfo {
     pub requests: usize,
     /// Ids let in ahead of time, not seen on the network yet.
     pub invited: Vec<String>,
+    /// New ids that take a player's place once let in: new id → old id.
+    pub takeovers: std::collections::BTreeMap<String, String>,
     /// The member the GM hands the world over to, once they show up.
     pub handover: Option<String>,
     /// Whether players' writing waits for the GM before the others see it.
@@ -416,6 +419,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         home: meta.home.clone(),
         requests: if is_gm { store.load_requests(&id)?.len() } else { 0 },
         invited: if is_gm { meta.invited.clone() } else { Vec::new() },
+        takeovers: if is_gm { store.takeovers(&id)? } else { Default::default() },
         handover: if is_gm { store.pending_handover(&id)? } else { None },
         moderated: store.moderated(&id)?,
         version_limit: store.version_limit(&id)?,
@@ -873,6 +877,15 @@ pub(crate) fn admit(
     store.save_keyring(world, &ring)?;
 
     let id = card.id.to_string();
+    // Taking someone's place: what was theirs is theirs now, and the old id leaves.
+    let replaced = store.takeovers(world)?.get(&id).and_then(|old| meta.member(old)).filter(|m| m.role == Role::Player).cloned();
+    if let Some(old) = &replaced {
+        for a in &old.attributes {
+            if !clean.contains(a) {
+                clean.push(a.clone());
+            }
+        }
+    }
     meta.members.retain(|m| m.identity.id != card.id);
     meta.invited.retain(|i| i != &id);
     meta.members.push(Member {
@@ -884,6 +897,54 @@ pub(crate) fn admit(
     let mut requests = store.load_requests(world)?;
     requests.retain(|r| r.identity.id.as_str() != id);
     store.save_requests(world, &requests)?;
+    if store.takeovers(world)?.contains_key(&id) {
+        store.set_takeover(world, &id, None)?;
+    }
+    match replaced {
+        Some(old) => Ok(store.remove_member(world, old.identity.id.as_str())?),
+        None => Ok(meta),
+    }
+}
+
+#[cfg(feature = "gui")]
+/// A player's new id takes the place of their old one — for someone whose
+/// device was set up anew without their keys. What was assigned to the old
+/// id goes to the new one, and the old one leaves: its keys turn over. A
+/// new id not let in yet takes over as soon as it is.
+#[cfg_attr(feature = "gui", tauri::command)]
+fn member_replace(app: tauri::AppHandle, world: String, old: String, new: String) -> Answer<WorldInfo> {
+    let store = store(&app)?;
+    let me = store.load_identity()?;
+    let meta = replace_member(&store, &world, &old, &new)?;
+    world_info(&store, &meta, me.id().as_str())
+}
+
+pub(crate) fn replace_member(store: &Store, world: &str, old: &str, new: &str) -> Answer<WorldMeta> {
+    if !store.is_gm(world) {
+        return Err(AppError("Only the GM gives a player a new id.".into()));
+    }
+    let new = new.trim();
+    let valid = new.strip_prefix("id:").is_some_and(|body| body.len() == 16 && body.chars().all(|c| c.is_ascii_hexdigit()));
+    if !valid {
+        return Err(AppError("That is no player id. It is the whole id — id: and 16 characters.".into()));
+    }
+    let mut meta = store.load_world_meta(world)?;
+    if new == old || !meta.member(old).is_some_and(|m| m.role == Role::Player) {
+        return Err(AppError("There is no such player.".into()));
+    }
+    store.set_takeover(world, new, Some(old))?;
+    // Let in already, or asking: at once.
+    if let Some(member) = meta.member(new).cloned() {
+        return admit(store, world, member.identity, member.attributes);
+    }
+    if let Some(request) = store.load_requests(world)?.into_iter().find(|r| r.identity.id.as_str() == new) {
+        return admit(store, world, request.identity, Vec::new());
+    }
+    // Otherwise once it shows up, as anyone let in ahead of time.
+    if !meta.invited.iter().any(|i| i == new) {
+        meta.invited.push(new.to_string());
+        store.save_world_meta(&meta)?;
+    }
     Ok(meta)
 }
 
@@ -2086,6 +2147,7 @@ pub fn run() {
         // stands, then it is clamped into the usable area.
         .setup(|app| {
             network::start(app.handle()).map_err(|e| std::io::Error::other(e.0))?;
+            backup::start(app.handle());
             if let Some(w) = app.get_webview_window("main") {
                 window_state::on_start(app.handle().clone(), w);
             }
@@ -2155,6 +2217,12 @@ pub fn run() {
             world_delete,
             member_add,
             member_remove,
+            member_replace,
+            backup::backup_view,
+            backup::backup_plan_set,
+            backup::backup_now,
+            backup::backup_open,
+            backup::backup_restore,
             gm_handover,
             gm_handover_file,
             world_moderation_set,

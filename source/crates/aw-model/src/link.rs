@@ -11,7 +11,10 @@
 //! ```
 //!
 //! After a `#` follows a property of the target — then the link shows its
-//! value: `Tim is @@Character:Tim#Status@@.`
+//! value: `Tim is @@Character:Tim#Status@@.` After `#^` follows a mark in
+//! the target's text instead (`^2f9e17` closing a paragraph, see
+//! [`crate::markdown`]) — the link leads there. Without a name it is a
+//! place in the same document: `@@#^2f9e17|the inn@@`.
 //!
 //! The type may be left out: `@@Morningstone@@`. Doubled, like `%%value%%`:
 //! a doubled sign is markup, a single one is text — `mail@example.org` never
@@ -30,6 +33,7 @@ pub struct Link {
     /// The name of the target.
     pub name: String,
     /// A property of the target, after `#` — empty for the target itself.
+    /// Starting with `^`, a mark in its text instead (see [`Link::mark`]).
     pub property: String,
     /// What is shown — the name, unless the link says otherwise after `|`.
     pub text: String,
@@ -39,6 +43,11 @@ impl Link {
     /// A link to a document, as written without anything further.
     pub fn to(of: &str, name: &str) -> Self {
         Link { of: of.into(), name: name.into(), property: String::new(), text: name.into() }
+    }
+
+    /// The mark in the target's text it leads to — `#^2f9e17`.
+    pub fn mark(&self) -> Option<&str> {
+        self.property.strip_prefix('^').filter(|m| !m.is_empty())
     }
 }
 
@@ -135,10 +144,11 @@ fn link_in(inner: &str) -> Option<Link> {
         Some((of, name)) => (of.trim(), name.trim()),
         None => ("", target.trim()),
     };
-    if name.is_empty() {
+    // Without a name only a mark in the same document.
+    if name.is_empty() && !(of.is_empty() && property.len() > 1 && property.starts_with('^')) {
         return None;
     }
-    let text = if text.is_empty() { name } else { text };
+    let text = if !text.is_empty() { text } else if name.is_empty() { &property[1..] } else { name };
     Some(Link { of: of.into(), name: name.into(), property: property.into(), text: text.into() })
 }
 
@@ -182,6 +192,17 @@ mod tests {
         assert!(links("@Elves@").is_empty());
         assert!(links("@@not closed").is_empty());
         assert!(links("@@Elves\n@@").is_empty(), "a link stays on its line");
+    }
+
+    #[test]
+    fn a_link_may_lead_to_a_mark_here_or_in_another_document() {
+        let here = links("as @@#^2f9e17|the inn@@ said");
+        assert_eq!(here, vec![Link { of: "".into(), name: "".into(), property: "^2f9e17".into(), text: "the inn".into() }]);
+        assert_eq!(here[0].mark(), Some("2f9e17"));
+        assert_eq!(links("@@Session log:Session 1#^c70ff9@@")[0].mark(), Some("c70ff9"));
+        // Nothing but a property, or nothing at all, is no link.
+        assert!(links("@@#Status@@ @@#^@@ @@|x@@").is_empty());
+        assert_eq!(write_full("", "", "^2f9e17", "the inn"), "@@#^2f9e17|the inn@@");
     }
 
     #[test]

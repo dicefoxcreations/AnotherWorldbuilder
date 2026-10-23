@@ -412,6 +412,11 @@ pub fn storage_open(app: tauri::AppHandle, path: String) -> Answer<()> {
     if !known || !path.is_dir() {
         return Err(AppError("That folder is not there.".into()));
     }
+    reveal(&path)
+}
+
+/// Opens a folder in the file manager.
+pub(crate) fn reveal(path: &Path) -> Answer<()> {
     #[cfg(target_os = "windows")]
     let opener = "explorer";
     #[cfg(target_os = "macos")]

@@ -505,7 +505,7 @@ fn remove_tree(dir: &Path) -> std::io::Result<()> {
 }
 
 /// Copies a folder with all below it, each file on disk before it counts.
-fn copy_dir(from: &Path, to: &Path, tell: &dyn Fn(usize, usize)) -> std::io::Result<()> {
+pub(crate) fn copy_dir(from: &Path, to: &Path, tell: &dyn Fn(usize, usize)) -> std::io::Result<()> {
     let mut files = Vec::new();
     let mut dirs = vec![from.to_path_buf()];
     while let Some(dir) = dirs.pop() {
@@ -1871,6 +1871,12 @@ impl Store {
         meta.members.retain(|m| m.identity.id.as_str() != id);
         meta.invited.retain(|i| i != id);
         self.save_world_meta(&meta)?;
+        // Nobody takes their place, nor they anyone's.
+        for (new, old) in self.takeovers(world_id)? {
+            if new == id || old == id {
+                self.set_takeover(world_id, &new, None)?;
+            }
+        }
         if self.pending_handover(world_id)?.as_deref() == Some(id) {
             self.set_handover(world_id, None)?;
         }
@@ -2266,7 +2272,31 @@ impl Store {
         aw_store::durable::write(&self.private_world_dir(world_id).join("requests.json"), &serde_json::to_vec_pretty(requests)?)?;
         Ok(())
     }
+
+    /// Ids that take a player's place once they are let in: new id → old id.
+    /// For someone whose device was set up anew without their keys.
+    pub fn takeovers(&self, world_id: &str) -> Result<std::collections::BTreeMap<String, String>> {
+        let path = self.private_world_dir(world_id).join(TAKEOVERS);
+        if !path.exists() {
+            return Ok(Default::default());
+        }
+        Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+    }
+
+    /// `new` takes `old`'s place once let in — or no longer, with `None`.
+    pub fn set_takeover(&self, world_id: &str, new: &str, old: Option<&str>) -> Result<()> {
+        let mut all = self.takeovers(world_id)?;
+        match old {
+            Some(old) => all.insert(new.to_string(), old.to_string()),
+            None => all.remove(new),
+        };
+        aw_store::durable::write(&self.private_world_dir(world_id).join(TAKEOVERS), &serde_json::to_vec_pretty(&all)?)?;
+        Ok(())
+    }
 }
+
+/// See [`Store::takeovers`].
+pub const TAKEOVERS: &str = "takeovers.json";
 
 /// An article as it lies on disk: each layer sealed with its data key — as
 /// far as this device can open it.

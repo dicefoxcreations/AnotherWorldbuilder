@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 const FORMAT: &str = "aw-keys";
 /// What of a world's private folder goes along: what cannot be had again.
 /// Drafts and the index are this device's own work in progress.
-const KEPT: [&str; 5] = ["owner.key", "keyring.json", "state.json", "requests.json", "handover.json"];
+pub(crate) const KEPT: [&str; 6] = ["owner.key", "keyring.json", "state.json", "requests.json", "handover.json", crate::store::TAKEOVERS];
 /// Short passphrases are guessed, however slow each guess.
 const SHORTEST: usize = 10;
 

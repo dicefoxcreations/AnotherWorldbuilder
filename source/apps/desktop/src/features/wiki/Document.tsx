@@ -2135,6 +2135,18 @@ export function VisualEditor({
                 part={part}
                 title={block.title}
                 inherited={part.view === base && part.level === "open"}
+                access={
+                  // The first part's stands at the section's title.
+                  p > 0 && !(samePolicy(part.view, doc.access.view) && samePolicy(part.edit, doc.access.edit)) && (
+                    <AccessLine
+                      world={world}
+                      view={samePolicy(part.view, doc.access.view) ? undefined : part.view}
+                      edit={samePolicy(part.edit, doc.access.edit) ? undefined : part.edit}
+                      onView={world.isGm ? (view) => setPart(b, p, { view }) : undefined}
+                      onEdit={world.isGm ? (edit) => setPart(b, p, { edit }) : undefined}
+                    />
+                  )
+                }
                 removable={world.isGm && block.parts.length > 1}
                 links={links}
                 carets={carets(part.key)}
@@ -2897,12 +2909,15 @@ function PartEditor({
   onRemove,
   onCaret,
   graph,
+  access,
 }: {
   world: WorldInfo;
   part: BlockPart;
   /** The section's title — to name the part by. */
   title: string;
   inherited: boolean;
+  /** Who views and changes it, where it differs from the document. */
+  access?: React.ReactNode;
   removable: boolean;
   links: Links;
   carets: RemoteCaret[];
@@ -2977,6 +2992,7 @@ function PartEditor({
         part.level !== "open" ? ` level-${part.level}` : ""
       }`}
     >
+      {access && <div className="part-access">{access}</div>}
       {inspecting && (
         <Inspector title={title ? `Part · ${title}` : "Part"} onClose={() => (setInspecting(false), setDismissed(true))}>
           <AccessSection />

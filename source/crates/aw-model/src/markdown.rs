@@ -40,6 +40,9 @@ pub enum Node {
     SoftBreak,
     /// An outward link. The frontend decides whether to open it.
     Link { target: String, children: Vec<Node> },
+    /// `^2f9e17` closing a line — a place in the text that a link leads to
+    /// (`@@#^2f9e17|…@@`, see [`crate::link`]). Not shown.
+    Anchor { id: String },
     /// `@@Type:Article@@` — the link to another article.
     ///
     /// It is only resolved when drawing: only there is it known which
@@ -766,13 +769,31 @@ fn tidy(children: Vec<Node>) -> Vec<Node> {
     }
 
     let mut out = Vec::with_capacity(merged.len());
-    for nodes in merged {
+    let ends: Vec<bool> = (0..merged.len()).map(|i| matches!(merged.get(i + 1), None | Some(Node::SoftBreak))).collect();
+    for (nodes, line_end) in merged.into_iter().zip(ends) {
         match nodes {
-            Node::Text { text } => out.extend(wikilinks(&text)),
+            Node::Text { text } => match trailing_mark(&text).filter(|_| line_end) {
+                Some((before, id)) => {
+                    out.extend(wikilinks(before));
+                    out.push(Node::Anchor { id: id.to_string() });
+                }
+                None => out.extend(wikilinks(&text)),
+            },
             other => out.push(other),
         }
     }
     out
+}
+
+/// `… planen. ^2f9e17` — the text before the mark, and the mark.
+fn trailing_mark(text: &str) -> Option<(&str, &str)> {
+    let bare = text.trim_end();
+    let at = bare.rfind(|c: char| c.is_whitespace()).map_or(0, |i| i + 1);
+    let id = bare[at..].strip_prefix('^')?;
+    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some((bare[..at].trim_end(), id))
 }
 
 #[derive(Clone, Debug)]
@@ -1273,6 +1294,23 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert!(matches!(&rows[0][1][0], Node::Wikilink { target, .. } if target == "Alert"), "{:?}", rows[0][1]);
         assert!(matches!(&rows[1][1][0], Node::Strong { .. }));
+    }
+
+    #[test]
+    fn a_mark_closing_a_line_is_a_place_to_lead_to() {
+        let mark = |id: &str| Node::Anchor { id: id.into() };
+        assert_eq!(split("They plan.   ^2f9e17"), vec![Node::Paragraph { children: vec![text("They plan."), mark("2f9e17")] }]);
+        // After a link, at a line's end in the middle of a paragraph, in a table.
+        let tree = split("He is @@Tim@@. ^9c2b7a\nNext line.");
+        let Node::Paragraph { children } = &tree[0] else { panic!("{tree:?}") };
+        assert_eq!(children[2..4], [text("."), mark("9c2b7a")]);
+        assert!(matches!(children[4], Node::SoftBreak));
+        let tree = split("| a | b |\n|-|-|\n| Very rare | 5,000 gold ^dbbde3 |");
+        let Node::Table { rows, .. } = &tree[0] else { panic!("{tree:?}") };
+        assert_eq!(rows[0][1], vec![text("5,000 gold"), mark("dbbde3")]);
+        // Mid-line, or not a plain name: text.
+        assert_eq!(split("x^2 is ^big here"), vec![Node::Paragraph { children: vec![text("x^2 is ^big here")] }]);
+        assert_eq!(split("2^10"), vec![Node::Paragraph { children: vec![text("2^10")] }]);
     }
 
     #[test]

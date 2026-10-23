@@ -48,6 +48,8 @@ export type WorldInfo = {
   requests: number;
   /** Ids let in ahead of time, not seen on the network yet. */
   invited: string[];
+  /** New ids that take a player's place once let in: new id → old id. */
+  takeovers: Record<string, string>;
   /** The member the GM hands the world over to, once they show up. */
   handover: string | null;
   /** Whether players' writing waits for the GM before the others see it. */
@@ -153,6 +155,10 @@ export type StorageView = {
 /** One folder for both, or each on its own. */
 export type StorageChoice = { base: string } | { profile: string; worlds: string; additional?: string[] };
 /** What a server holds of a GM's world, measured against this device. */
+/** How often a world backs itself up, how many backups stay, where (empty: beside the worlds). */
+export type BackupPlan = { every: "off" | "daily" | "weekly"; keep: number; folder: string };
+export type BackupView = { plan: BackupPlan; folder: string; backups: { at: number; path: string }[] };
+
 export type WorldCheck = { records: number; missing: number; new: number; parts: number; intact: number; lacking: number; repaired: number };
 
 export type WorldDestination = { kind: "local"; path: string } | { kind: "server"; server: string };
@@ -492,6 +498,7 @@ const toWorld = (r: Raw): WorldInfo => ({
   home: r.home ?? "",
   requests: r.requests ?? 0,
   invited: r.invited ?? [],
+  takeovers: (r.takeovers as Record<string, string>) ?? {},
   handover: r.handover ?? null,
   moderated: !!r.moderated,
   waiting: r.waiting ?? 0,
@@ -730,8 +737,10 @@ export type Node =
   | { kind: "soft-break" }
   | { kind: "link"; target: string; children: Node[] }
   /** `@@Type:Name@@` — `of` is the type as written, empty when it says none. */
-  /** `#property` shows that property's value instead of the name. */
+  /** `#property` shows that property's value instead of the name; `#^anchor` leads to that line of it. */
   | { kind: "wikilink"; target: string; text: string; of: string; property: string }
+  /** `^2f9e17` closing a line — where `@@#^2f9e17|…@@` leads. Not shown. */
+  | { kind: "anchor"; id: string }
   /** `%%Name%%` — the value of a property of this document. */
   | { kind: "value"; name: string }
   /** `<select bind=Species>` — an element showing a property. */
@@ -1045,6 +1054,13 @@ export const api = {
   worldCopy: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_copy", { world, destination })),
   /** Whether all of a GM's world is on its server: entries by name, image parts by their bytes. */
   worldCheck: (world: string) => invoke<WorldCheck>("world_check", { world }),
+  /** A world's backups: how often, how many stay, where — and those there are. */
+  backupView: (world: string) => invoke<BackupView>("backup_view", { world }),
+  backupPlanSet: (world: string, plan: BackupPlan) => invoke<BackupView>("backup_plan_set", { world, plan }),
+  backupNow: (world: string) => invoke<BackupView>("backup_now", { world }),
+  backupOpen: (world: string) => invoke<void>("backup_open", { world }),
+  /** Brings a world back from a backup — `path` is its `backup.awbackup`. */
+  backupRestore: async (path: string) => toWorld(await invoke<Raw>("backup_restore", { path })),
   /** Moves a GM's world into a folder here (empty: where its copy lies) or onto a server. */
   worldMove: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_move", { world, destination })),
   worldOpen: async (path: string, location: string) => toWorld(await invoke<Raw>("world_open", { path, location })),
@@ -1067,6 +1083,9 @@ export const api = {
   /** Takes a member out — or an id let in ahead of time. */
   memberRemove: async (world: string, id: string) =>
     toWorld(await invoke<Raw>("member_remove", { world, id })),
+  /** A player's new id takes the old one's place — at once, or once it is let in. */
+  memberReplace: async (world: string, old: string, id: string) =>
+    toWorld(await invoke<Raw>("member_replace", { world, old, new: id })),
   /** Hands the world over once the member shows up; `null` takes it back. */
   gmHandover: async (world: string, member: string | null) =>
     toWorld(await invoke<Raw>("gm_handover", { world, member })),

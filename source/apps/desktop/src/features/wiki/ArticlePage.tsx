@@ -223,6 +223,7 @@ export function ArticlePage({
           block={block.key}
           layers={parts}
           base={article.visibility}
+          access={glance ? undefined : differs}
           resolve={resolve}
           values={valueOf}
           onPlace={onPlace}
@@ -244,7 +245,7 @@ export function ArticlePage({
           block={block}
           access={!glance && differs(layers[0])}
         >
-          <BlockText article={article.id} block={section} layers={layers} base={article.visibility} resolve={resolve} values={valueOf} onPlace={onPlace} />
+          <BlockText article={article.id} block={section} layers={layers} base={article.visibility} access={glance ? undefined : differs} resolve={resolve} values={valueOf} onPlace={onPlace} />
         </FoldBlock>
       ));
 
@@ -390,12 +391,15 @@ export function BlockText({
   article,
   block,
   layers,
+  access,
   ...shown
 }: {
   article: string;
   block: string;
   layers: LayerView[];
   base: string;
+  /** Who views and changes a part, where it differs from the document — the first part's stands at the title. */
+  access?: (part: LayerView) => ReactNode;
   resolve: Resolve;
   /** The document's values — none in a page drawn into another. */
   values?: ValueOf;
@@ -424,7 +428,7 @@ export function BlockText({
     <>
       {layers.map((layer, i) =>
         texts[i] === "" || (folds && folds[i].length > 0 && folds[i].every((n) => n.hidden)) ? null : (
-          <PartDisplay key={layer.id} layer={{ ...layer, text: texts[i] }} nodes={trees?.[i]} folds={folds?.[i]} {...shown} />
+          <PartDisplay key={layer.id} layer={{ ...layer, text: texts[i] }} nodes={trees?.[i]} folds={folds?.[i]} access={i > 0 ? access?.(layer) : null} {...shown} />
         ),
       )}
     </>
@@ -442,6 +446,7 @@ function PartDisplay({
   layer,
   nodes,
   folds,
+  access,
   base,
   resolve,
   values,
@@ -451,6 +456,7 @@ function PartDisplay({
   /** Its text split already, and what its headings fold — see `BlockText`. */
   nodes?: Node[];
   folds?: TopFolds;
+  access?: ReactNode;
   /** Who sees the document as a whole — a part seen by exactly them is not set apart. */
   base: string;
   resolve: Resolve;
@@ -470,6 +476,7 @@ function PartDisplay({
         layer.level !== "open" ? ` level-${layer.level}` : ""
       }`}
     >
+      {access && <div className="part-access">{access}</div>}
       <MarkdownText text={layer.text} nodes={nodes} folds={folds} resolve={resolve} value={values} onPlace={onPlace} />
     </div>
     </RollScopeContext.Provider>
