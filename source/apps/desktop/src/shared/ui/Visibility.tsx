@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import type { CSSProperties } from "react";
 import type { ArticleView, Template, WorldInfo } from "../../api/client";
 import { CurrentDocument, useWorldData } from "../../features/worlds/WorldData";
 import { EyeIcon, PenIcon } from "./Icons";
@@ -26,6 +27,16 @@ import { EyeIcon, PenIcon } from "./Icons";
 import { BASICS, effective, OR, samePolicy } from "../Policies";
 
 export { effective, samePolicy, terms } from "../Policies";
+
+/** Colours for names — not the GM's red, not everyone's green. */
+const TONES = ["var(--relation-0)", "var(--relation-1)", "var(--relation-2)", "var(--relation-5)", "#d2b55b"];
+
+/** The colour of a named term — a player, a character, a type: always the same one. */
+function tone(term: string): string {
+  let h = 0;
+  for (const c of term.toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return TONES[h % TONES.length];
+}
 
 /** A type's id as part of an attribute, as the core writes it (`own_view`). */
 export const typeAttribute = (id: string) =>
@@ -144,11 +155,6 @@ export function VisibilityPicker({
   // assigned to it (Options → Players → Assign).
   const basics: { value: string; text: string; hint: string }[] = [
     { value: "all", text: "Everyone", hint: "Everyone in the world" },
-    {
-      value: "players",
-      text: "All players",
-      hint: "Every player, not only the GM",
-    },
     { value: "gm", text: "GM only", hint: "Only the game master" },
     ...(self
       ? [
@@ -213,7 +219,8 @@ export function VisibilityPicker({
           <span
             key={t}
             // The GM cannot be taken away.
-            className={`bubble ${t === "gm" ? "gm" : t === "all" ? "all" : ""}${readOnly || t === "gm" ? " plain" : ""}`}
+            className={`bubble ${t === "gm" ? "gm" : t === "all" ? "all" : "named"}${readOnly || t === "gm" ? " plain" : ""}`}
+            style={t === "gm" || t === "all" ? undefined : ({ "--tone": tone(t) } as CSSProperties)}
             title={label(t, world, false, around)}
           >
             {t === "gm" && parts.length > 1 ? "GM" : label(t, world, small, around)}
@@ -324,6 +331,17 @@ export function AccessLine({
 }) {
   // Unencrypted, no view or right counts — nothing to show.
   if (!world.encrypted) return null;
+  // The same who see it change it: one group, eye and pen.
+  if (view !== undefined && edit !== undefined && samePolicy(view, edit) && !onView && !onEdit)
+    return (
+      <span className="head-access">
+        <span className="access-sign" title="Who views and changes it">
+          <EyeIcon />
+          <PenIcon />
+        </span>
+        <VisibilityPicker world={world} value={view} onChange={() => {}} small readOnly />
+      </span>
+    );
   return (
     <span className="head-access">
       {view !== undefined && (
@@ -347,45 +365,39 @@ export function AccessLine({
 }
 
 /**
- * Who a region of a section is for — a quiet line at its top: the names
- * only, the GM left out (they see everything anyway). The pen joins the
- * eye where the same may change it; otherwise it names its own.
+ * Who a region of a section is for — on the top line of its frame, as the
+ * document's head says it: eye and pen with whom they name. Editing, a click
+ * opens its access in the side bar.
  */
 export function RegionAccess({
   world,
   view,
   edit,
+  docView,
+  docEdit,
   onClick,
 }: {
   world: WorldInfo;
   view: string;
   edit: string;
-  /** Editing: where its access is changed. */
+  /** The document's — only what differs from it is said. */
+  docView: string;
+  docEdit: string;
   onClick?: () => void;
 }) {
-  const data = useWorldData();
-  const self = useContext(CurrentDocument);
-  const around = { self, articles: data?.articles ?? [], templates: data?.templates ?? [] };
-  // Unencrypted, no view or right counts — nothing to show.
   if (!world.encrypted) return null;
-  const names = (policy: string) => {
-    const named = effective(policy).filter((t) => t.toLowerCase() !== "gm");
-    return named.length === 0 ? "GM" : named.map((t) => label(t, world, true, around)).join(", ");
-  };
-  const same = samePolicy(view, edit);
-  const Tag = onClick ? "button" : "span";
-  return (
-    <Tag className="region-access" onClick={onClick} title={onClick ? "Who sees and changes it" : undefined}>
-      <EyeIcon />
-      {same && <PenIcon />}
-      <span>{names(view)}</span>
-      {!same && (
-        <>
-          <PenIcon />
-          <span>{names(edit)}</span>
-        </>
-      )}
-    </Tag>
+  const line = (
+    <AccessLine
+      world={world}
+      view={samePolicy(view, docView) && !samePolicy(view, edit) ? undefined : view}
+      edit={samePolicy(edit, docEdit) && !samePolicy(view, edit) ? undefined : edit}
+    />
+  );
+  return onClick ? (
+    <button className="region-access" onClick={onClick} title="Who sees and changes it">
+      {line}
+    </button>
+  ) : (
+    <span className="region-access">{line}</span>
   );
 }
-

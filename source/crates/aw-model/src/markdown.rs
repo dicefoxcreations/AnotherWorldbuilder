@@ -790,7 +790,7 @@ fn trailing_mark(text: &str) -> Option<(&str, &str)> {
     let bare = text.trim_end();
     let at = bare.rfind(|c: char| c.is_whitespace()).map_or(0, |i| i + 1);
     let id = bare[at..].strip_prefix('^')?;
-    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if id.is_empty() || id.chars().count() > 64 || !id.chars().all(|c| c.is_alphanumeric() || c == '-') {
         return None;
     }
     Some((bare[..at].trim_end(), id))
@@ -1311,6 +1311,8 @@ mod tests {
         // Mid-line, or not a plain name: text.
         assert_eq!(split("x^2 is ^big here"), vec![Node::Paragraph { children: vec![text("x^2 is ^big here")] }]);
         assert_eq!(split("2^10"), vec![Node::Paragraph { children: vec![text("2^10")] }]);
+        // A name of letters, any letters.
+        assert_eq!(split("Preise. ^magische-belohnungen"), vec![Node::Paragraph { children: vec![text("Preise."), mark("magische-belohnungen")] }]);
     }
 
     #[test]

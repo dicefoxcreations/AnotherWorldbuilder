@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { anchorIn, anchoredPart } from "../../shared/Anchors";
+import { anchoredParts } from "../../shared/Anchors";
 import { useWorldData } from "../worlds/WorldData";
 import { ArticlePage } from "./ArticlePage";
 
@@ -153,14 +153,13 @@ function PartOnly({ anchor, children }: { anchor: string; children: ReactNode })
     const page = hidden.current;
     if (!page) return;
     const take = () => {
-      const spot = anchorIn(page, anchor);
-      const part = spot && anchoredPart(spot);
-      if (!part || !shown.current) return false;
-      const copy = part.cloneNode(true) as Element;
-      // A table stands with its frame; a lone row or item with the list around it.
-      const holder = document.createElement(part.tagName === "LI" ? (part.parentElement?.tagName === "OL" ? "ol" : "ul") : "div");
+      const parts = anchoredParts(page, anchor);
+      if (parts.length === 0 || !shown.current) return false;
+      // A table stands with its frame; a lone item with the list around it.
+      const lone = parts.length === 1 && parts[0].tagName === "LI";
+      const holder = document.createElement(lone ? (parts[0].parentElement?.tagName === "OL" ? "ol" : "ul") : "div");
       holder.className = "markdown";
-      holder.appendChild(copy);
+      for (const part of parts) holder.appendChild(part.cloneNode(true));
       shown.current.replaceChildren(holder);
       return true;
     };

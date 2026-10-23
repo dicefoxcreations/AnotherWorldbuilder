@@ -31,6 +31,7 @@ import { ArticleHead } from "./ArticleHead";
 import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
 import { late, VersionsPanel } from "./Versions";
 import { linker, linkIn, linksIn, linkText, linkTo, MARK, scanLinks, typeNames, type Link } from "../../shared/Links";
+import { anchorName, anchorsIn, markSection } from "../../shared/Anchors";
 import { withClosingTag } from "../../shared/editor/Closing";
 import { formatted } from "../../shared/editor/Format";
 import { cutAtHeadings, headingLevel } from "../../shared/Sections";
@@ -1200,6 +1201,7 @@ function BrickMenu({
   onCut,
   link,
   onHide,
+  sections,
   onClose,
 }: {
   x: number;
@@ -1216,6 +1218,8 @@ function BrickMenu({
   link?: LinkChoice;
   /** Selected text: into a region only the GM sees. */
   onHide?: () => void;
+  /** Sections: marking the selection as one, and linking to one. */
+  sections?: SectionChoice;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -1243,6 +1247,7 @@ function BrickMenu({
       onContextMenu={(e) => e.preventDefault()}
     >
       {link && <LinkGroup link={link} />}
+      {sections && <SectionGroup sections={sections} />}
       {onFormat && (
         <div className="brick-group">
           <h5>Selected</h5>
@@ -1287,6 +1292,100 @@ function BrickMenu({
             </button>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Sections of the text: what is selected marked as one, and a link to any one. */
+type SectionChoice = {
+  /** Marks the selection as a section of this name — where something is selected. */
+  mark?: (name: string) => void;
+  /** Every section of the world this reader can open. */
+  found: SectionEntry[];
+  onLink: (s: SectionEntry) => void;
+};
+type SectionEntry = { article: ArticleView; anchor: string; shown: string; line: string };
+
+/** Every anchor of the documents — named, or by the words of its line. */
+function sectionsOf(all: ArticleView[]): SectionEntry[] {
+  const out: SectionEntry[] = [];
+  for (const article of all) {
+    const seen = new Set<string>();
+    for (const layer of article.layers) {
+      for (const { anchor, line } of anchorsIn(layer.text ?? "")) {
+        if (seen.has(anchor)) continue;
+        seen.add(anchor);
+        // What one reads of the line: links by their text, no marks.
+        const read = scanLinks(line)
+          .map((p) => (typeof p === "string" ? p : p.text))
+          .join("")
+          .replace(/[*_`|>#]/g, " ")
+          .replace(/^\s*([-+]|\d+[.)])\s+/, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        const named = !/^[0-9a-f]{6}$/.test(anchor);
+        const name = anchor.replace(/-/g, " ");
+        out.push({ article, anchor, shown: named ? name.charAt(0).toUpperCase() + name.slice(1) : read.split(" ").slice(0, 6).join(" "), line: read });
+      }
+    }
+  }
+  return out;
+}
+
+/** In the right-click menu: sections — the selection marked as one, a link to one. */
+function SectionGroup({ sections }: { sections: SectionChoice }) {
+  const [mode, setMode] = useState<"" | "mark" | "link">("");
+  const [input, setInput] = useState("");
+  const q = input.trim().toLowerCase();
+  const found = mode === "link"
+    ? sections.found
+        .filter((s) => !q || `${s.article.name} ${s.shown} ${s.line}`.toLowerCase().includes(q))
+        .slice(0, 8)
+    : [];
+  return (
+    <div className="brick-group">
+      <h5>Section</h5>
+      {mode === "" && (
+        <>
+          {sections.mark && (
+            <button className="ghost" onClick={() => setMode("mark")}>
+              Mark as section …
+            </button>
+          )}
+          <button className="ghost" onClick={() => setMode("link")}>
+            Link to a section …
+          </button>
+        </>
+      )}
+      {mode === "mark" && (
+        <input
+          className="brick-filter"
+          autoFocus
+          placeholder="Name of the section"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && input.trim() && sections.mark?.(input)}
+        />
+      )}
+      {mode === "link" && (
+        <>
+          <input
+            className="brick-filter"
+            autoFocus
+            placeholder="Find a section"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && found[0] && sections.onLink(found[0])}
+          />
+          {found.map((s) => (
+            <button key={`${s.article.id}^${s.anchor}`} className="ghost link-choice" title={s.line} onClick={() => sections.onLink(s)}>
+              <span>{s.shown}</span>
+              <span className="small">{s.article.name}</span>
+            </button>
+          ))}
+          {found.length === 0 && <p className="small muted brick-note">No section found.</p>}
+        </>
       )}
     </div>
   );
@@ -1449,6 +1548,42 @@ function useBricks(gm: boolean, text: string, onText: (t: string) => void, links
       },
     };
   };
+  /** Sections: the selection marked as one, a link to one put in at the selection. */
+  const sectionsFor = ([from, to]: [number, number]): SectionChoice => {
+    const put = (next: string, at: number) => {
+      setMenu(null);
+      onText(next);
+      requestAnimationFrame(() => {
+        field.current?.focus();
+        field.current?.setSelectionRange(at, at);
+      });
+    };
+    return {
+      mark:
+        to > from
+          ? (name) => {
+              const base = anchorName(name);
+              if (!base) return;
+              // Unique in the document: a second of the same name gets a number.
+              const taken = new Set(sectionsOf(links.all.filter((a) => a.id === links.selfId)).map((s) => s.anchor));
+              let anchor = base;
+              for (let n = 2; taken.has(anchor) || anchorsIn(text).some((a) => a.anchor === anchor); n++) anchor = `${base}-${n}`;
+              const next = markSection(text, from, to, anchor);
+              if (next) put(next, to);
+            }
+          : undefined,
+      found: sectionsOf(links.all),
+      onLink: (s) => {
+        const words = text.slice(from, to);
+        const shown = words.trim() && !/[\n@|]/.test(words) ? words : s.shown;
+        const written =
+          s.article.id === links.selfId
+            ? `${MARK}#^${s.anchor}|${shown.trim()}${MARK}`
+            : linkText(typeNames(links.templates, s.article.articleType)[0] ?? "", s.article.name, shown, `^${s.anchor}`);
+        put(text.slice(0, from) + written + text.slice(to), from + written.length);
+      },
+    };
+  };
   /** The selection — or, where nothing is selected, the word the caret stands in. */
   const chosenWords = (): [number, number] => {
     const f = field.current;
@@ -1552,6 +1687,7 @@ function useBricks(gm: boolean, text: string, onText: (t: string) => void, links
               : undefined
           }
           link={linkFor(menu.sel)}
+          sections={sectionsFor(menu.sel)}
           onHide={
             menu.sel[1] > menu.sel[0]
               ? () => {
@@ -2135,6 +2271,7 @@ export function VisualEditor({
                 part={part}
                 title={block.title}
                 inherited={part.view === base && part.level === "open"}
+                docAccess={doc.access}
                 region={
                   // The first part's stands at the section's title.
                   p > 0 && !(samePolicy(part.view, doc.access.view) && samePolicy(part.edit, doc.access.edit))
@@ -2902,6 +3039,7 @@ function PartEditor({
   onCaret,
   graph,
   region,
+  docAccess,
 }: {
   world: WorldInfo;
   part: BlockPart;
@@ -2910,6 +3048,8 @@ function PartEditor({
   inherited: boolean;
   /** A region with access of its own: says whom it is for at its top. */
   region?: boolean;
+  /** The document's access — what a region's differs from. */
+  docAccess: { view: string; edit: string };
   removable: boolean;
   links: Links;
   carets: RemoteCaret[];
@@ -2985,7 +3125,7 @@ function PartEditor({
       }`}
     >
       {region && (
-        <RegionAccess world={world} view={part.view} edit={part.edit} onClick={world.isGm ? () => (setDismissed(false), setInspecting(true)) : undefined} />
+        <RegionAccess world={world} view={part.view} edit={part.edit} docView={docAccess.view} docEdit={docAccess.edit} onClick={world.isGm ? () => (setDismissed(false), setInspecting(true)) : undefined} />
       )}
       {inspecting && (
         <Inspector title={title ? `Part · ${title}` : "Part"} onClose={() => (setInspecting(false), setDismissed(true))}>
@@ -3079,14 +3219,18 @@ function PartFlow({
   void _unused;
   // A link as it is read: the name it names — or its own text — and grey where it leads nowhere.
   const resolve = useMemo(() => linker(links.all, links.templates), [links.all, links.templates]);
+  const current = useContext(CurrentDocument);
   const linkLook = (written: string) => {
     const link = linkIn(written.slice(MARK.length, -MARK.length));
     if (!link) return { text: written, dead: true };
-    const target = resolve(link);
+    // `#^2f9e17`: a line of the target — of this document without a name.
+    const anchor = link.property.startsWith("^") ? link.property.slice(1) : undefined;
+    const target = anchor && !link.name ? links.all.find((a) => a.id === current) : resolve(link);
     return {
       text: link.text !== link.name ? link.text : (target?.name ?? link.name),
       dead: !target,
       id: target?.id,
+      anchor,
       icon: target && linkIcon(links.templates, target.articleType),
     };
   };

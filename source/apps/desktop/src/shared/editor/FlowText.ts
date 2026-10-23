@@ -22,7 +22,7 @@ const RULE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*(\n|$)/;
 const DICE = String.raw`(?<![\p{L}\p{N}_])\d{0,3}[dDwW]\d{1,4}(?:[ ]*[+-][ ]*(?:\d{0,3}[dDwW]\d{1,4}|\d{1,4})(?![\p{L}\p{N}_]))*(?![\p{L}\p{N}_])`;
 const ROLL = String.raw`\[\[(?:(?!\]\])[^\n])+\]\]`;
 /** `^2f9e17` closing a line: where a link leads to (`shared/Anchors`). */
-const ANCHOR = /(\s+\^[A-Za-z0-9-]{1,64})(\s*)$/;
+const ANCHOR = /(\s+\^[\p{L}\p{N}-]{1,64})(\s*)$/u;
 // A link first: what stands between its marks is its own, not bold or italic.
 const INLINE = new RegExp(
   String.raw`(@@(?:(?!@@)[^\n])+?@@|${ROLL}|\*\*\*[^*\n]+\*\*\*|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|\x60[^\x60\n]+\x60|${DICE})`,
@@ -66,10 +66,14 @@ export function runs(text: string, open = -1): Run[] {
         const width = whole.startsWith("***") ? 3 : whole.startsWith("**") || whole.startsWith("__") ? 2 : 1;
         const look = whole.startsWith("`") ? "code" : width === 3 ? "bold italic" : width === 2 ? "bold" : "italic";
         const shown = open >= start && open <= end;
+        // Bold or italic around a link: the link inside is one too. Code is code.
+        const middle: Run[] = [];
+        if (look === "code") middle.push({ text: whole.slice(width, -width) });
+        else inline(middle, whole.slice(width, -width), start + width);
         into.push({
           text: whole,
           look,
-          inner: [mark(whole.slice(0, width), shown), { text: whole.slice(width, -width) }, mark(whole.slice(-width), shown)],
+          inner: [mark(whole.slice(0, width), shown), ...(middle.length ? middle : [{ text: "" }]), mark(whole.slice(-width), shown)],
         });
       }
       at = m.index! + whole.length;

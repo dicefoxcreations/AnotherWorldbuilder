@@ -67,3 +67,8 @@ test("an anchor closing a line is drawn on its own, faint", () => {
   assert.equal(flat(runs("They plan.   ^2f9e17\nTim comes in.")), "They plan.|anchor:   ^2f9e17|\nTim comes in.");
   assert.equal(flat(runs("x^2 is ^big here")), "x^2 is ^big here");
 });
+
+test("a link in italic or bold text stays a link", () => {
+  assert.equal(flat(runs("_A @@#^x|link@@ here._")), "italic(mark-hidden:_|A |link:@@#^x|link@@| here.|mark-hidden:_)");
+  assert.equal(flat(runs("`@@not a link@@`")), "code(mark-hidden:`|@@not a link@@|mark-hidden:`)");
+});

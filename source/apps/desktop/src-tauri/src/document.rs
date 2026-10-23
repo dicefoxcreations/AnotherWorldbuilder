@@ -2950,6 +2950,29 @@ mod tests {
     }
 
     #[test]
+    fn a_region_written_into_a_section_leaves_the_infobox_as_it_was() {
+        let w = world("region-infobox");
+        let mut log = template(
+            "log",
+            vec![field("date", "Date", FieldKind::Text { multiline: false })],
+            vec![TemplateBlock { parts: vec![part("journal", "all", "players", "open")], ..TemplateBlock::fresh("journal", "Journal") }],
+        );
+        log.auth = Some(Access { view: "all".into(), edit: "players".into(), level: "open".into() });
+        w.store.save_templates(&w.id, &[log]).unwrap();
+        let mut props = layer(INFOBOX_SECTION, "", "all", "players", "open");
+        props.fields = serde_json::json!({ "date": "1 Hammer" });
+        let id = create_document(&w.store, &w.id, "log".into(), "s1".into(), "Session 1".into(), "all".into(), vec![props, layer("journal", "They meet.", "all", "players", "open")]).unwrap();
+        let held = w.store.load_keyring(&w.id).unwrap().everything();
+        let infobox = || build_view(&w.store.load_articles(&w.id).unwrap(), &held).into_iter().find(|a| a.id == id).unwrap().layers.into_iter().find(|l| l.section == INFOBOX_SECTION).map(|l| (l.policy, l.edit)).unwrap();
+        assert_eq!(infobox(), ("all".to_string(), "players".to_string()));
+        let code = code_of(&w.store, &w.gm, &w.id, &id).unwrap().code;
+        let region = code.replace("They meet.\n", "They meet.\n\n<block view=\"gm OR doc:ABC\" edit=\"gm OR doc:ABC\">\nA secret.\n</block>\n");
+        assert_ne!(region, code);
+        save_now(&w.store, &w.gm, &w.id, &id, &region).unwrap();
+        assert_eq!(infobox(), ("all".to_string(), "players".to_string()), "{}", code_of(&w.store, &w.gm, &w.id, &id).unwrap().code);
+    }
+
+    #[test]
     fn a_field_with_access_of_its_own_is_a_layer_of_its_own() {
         let w = world("field");
         let mut secret = field("goal", "True goal", FieldKind::Text { multiline: false });

@@ -320,7 +320,7 @@ export function FlowField({
   /** How its place in the flow looks: `image right`, `graph`. */
   surfaceClass: (piece: Piece) => string;
   /** How a link is read: what it shows, and whether it leads anywhere. */
-  linkLook?: (written: string) => { text: string; dead: boolean; id?: string; icon?: string };
+  linkLook?: (written: string) => { text: string; dead: boolean; id?: string; icon?: string; anchor?: string };
   onText: (text: string) => void;
   onCaret?: (start: number, end: number) => void;
   /** What the helpers listen to: key presses, selection, the context menu. */
@@ -349,6 +349,19 @@ export function FlowField({
         into.appendChild(line);
         continue;
       }
+      if (r.look === "anchor") {
+        // An anchor (`^2f9e17`) as one small sign; its name where it has one to read.
+        const name = r.text.trim().slice(1);
+        const atom = document.createElement("span");
+        atom.contentEditable = "false";
+        atom.dataset.look = "anchor";
+        atom.dataset.raw = r.text;
+        atom.className = "flow-anchor";
+        atom.title = `Anchor ^${name}`;
+        atom.textContent = /^[0-9a-f]{6}$/.test(name) ? "⚓" : `⚓ ${name}`;
+        into.appendChild(atom);
+        continue;
+      }
       if (r.look === "link") {
         // One piece, not letters: the caret passes over it, a click opens it.
         const look = latest.current.linkLook?.(r.text) ?? { text: shownName(r.text), dead: false };
@@ -358,6 +371,7 @@ export function FlowField({
         atom.dataset.raw = r.text;
         atom.className = look.dead ? "flow-link dead-link" : "flow-link wikilink";
         if (look.id) atom.dataset.preview = look.id;
+        if (look.anchor) atom.dataset.previewAnchor = look.anchor;
         if (look.icon) atom.dataset.icon = look.icon;
         atom.textContent = look.text;
         into.appendChild(atom);
@@ -516,6 +530,10 @@ export function FlowField({
         if (look.id) atom.dataset.preview = look.id;
         else delete atom.dataset.preview;
       }
+      if ((atom.dataset.previewAnchor ?? "") !== (look.anchor ?? "")) {
+        if (look.anchor) atom.dataset.previewAnchor = look.anchor;
+        else delete atom.dataset.previewAnchor;
+      }
       if ((atom.dataset.icon ?? "") !== (look.icon ?? "")) {
         if (look.icon) atom.dataset.icon = look.icon;
         else delete atom.dataset.icon;
@@ -610,9 +628,11 @@ export function FlowField({
     const atom = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-raw]") : null;
     if (!atom || !root.current?.contains(atom)) return false;
     e.preventDefault();
-    const index = [...root.current.childNodes].indexOf(atom);
-    const start = h.offsetOf(root.current, index);
-    const end = start + (atom.dataset.raw?.length ?? 0) - 2;
+    // In a list item, a heading or bold text too: counted from its own container.
+    const box = atom.parentNode!;
+    const start = h.offsetOf(box, [...box.childNodes].indexOf(atom));
+    // A link opens before its closing marks, an anchor after itself.
+    const end = start + (atom.dataset.raw?.length ?? 0) - (atom.dataset.look === "link" ? 2 : 0);
     root.current.focus();
     build(h.text, end);
     h.setSelectionRange(end, end);

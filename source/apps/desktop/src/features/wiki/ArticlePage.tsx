@@ -211,7 +211,7 @@ export function ArticlePage({
   // At the top of a region with access of its own: whom it is for.
   const region = (part: { policy: string; edit: string }) =>
     samePolicy(part.policy, article.visibility) && samePolicy(part.edit, article.edit) ? null : (
-      <RegionAccess world={world} view={part.policy} edit={part.edit} />
+      <RegionAccess world={world} view={part.policy} edit={part.edit} docView={article.visibility} docEdit={article.edit} />
     );
   const drawBlock = (block: TemplateBlock) => {
     const parts = (partsOf.get(block.key) ?? []).filter((l) => l.text.trim() !== "");

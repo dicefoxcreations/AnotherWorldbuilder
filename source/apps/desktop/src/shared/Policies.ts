@@ -17,15 +17,15 @@ export const terms = (policy: string): string[] =>
 export const BASICS = ["all", "players", "gm"];
 
 /**
- * What a policy amounts to: everyone takes in all players and the GM, all
- * players any one of them, and the GM is always there. `all OR gm` is
- * everyone; `gm OR player:roque` the GM and Roque; nothing at all the GM.
+ * What a policy amounts to: everyone takes in all players and the GM — and
+ * `players` is everyone too, as every player holds both — any one of them,
+ * and the GM is always there. `all OR gm` is everyone; `gm OR player:roque`
+ * the GM and Roque; nothing at all the GM.
  */
 export function effective(policy: string): string[] {
   const all = terms(policy);
   const has = (t: string) => all.some((x) => x.toLowerCase() === t);
-  if (has("all")) return ["all"];
-  if (has("players")) return ["players"];
+  if (has("all") || has("players")) return ["all"];
   const named = all.filter((x) => x.toLowerCase() !== "gm");
   return ["gm", ...named.filter((x, i) => named.indexOf(x) === i)];
 }
