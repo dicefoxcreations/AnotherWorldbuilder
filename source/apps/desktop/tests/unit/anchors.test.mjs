@@ -1,7 +1,7 @@
 // Sections: anchors set from a selection, and found again.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { anchorName, anchorsIn, markSection } from "../../src/shared/Anchors.ts";
+import { anchorName, anchorRange, anchorsIn, markSection, relinked, renameInText } from "../../src/shared/Anchors.ts";
 
 const text = "Intro line.\n\nThe inn is old.\nIts roof leaks.\n\n| Rarity | Reward |\n| --- | --- |\n| Rare | 500 gold |\n\n- one\n- two\n\nAfter.";
 
@@ -34,4 +34,25 @@ test("anchors are found with their line", () => {
     { anchor: "2f9e17", line: "A." },
     { anchor: "dbbde3", line: "| x | 5 pp" },
   ]);
+});
+
+test("a section's place in its text: its block, from where it begins", () => {
+  const t = "Head.\n\nThe inn is old.\nIts roof leaks. ^roof\n\nAfter.";
+  const r = anchorRange(t, "roof");
+  assert.equal(t.slice(r.start, r.end), "The inn is old.\nIts roof leaks. ^roof");
+  const s = "- a ^x\n- b\n- c ^x";
+  assert.equal(s.slice(anchorRange(s, "x").start, anchorRange(s, "x").end), s);
+  assert.equal(anchorRange(t, "none"), null);
+});
+
+test("renamed: the anchor and this document's links to it, not others", () => {
+  const t = "Its roof leaks. ^roof\n| a | 5 ^roof |\nSee @@#^roof|the roof@@ and @@#^roofs@@ and @@Inn#^roof@@.";
+  assert.equal(
+    renameInText(t, "roof", "dach"),
+    "Its roof leaks. ^dach\n| a | 5 ^dach |\nSee @@#^dach|the roof@@ and @@#^roofs@@ and @@Inn#^roof@@.",
+  );
+  assert.equal(
+    relinked("@@Place:Inn#^roof|x@@ @@Place:Mill#^roof@@", "roof", "dach", (target) => target === "Place:Inn"),
+    "@@Place:Inn#^dach|x@@ @@Place:Mill#^roof@@",
+  );
 });

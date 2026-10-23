@@ -306,6 +306,7 @@ export function FlowField({
   surface,
   surfaceClass,
   linkLook,
+  onAnchor,
   onText,
   onCaret,
   handlers,
@@ -321,6 +322,8 @@ export function FlowField({
   surfaceClass: (piece: Piece) => string;
   /** How a link is read: what it shows, and whether it leads anywhere. */
   linkLook?: (written: string) => { text: string; dead: boolean; id?: string; icon?: string; anchor?: string };
+  /** A click on an anchor (`^name`): it is chosen — its name shown to change. */
+  onAnchor?: (name: string) => void;
   onText: (text: string) => void;
   onCaret?: (start: number, end: number) => void;
   /** What the helpers listen to: key presses, selection, the context menu. */
@@ -628,6 +631,11 @@ export function FlowField({
     const atom = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-raw]") : null;
     if (!atom || !root.current?.contains(atom)) return false;
     e.preventDefault();
+    // An anchor is chosen, not opened: its name is set in the side bar.
+    if (atom.dataset.look === "anchor" && onAnchor) {
+      onAnchor((atom.dataset.raw ?? "").trim().slice(1));
+      return true;
+    }
     // In a list item, a heading or bold text too: counted from its own container.
     const box = atom.parentNode!;
     const start = h.offsetOf(box, [...box.childNodes].indexOf(atom));

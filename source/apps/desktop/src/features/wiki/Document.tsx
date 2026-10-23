@@ -31,7 +31,7 @@ import { ArticleHead } from "./ArticleHead";
 import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
 import { late, VersionsPanel } from "./Versions";
 import { linker, linkIn, linksIn, linkText, linkTo, MARK, scanLinks, typeNames, type Link } from "../../shared/Links";
-import { anchorName, anchorsIn, markSection } from "../../shared/Anchors";
+import { anchorName, anchorRange, anchorsIn, markSection, relinked, renameInText, withoutAnchor } from "../../shared/Anchors";
 import { withClosingTag } from "../../shared/editor/Closing";
 import { formatted } from "../../shared/editor/Format";
 import { cutAtHeadings, headingLevel } from "../../shared/Sections";
@@ -2037,6 +2037,37 @@ export function VisualEditor({
       properties: doc.properties.map((x, j) => (j === i ? { ...x, ...p } : x)),
     });
 
+  /**
+   * A section renamed: its anchors and this document's links to it here,
+   * the links of other documents to it there — each saved as a version.
+   */
+  const renameSection = async (old: string, fresh: string) => {
+    onDoc({ ...doc, blocks: doc.blocks.map((block) => ({ ...block, parts: block.parts.map((part) => ({ ...part, text: renameInText(part.text, old, fresh) })) })) });
+    const resolve = linker(links.all, links.templates);
+    const others = links.all.filter((a) => a.id !== article.id && a.layers.some((l) => (l.text ?? "").includes(`#^${old}`)));
+    for (const other of others) {
+      const opened = await api.documentOpen(world.id, other.id);
+      const next = relinked(opened.code, old, fresh, (target) => {
+        const link = linkIn(target);
+        return !!link && resolve(link)?.id === article.id;
+      });
+      if (next === opened.code) continue;
+      const session = newSession();
+      await api.documentSave(world.id, other.id, next, opened.base, session);
+      await api.sessionEnd(world.id, session);
+    }
+    if (others.length) reload?.();
+  };
+  /** Links of other documents to a section of this one. */
+  const linkedElsewhere = (anchor: string) =>
+    links.all.filter((a) => a.id !== article.id && a.layers.some((l) => (l.text ?? "").includes(`@@${article.id}#^${anchor}`))).length;
+  /** A section's anchors taken out — the text stays. */
+  const removeSection = (anchor: string) =>
+    onDoc({ ...doc, blocks: doc.blocks.map((block) => ({ ...block, parts: block.parts.map((part) => ({ ...part, text: withoutAnchor(part.text, anchor) })) })) });
+  /** Every anchor of the document, to keep names apart. */
+  const anchorsHere = () => new Set(doc.blocks.flatMap((block) => block.parts.flatMap((part) => anchorsIn(part.text).map((a) => a.anchor))));
+  const sectionActions: SectionActions = { rename: renameSection, remove: removeSection, linkedElsewhere, taken: anchorsHere };
+
   const setPart = (b: number, p: number, part: Partial<BlockPart>) =>
     onDoc({
       ...doc,
@@ -2279,6 +2310,7 @@ export function VisualEditor({
                 part={part}
                 title={block.title}
                 inherited={part.view === base && part.level === "open"}
+                sections={sectionActions}
                 docAccess={doc.access}
                 region={
                   // The first part's stands at the section's title.
@@ -3033,6 +3065,68 @@ function TextProperty({
  * change it is set in the side bar — it opens for the game master as soon
  * as the caret is in the part, unless something else holds the bar.
  */
+/** What a section chosen by its anchor can be given: a new name, or none. */
+type SectionActions = {
+  rename: (old: string, fresh: string) => Promise<void>;
+  remove: (anchor: string) => void;
+  /** How many other documents link to it. */
+  linkedElsewhere: (anchor: string) => number;
+  /** The anchors the document has. */
+  taken: () => Set<string>;
+};
+
+/** A section in the side bar: its name to change, and taking it out. */
+function SectionInspector({ anchor, actions, onRenamed, onClose }: { anchor: string; actions: SectionActions; onRenamed: (fresh: string) => void; onClose: () => void }) {
+  const [name, setName] = useState(anchor);
+  const [problem, setProblem] = useState("");
+  const [busy, setBusy] = useState(false);
+  const elsewhere = actions.linkedElsewhere(anchor);
+  const rename = async () => {
+    const fresh = anchorName(name);
+    if (!fresh || fresh === anchor) return setName(anchor);
+    if (actions.taken().has(fresh)) return setProblem(`“${fresh}” is taken in this document.`);
+    setBusy(true);
+    setProblem("");
+    try {
+      await actions.rename(anchor, fresh);
+      onRenamed(fresh);
+    } catch (e) {
+      setProblem(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Inspector title="Section" onClose={onClose}>
+      <InspectorSection title="Name">
+        <input
+          value={name}
+          disabled={busy}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => void rename()}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+        <small className="small muted">
+          ^{anchorName(name) || anchor}
+          {elsewhere > 0 && ` · linked from ${elsewhere} other ${elsewhere === 1 ? "document" : "documents"} — renamed there too`}
+        </small>
+        {problem && <small className="small error">{problem}</small>}
+      </InspectorSection>
+      <button
+        className="danger compact inspector-remove"
+        disabled={busy}
+        title={elsewhere > 0 ? "Its links then lead to the document only" : undefined}
+        onClick={() => {
+          actions.remove(anchor);
+          onClose();
+        }}
+      >
+        Remove the section
+      </button>
+    </Inspector>
+  );
+}
+
 function PartEditor({
   world,
   part,
@@ -3048,6 +3142,7 @@ function PartEditor({
   graph,
   region,
   docAccess,
+  sections,
 }: {
   world: WorldInfo;
   part: BlockPart;
@@ -3058,6 +3153,8 @@ function PartEditor({
   region?: boolean;
   /** The document's access — what a region's differs from. */
   docAccess: { view: string; edit: string };
+  /** What is done to a section chosen by its anchor — across the document. */
+  sections: SectionActions;
   removable: boolean;
   links: Links;
   carets: RemoteCaret[];
@@ -3109,6 +3206,10 @@ function PartEditor({
   const surfaces = shown.filter((p) => p.kind !== "text");
   const alone = surfaces.length === 1 && shown.every((p) => p.kind !== "text" || !p.text.trim());
   const [inspecting, setInspecting] = useState(false);
+  // A section chosen by a click on its anchor: its name in the side bar, its place marked.
+  const [chosenSection, setChosenSection] = useState<string | null>(null);
+  useSideBar(`anchor:${part.key}`, !!chosenSection, () => setChosenSection(null));
+  const sectionPlace = chosenSection ? anchorRange(part.text, chosenSection) : null;
   // As in the right-click menu: a new section below this one.
   const sectionBelow = useContext(SectionBelow);
   const [dismissed, setDismissed] = useState(false);
@@ -3123,7 +3224,7 @@ function PartEditor({
     const holder = sideBarOwner();
     // Only a section of several parts has a part's own access to set; one
     // of a single part sets it on the section.
-    if (world.isGm && removable && !inspecting && !dismissed && !holder?.startsWith("versions:")) setInspecting(true);
+    if (world.isGm && removable && !inspecting && !dismissed && !chosenSection && !holder?.startsWith("versions:")) setInspecting(true);
   };
   return (
     <PartAccessContext.Provider value={{ world, part, title, alone, onPart, onRemove: removable ? onRemove : undefined }}>
@@ -3152,6 +3253,15 @@ function PartEditor({
           )}
         </Inspector>
       )}
+      {chosenSection && (
+        <SectionInspector
+          key={chosenSection}
+          anchor={chosenSection}
+          actions={sections}
+          onRenamed={setChosenSection}
+          onClose={() => setChosenSection(null)}
+        />
+      )}
       <PartFlow
         world={world}
         text={part.text}
@@ -3159,6 +3269,11 @@ function PartEditor({
         links={links}
         carets={carets}
         marks={marks}
+        onAnchor={(name) => {
+          setInspecting(false);
+          setChosenSection(name);
+        }}
+        section={sectionPlace}
         surface={(piece, i) => (
           <PieceMoveContext.Provider value={moves(i)}>
           {piece.kind === "graph" ? (
@@ -3211,6 +3326,8 @@ function PartFlow({
   surface,
   onText,
   onCaret,
+  onAnchor,
+  section,
 }: {
   world: WorldInfo;
   text: string;
@@ -3221,6 +3338,10 @@ function PartFlow({
   surface: (piece: Piece, i: number) => React.ReactNode;
   onText: (text: string) => void;
   onCaret: (start: number, end: number) => void;
+  /** A click on an anchor — see `FlowField`. */
+  onAnchor?: (name: string) => void;
+  /** The chosen section's place in the text, marked. */
+  section?: { start: number; end: number } | null;
 }) {
   const bricks = useBricks(world.isGm, text, onText, links, flow);
   const { ref: _unused, ...handlers } = bricks.props;
@@ -3251,6 +3372,7 @@ function PartFlow({
         placeholder="Write here. @@ links a document, right-click inserts lists, images …"
         surface={surface}
         linkLook={linkLook}
+        onAnchor={onAnchor}
         surfaceClass={(p) =>
           p.kind === "image"
             ? imageSurface(p.image)
@@ -3261,6 +3383,7 @@ function PartFlow({
         handlers={handlers}
       >
         <FlowMarks handle={flow} text={text} ranges={marks.ranges} kind={marks.kind} />
+        {section && <FlowMarks handle={flow} text={text} ranges={[section]} kind="section" />}
         <RemoteCarets field={flow} carets={carets} />
       </FlowField>
       {bricks.element}

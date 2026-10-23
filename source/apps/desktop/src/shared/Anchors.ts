@@ -128,3 +128,52 @@ export function markSection(text: string, from: number, to: number, anchor: stri
   if (last > first) lines[last] = anchored(lines[last], anchor);
   return lines.join("\n");
 }
+
+const escaped = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Where a block of Markdown begins that holds line `i` — see `blockEnd`. */
+function blockStart(lines: string[], i: number): number {
+  const kind = (l: string) =>
+    /^\s*\|/.test(l) ? "table" : /^\s*([-*+]|\d{1,9}[.)])\s/.test(l) ? "item" : /^#{1,6}\s/.test(l) ? "heading" : l.trim() === "" ? "empty" : /^\s*</.test(l) ? "tag" : "text";
+  const first = kind(lines[i]);
+  if (first === "item" || first === "heading" || first === "tag" || first === "empty") return i;
+  let j = i;
+  while (j > 0 && kind(lines[j - 1]) === first) j--;
+  return j;
+}
+
+/** Where an anchor's section stands in a text: from its first block's start to the end of its last line. */
+export function anchorRange(text: string, anchor: string): { start: number; end: number } | null {
+  const lines = text.split("\n");
+  const at = lines.map((l, i) => (ANCHOR_AT_END.exec(l)?.[1] === anchor ? i : -1)).filter((i) => i >= 0);
+  if (at.length === 0) return null;
+  const offset = (line: number) => lines.slice(0, line).reduce((n, l) => n + l.length + 1, 0);
+  const first = blockStart(lines, at[0]);
+  const last = at[at.length - 1];
+  return { start: offset(first), end: offset(last) + lines[last].length };
+}
+
+/** A text with an anchor renamed — where it closes lines, and in this document's links to it (`@@#^…`). */
+export function renameInText(text: string, old: string, fresh: string): string {
+  const o = escaped(old);
+  return text
+    .split("\n")
+    .map((line) => (ANCHOR_AT_END.exec(line)?.[1] === old ? line.replace(new RegExp(`(\\s\\^)${o}(?=(\\s*\\|)?\\s*$)`, "u"), `$1${fresh}`) : line))
+    .join("\n")
+    .replace(new RegExp(`@@#\\^${o}(?=[|@])`, "gu"), `@@#^${fresh}`);
+}
+
+/** Of a text, the links to `anchor` of another document — by the part before `#`, which `leadsThere` checks. */
+export function relinked(text: string, anchor: string, fresh: string, leadsThere: (target: string) => boolean): string {
+  return text.replace(new RegExp(`@@([^@\\n#]+)#\\^${escaped(anchor)}(?=[|@])`, "gu"), (whole, target: string) =>
+    leadsThere(target) ? `@@${target}#^${fresh}` : whole,
+  );
+}
+
+/** A text without an anchor's marks — the lines they closed stay. */
+export function withoutAnchor(text: string, anchor: string): string {
+  return text
+    .split("\n")
+    .map((line) => (ANCHOR_AT_END.exec(line)?.[1] === anchor ? line.replace(new RegExp(`\\s\\^${escaped(anchor)}(?=(\\s*\\|)?\\s*$)`, "u"), "") : line))
+    .join("\n");
+}

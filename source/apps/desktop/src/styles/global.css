@@ -1998,3 +1998,6 @@ button.region-access:hover .bubble { border-color: var(--accent-line); }
 .own-colour input[type="color"] { width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 999px; background: none; overflow: hidden; cursor: pointer; }
 .own-colour input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .own-colour input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 999px; }
+/* The section chosen by its anchor, while editing. */
+.flow-diff.mark-section { background: var(--accent-soft); }
+.flow-anchor:hover { color: var(--accent); }
