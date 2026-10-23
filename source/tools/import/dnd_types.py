@@ -210,7 +210,9 @@ CAMPAIGN_DATA = {
                          "Abyssal", "Celestial", "Deep Speech", "Druidic", "Infernal", "Primordial", "Sylvan", "Thieves' Cant", "Undercommon"]),
 }
 for name, (icon, _) in CAMPAIGN_DATA.items():
-    T.add(data_type_id(name), name, icon)
+    # A language says where it comes from — the world's own, or a book's.
+    text = type_text("Origin: text\n", ["<text bind=Origin>"], []) if name == "Language" else None
+    T.add(data_type_id(name), name, icon, text)
 
 
 def campaign_text(props, shown, blocks, sort="", players=False, name=""):
