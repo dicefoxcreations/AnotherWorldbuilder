@@ -26,7 +26,7 @@
 
 use super::*;
 use crate::store::JoinRequest;
-use aw_sync::world::{Ask, HeldWorld, Host, Offer, Order, Person, Reach, Reply, Server, ServerState, WorldNet};
+use aw_sync::world::{Ask, BackupPlan, HeldWorld, Host, Offer, Order, Person, Reach, Reply, Server, ServerBackups, ServerState, WorldNet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -141,6 +141,13 @@ async fn run(o: Options) -> Answer<()> {
         port_required: true,
         only: home_ip(&o.addresses),
     };
+    // Backups, by themselves: a minute after the start, then every quarter hour.
+    let backing = keeper.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        backing.due();
+        std::thread::sleep(std::time::Duration::from_secs(14 * 60));
+    });
     let net = WorldNet::start(keeper.clone(), reach).await.map_err(|e| AppError(format!("The network could not start: {e}")))?;
 
     let mut addresses = o.addresses.clone();
@@ -178,11 +185,22 @@ struct Book {
     blocked: Vec<String>,
     /// By id: name, and when last seen.
     users: BTreeMap<String, (String, u64)>,
+    /// By world: how it is backed up, where its GM said otherwise than daily, 7 kept.
+    #[serde(default)]
+    backups: BTreeMap<String, BackupPlan>,
+}
+
+/// Unless its GM says otherwise, a world here is backed up daily and the last
+/// seven stay.
+fn default_plan() -> BackupPlan {
+    BackupPlan { every: "daily".into(), keep: 7 }
 }
 
 struct Keeper {
     store: Store,
     admin: String,
+    /// Where the backups of the worlds lie: `backups/` in the data folder.
+    backups: PathBuf,
     me: IdentityPublic,
     book: Mutex<Book>,
     path: PathBuf,
@@ -236,7 +254,7 @@ impl Keeper {
             Err(_) => Book::default(),
         };
         let me = store.load_identity()?.public();
-        Ok(Keeper { store, admin, me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default() })
+        Ok(Keeper { store, admin, backups: data.join("backups"), me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default() })
     }
 
     fn book(&self) -> Answer<std::sync::MutexGuard<'_, Book>> {
@@ -344,6 +362,22 @@ impl Keeper {
                 return Ok(Reply::Managed { state: self.state()? });
             }
             Ask::Manage { .. } => return Ok(Reply::NotOffered),
+            // Its GM, or the admin: how the server backs the world up.
+            Ask::Backups { plan } => {
+                let gm = self.store.holds(world) && self.store.gm_of(world)?.as_deref() == Some(id.as_str());
+                if !(gm || (id == self.admin && self.store.holds(world))) {
+                    return Ok(Reply::NotOffered);
+                }
+                if let Some(plan) = plan {
+                    if !["off", "daily", "weekly"].contains(&plan.every.as_str()) {
+                        return Err(AppError("Off, daily or weekly.".into()));
+                    }
+                    let mut book = self.book()?;
+                    book.backups.insert(world.to_string(), BackupPlan { keep: plan.keep.clamp(1, 365), ..plan });
+                    self.save(&book)?;
+                }
+                return Ok(Reply::Backups { backups: self.backups_of(world)? });
+            }
             Ask::HostWorlds => {
                 if !self.may_bring(&id)? {
                     let mut book = self.book()?;
@@ -466,6 +500,42 @@ impl Keeper {
             store.save_requests(world, &requests)?;
         }
         Ok(requests.into_iter().map(|r| r.identity).collect())
+    }
+
+    fn plan(&self, world: &str) -> Answer<BackupPlan> {
+        Ok(self.book()?.backups.get(world).cloned().unwrap_or_else(default_plan))
+    }
+
+    /// The folder of a world's backups here.
+    fn backups_dir(&self, world: &str) -> PathBuf {
+        self.backups.join(store::dir_name(world))
+    }
+
+    fn backups_of(&self, world: &str) -> Answer<ServerBackups> {
+        let there = backup::list(&self.backups_dir(world));
+        Ok(ServerBackups { plan: self.plan(world)?, count: there.len() as u32, last: there.first().map(|(a, _)| a.at).unwrap_or(0) })
+    }
+
+    /// Backs up the worlds whose time has come — not one being written right
+    /// now; it comes the next time round.
+    fn due(&self) {
+        let Ok(worlds) = self.store.list_worlds() else { return };
+        for meta in worlds {
+            let world = meta.public.world_id.to_string();
+            let Ok(plan) = self.plan(&world) else { continue };
+            let Some(period) = backup::period(&plan.every) else { continue };
+            let into = self.backups_dir(&world);
+            let last = backup::list(&into).first().map(|(a, _)| a.at).unwrap_or(0);
+            if store::now().saturating_sub(last) < period {
+                continue;
+            }
+            let Ok(Some(Some(_writing))) = self.claim(&world, true) else { continue };
+            let gm = self.known(&world).map(|k| k.gm_id).unwrap_or_default();
+            match backup::copy_world(&self.store.world_dir(&world), &into, &world, &meta.public.name, &gm, Some(plan.keep), |_| Ok(())) {
+                Ok(at) => println!("{world}: backed up to {}", at.display()),
+                Err(e) => eprintln!("{world}: backup failed: {}", e.0),
+            }
+        }
     }
 
     fn carry_out(&self, order: Order) -> Answer<()> {
@@ -723,6 +793,44 @@ mod tests {
         assert!(!state(&keeper, &marla).worlds.is_empty());
         drop(writing);
         assert!(matches!(keeper.answer(&eldermere, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Digest { .. }));
+    }
+
+    #[test]
+    fn a_world_here_is_backed_up_by_the_server_as_its_gm_asks() {
+        let dir = tempfile::tempdir().unwrap();
+        let marla = someone(dir.path(), "Marla");
+        let tim = someone(dir.path(), "Tim");
+        let keeper = keeper(dir.path(), &marla);
+        let (eldermere, _) = world(&marla, "Eldermere");
+        swap(&keeper, &marla, &eldermere);
+        assert!(keeper.store.holds(&eldermere));
+        let backups = |who: &Someone, plan: Option<BackupPlan>| keeper.answer(&eldermere, &who.me.public(), Ask::Backups { plan });
+
+        // Daily, seven kept — until its GM says otherwise. Nobody else asks.
+        let Reply::Backups { backups: first } = backups(&marla, None) else { panic!("its GM asks") };
+        assert_eq!((first.plan.every.as_str(), first.plan.keep, first.count), ("daily", 7, 0));
+        assert_eq!(backups(&tim, None), Reply::NotOffered);
+        assert_eq!(backups(&tim, Some(BackupPlan { every: "off".into(), keep: 1 })), Reply::NotOffered);
+
+        // Due: backed up once, then not again before a day is over.
+        keeper.due();
+        keeper.due();
+        let Reply::Backups { backups: after } = backups(&marla, None) else { panic!() };
+        assert_eq!(after.count, 1);
+        assert!(after.last > 0);
+        let there = backup::list(&keeper.backups_dir(&eldermere));
+        assert!(there[0].1.join("world").is_dir(), "the world's folder, as it was");
+
+        // Being written: not now, the next time round.
+        let writing = keeper.claim(&eldermere, true).unwrap().unwrap();
+        keeper.due();
+        drop(writing);
+
+        // Weekly, three kept — on disk, after a restart too. Nonsense is refused.
+        assert!(matches!(backups(&marla, Some(BackupPlan { every: "weekly".into(), keep: 3 })), Reply::Backups { .. }));
+        assert_eq!(backups(&marla, Some(BackupPlan { every: "hourly".into(), keep: 3 })), Reply::NotOffered);
+        let again = Keeper::open(keeper.store.clone(), dir.path(), marla.me.id().to_string()).unwrap();
+        assert_eq!(again.plan(&eldermere).unwrap(), BackupPlan { every: "weekly".into(), keep: 3 });
     }
 
     #[test]

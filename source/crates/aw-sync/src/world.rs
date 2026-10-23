@@ -118,6 +118,25 @@ pub enum Ask {
     Manage { order: Option<Order> },
     /// To bring worlds to a server — the admin decides.
     HostWorlds,
+    /// How a server backs this world up — asked by its GM or the server's
+    /// admin; with a plan (`off`, `daily`, `weekly`; how many stay), set first.
+    Backups { plan: Option<BackupPlan> },
+}
+
+/// How often a server backs a world up by itself, and how many backups stay.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupPlan {
+    pub every: String,
+    pub keep: u32,
+}
+
+/// A world's backups on its server: the plan, and those there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerBackups {
+    pub plan: BackupPlan,
+    pub count: u32,
+    /// Milliseconds since 1970 of the newest — 0: none yet.
+    pub last: u64,
 }
 
 /// What a server's admin orders.
@@ -225,6 +244,8 @@ pub enum Reply {
     },
     /// What a server holds and who uses it — for its admin.
     Managed { state: ServerState },
+    /// How a server backs a world up.
+    Backups { backups: ServerBackups },
     /// What a call came to: its answer as JSON, or why not.
     Called {
         #[serde(default, skip_serializing_if = "Option::is_none")]

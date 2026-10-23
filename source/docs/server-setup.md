@@ -68,6 +68,12 @@ or with a port, `worlds.example.org:4001` – or the full code. The admin then s
 **Manage** at the server: which GMs may bring worlds, which worlds are closed, who is
 turned away. A GM brings a world with *Options → World → Where it lives → Move or copy …*.
 
+**Backups.** The server backs up each world it holds by itself — daily, the last
+seven kept, until the world's GM changes it under *Options → World → Backups*. They lie
+in `aw-server/backups/` beside the worlds, so the volume holds them too; copy that
+folder elsewhere now and then. A backup holds the world's files encrypted as they are;
+the keys stay with the GM.
+
 ## On a Synology NAS
 
 Container Manager runs on the x86-64 models (the "+" series).

@@ -22,7 +22,7 @@
 - [Maps](architecture/maps.md): `<map>` to pan and zoom, pins with a name and a target, layers that switch to the map of another document.
 - [Assigning players](architecture/assignment.md): documents, types and attributes per player, `view=self` for what belongs to the assigned player.
 - [Links](architecture/links.md): `@@Type:Name@@`, a property's value, anchors in the text (`@@#^c70ff9|the inn@@`).
-- [Backups](architecture/backups.md): a world backed up by hand, daily or weekly, how many stay, its keys sealed for the GM; restoring.
+- [Backups](architecture/backups.md): on this device by hand, its keys sealed for the GM; on a server daily or weekly by itself, how many stay; restoring.
 
 ## Testing
 

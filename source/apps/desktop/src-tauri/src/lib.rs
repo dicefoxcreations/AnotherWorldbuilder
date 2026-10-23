@@ -2149,7 +2149,6 @@ pub fn run() {
         // stands, then it is clamped into the usable area.
         .setup(|app| {
             network::start(app.handle()).map_err(|e| std::io::Error::other(e.0))?;
-            backup::start(app.handle());
             browser::start(app.handle());
             if let Some(w) = app.get_webview_window("main") {
                 window_state::on_start(app.handle().clone(), w);
@@ -2177,6 +2176,7 @@ pub fn run() {
             network::network_share,
             network::network_servers,
             network::server_manage,
+            network::server_backups,
             network::server_host_worlds,
             network::remote_call,
             network::network_copies_set,

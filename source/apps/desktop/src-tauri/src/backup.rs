@@ -1,6 +1,7 @@
 //! Backups of a world: its folder as it was at a time, in a folder of the
-//! GM's choice — by hand, or daily or weekly by themselves, as many kept as
-//! asked for.
+//! GM's choice. On this device they are made by hand and all of them stay;
+//! a server backs up the worlds it holds by itself, daily or weekly, as many
+//! kept as their GM asks for (`server.rs`, with `copy_world` from here).
 //!
 //! The world's files are named by their content and never change, so a file
 //! the last backup holds already is a hard link to it there: each backup
@@ -19,43 +20,34 @@ const KEYS: &str = "keys.sealed";
 /// Where the plan of a world's backups lies, in its private folder.
 const PLAN: &str = "backup.json";
 
-/// How often a world is backed up by itself, how many backups stay, and where.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+/// Where a world's backups go.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Plan {
-    /// `off`, `daily` or `weekly`.
-    pub every: String,
-    pub keep: u32,
     /// Empty: `backups/` beside the worlds' folder.
     #[serde(default)]
     pub folder: String,
 }
 
-impl Default for Plan {
-    fn default() -> Self {
-        Plan { every: "off".into(), keep: 7, folder: String::new() }
-    }
-}
-
-impl Plan {
-    fn period(&self) -> Option<u64> {
-        match self.every.as_str() {
-            "daily" => Some(24 * 3600 * 1000),
-            "weekly" => Some(7 * 24 * 3600 * 1000),
-            _ => None,
-        }
+/// How often a backup comes by itself — on a server.
+pub(crate) fn period(every: &str) -> Option<u64> {
+    match every {
+        "daily" => Some(24 * 3600 * 1000),
+        "weekly" => Some(7 * 24 * 3600 * 1000),
+        _ => None,
     }
 }
 
 /// What a backup says of itself.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct About {
+pub(crate) struct About {
     format: String,
     version: u32,
     world: String,
     name: String,
     /// Milliseconds since 1970.
-    at: u64,
-    /// The GM whose identity opens the keys.
+    pub(crate) at: u64,
+    /// The GM whose identity opens the keys — empty for a server's backup,
+    /// which holds no keys: the GM's own profile has them.
     gm: String,
 }
 
@@ -109,7 +101,7 @@ pub(crate) fn view(store: &Store, world: &str) -> Answer<View> {
 }
 
 /// The finished backups in a folder, newest first.
-fn list(folder: &Path) -> Vec<(About, PathBuf)> {
+pub(crate) fn list(folder: &Path) -> Vec<(About, PathBuf)> {
     let mut out: Vec<(About, PathBuf)> = std::fs::read_dir(folder)
         .into_iter()
         .flatten()
@@ -127,10 +119,6 @@ pub(crate) fn set_plan(store: &Store, world: &str, plan: Plan) -> Answer<View> {
     if !store.is_gm(world) {
         return Err(AppError("Only the GM backs up a world.".into()));
     }
-    if !["off", "daily", "weekly"].contains(&plan.every.as_str()) {
-        return Err(AppError("Off, daily or weekly.".into()));
-    }
-    let plan = Plan { keep: plan.keep.clamp(1, 365), ..plan };
     aw_store::durable::write(&store.private_world_dir(world).join(PLAN), &serde_json::to_vec_pretty(&plan)?)?;
     view(store, world)
 }
@@ -141,7 +129,7 @@ fn unchanging(path: &Path) -> bool {
     stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// Backs a world up now, then lets go of the oldest beyond what is kept.
+/// Backs a world up now — by hand; every backup stays.
 pub(crate) fn backup(store: &Store, world: &str) -> Answer<View> {
     if !store.is_gm(world) {
         return Err(AppError("Only the GM backs up a world.".into()));
@@ -151,18 +139,31 @@ pub(crate) fn backup(store: &Store, world: &str) -> Answer<View> {
     }
     let plan = plan(store, world)?;
     let into = folder(store, world, &plan)?;
-    std::fs::create_dir_all(&into)?;
+    let me = store.load_identity()?;
+    let name = store.load_world_meta(world)?.public.name;
+    copy_world(&store.world_dir(world), &into, world, &name, &me.id().to_string(), None, |partial| {
+        std::fs::write(partial.join(KEYS), serde_json::to_vec(&seal_keys(store, world, &me)?)?)?;
+        Ok(())
+    })?;
+    view(store, world)
+}
+
+/// A new backup of a world's folder `from` in `into`. A file named by its
+/// content that the last backup holds already is a hard link to it there:
+/// each backup takes the room of what is new only. `beside` writes what goes
+/// along — the keys. `keep`: how many stay, the oldest let go; `None`: all.
+pub(crate) fn copy_world(from: &Path, into: &Path, world: &str, name: &str, gm: &str, keep: Option<u32>, beside: impl FnOnce(&Path) -> Answer<()>) -> Answer<PathBuf> {
+    std::fs::create_dir_all(into)?;
     // A backup broken off before lies under a name starting with a dot.
-    for e in std::fs::read_dir(&into)?.flatten() {
+    for e in std::fs::read_dir(into)?.flatten() {
         if e.file_name().to_string_lossy().starts_with(".partial-") {
             let _ = std::fs::remove_dir_all(e.path());
         }
     }
     let at = store::now();
-    let last = list(&into).into_iter().next().map(|(_, p)| p.join("world"));
+    let last = list(into).into_iter().next().map(|(_, p)| p.join("world"));
     let partial = into.join(format!(".partial-{at}"));
-    let from = store.world_dir(world);
-    let mut dirs = vec![from.clone()];
+    let mut dirs = vec![from.to_path_buf()];
     while let Some(dir) = dirs.pop() {
         for entry in std::fs::read_dir(&dir)? {
             let path = entry?.path();
@@ -170,7 +171,7 @@ pub(crate) fn backup(store: &Store, world: &str) -> Answer<View> {
                 dirs.push(path);
                 continue;
             }
-            let rel = path.strip_prefix(&from).map_err(|e| AppError(e.to_string()))?;
+            let rel = path.strip_prefix(from).map_err(|e| AppError(e.to_string()))?;
             let target = partial.join("world").join(rel);
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -182,23 +183,26 @@ pub(crate) fn backup(store: &Store, world: &str) -> Answer<View> {
             std::fs::copy(&path, &target)?;
         }
     }
-    let me = store.load_identity()?;
-    std::fs::write(partial.join(KEYS), serde_json::to_vec(&seal_keys(store, world, &me)?)?)?;
-    let about = About { format: FORMAT.into(), version: 1, world: world.into(), name: store.load_world_meta(world)?.public.name, at, gm: me.id().to_string() };
+    std::fs::create_dir_all(&partial)?;
+    beside(&partial)?;
+    let about = About { format: FORMAT.into(), version: 1, world: world.into(), name: name.into(), at, gm: gm.into() };
     aw_store::durable::write(&partial.join(FILE), &serde_json::to_vec_pretty(&about)?)?;
     // Two in the same second: the second gets a number.
-    let mut name = stamp(at);
+    let mut stamped = stamp(at);
     for n in 2.. {
-        if !into.join(&name).exists() {
+        if !into.join(&stamped).exists() {
             break;
         }
-        name = format!("{} ({n})", stamp(at));
+        stamped = format!("{} ({n})", stamp(at));
     }
-    std::fs::rename(&partial, into.join(name))?;
-    for (_, old) in list(&into).into_iter().skip(plan.keep.max(1) as usize) {
-        let _ = std::fs::remove_dir_all(old);
+    let done = into.join(stamped);
+    std::fs::rename(&partial, &done)?;
+    if let Some(keep) = keep {
+        for (_, old) in list(into).into_iter().skip(keep.max(1) as usize) {
+            let _ = std::fs::remove_dir_all(old);
+        }
     }
-    view(store, world)
+    Ok(done)
 }
 
 fn seal_keys(store: &Store, world: &str, me: &Identity) -> Answer<SealedKeys> {
@@ -267,27 +271,6 @@ pub(crate) fn restore(store: &Store, file: &Path) -> Answer<String> {
     Ok(about.world)
 }
 
-/// Backs up, by themselves, the worlds whose time has come — looked at now
-/// and then while the app runs.
-pub(crate) fn due(store: &Store) {
-    let Ok(worlds) = store.list_worlds() else { return };
-    for meta in worlds {
-        let world = meta.public.world_id.to_string();
-        if !store.is_gm(&world) {
-            continue;
-        }
-        let Ok(plan) = plan(store, &world) else { continue };
-        let Some(period) = plan.period() else { continue };
-        let Ok(at) = folder(store, &world, &plan) else { continue };
-        let last = list(&at).first().map(|(a, _)| a.at).unwrap_or(0);
-        if store::now().saturating_sub(last) >= period {
-            if let Err(e) = backup(store, &world) {
-                eprintln!("backup of {world}: {}", e.0);
-            }
-        }
-    }
-}
-
 #[cfg(feature = "gui")]
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn backup_view(app: tauri::AppHandle, world: String) -> Answer<View> {
@@ -326,21 +309,6 @@ pub fn backup_restore(app: tauri::AppHandle, path: String) -> Answer<WorldInfo> 
     world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
 }
 
-#[cfg(feature = "gui")]
-/// Looks now and then whether a world is due — a minute after the start, then every quarter hour.
-pub fn start(app: &tauri::AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(60));
-        loop {
-            if let Ok(store) = store(&app) {
-                due(&store);
-            }
-            std::thread::sleep(std::time::Duration::from_secs(15 * 60));
-        }
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,7 +324,7 @@ mod tests {
         let page = |s: &Store| document::code_of(s, &gm, &world, &meta.home).unwrap().code;
         let before = page(&store);
 
-        set_plan(&store, &world, Plan { every: "daily".into(), keep: 2, folder: dir.path().join("safe").display().to_string() }).unwrap();
+        set_plan(&store, &world, Plan { folder: dir.path().join("safe").display().to_string() }).unwrap();
         let first = backup(&store, &world).unwrap();
         assert_eq!(first.backups.len(), 1);
         // The next links what did not change: the same file, not a copy.
@@ -374,13 +342,9 @@ mod tests {
         let (a, b) = (record(&second.backups[0]), record(&second.backups[1]));
         use std::os::unix::fs::MetadataExt;
         assert_eq!(std::fs::metadata(&a).unwrap().ino(), std::fs::metadata(b.parent().unwrap().join(a.file_name().unwrap())).unwrap().ino());
-        // Kept: two, the oldest goes.
+        // By hand, every one stays.
         std::thread::sleep(std::time::Duration::from_millis(5));
-        assert_eq!(backup(&store, &world).unwrap().backups.len(), 2);
-        // Not due again today.
-        let count = std::fs::read_dir(dir.path().join("safe")).unwrap().count();
-        due(&store);
-        assert_eq!(std::fs::read_dir(dir.path().join("safe")).unwrap().count(), count);
+        assert_eq!(backup(&store, &world).unwrap().backups.len(), 3);
 
         // Lost: the world and its keys. The backup brings both back.
         let newest = PathBuf::from(&view(&store, &world).unwrap().backups[0].path).join(FILE);
@@ -394,6 +358,22 @@ mod tests {
         let other = Store::new(dir.path().join("eve"));
         other.save_identity(&Identity::create("Eve").unwrap()).unwrap();
         assert!(restore(&other, &newest).is_err());
+    }
+
+    #[test]
+    fn a_server_keeps_as_many_as_asked_and_lets_go_of_the_oldest() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("world");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::write(from.join("a.txt"), "a").unwrap();
+        let into = dir.path().join("backups");
+        for _ in 0..4 {
+            copy_world(&from, &into, "world:1", "Eldermere", "", Some(2), |_| Ok(())).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let left = list(&into);
+        assert_eq!(left.len(), 2);
+        assert!(left[0].0.at > left[1].0.at, "the newest first");
     }
 
     #[test]

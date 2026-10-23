@@ -745,7 +745,7 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
             _ => Reply::NotOffered,
         },
         // A device lists no worlds and has no admin; a server does.
-        Ask::Worlds | Ask::Manage { .. } | Ask::HostWorlds => Reply::NotOffered,
+        Ask::Worlds | Ask::Manage { .. } | Ask::HostWorlds | Ask::Backups { .. } => Reply::NotOffered,
         Ask::Give { records } => {
             store.receive(world, &records)?;
             if store.handed_over(world)? {
@@ -2048,6 +2048,21 @@ pub async fn server_manage(app: tauri::AppHandle, server: String, order: Option<
     match ask(&net, &Via::Server(server), "", &me, Ask::Manage { order }).await? {
         Reply::Managed { state } => Ok(state),
         _ => Err(AppError("Only the server's admin manages it.".into())),
+    }
+}
+
+#[cfg(feature = "gui")]
+/// How the server a world lives on backs it up — with a plan, set first. Its GM asks.
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn server_backups(app: tauri::AppHandle, world: String, plan: Option<aw_sync::world::BackupPlan>) -> Answer<aw_sync::world::ServerBackups> {
+    let store = store(&app)?;
+    let me = store.load_identity()?;
+    let code = store.load_network()?.home_of(&world).cloned().ok_or_else(|| AppError("This world lives on no server.".into()))?;
+    let net = running().ok_or_else(|| AppError("The network is switched off.".into()))?;
+    let server = Server::parse(&code).map_err(|e| AppError(e.to_string()))?;
+    match ask(&net, &Via::Server(server), &world, &me, Ask::Backups { plan }).await? {
+        Reply::Backups { backups } => Ok(backups),
+        _ => Err(AppError("The server does not back this world up — it may be older than this app.".into())),
     }
 }
 

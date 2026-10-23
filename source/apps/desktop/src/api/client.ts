@@ -169,7 +169,10 @@ export type StorageView = {
 export type StorageChoice = { base: string } | { profile: string; worlds: string; additional?: string[] };
 /** What a server holds of a GM's world, measured against this device. */
 /** How often a world backs itself up, how many backups stay, where (empty: beside the worlds). */
-export type BackupPlan = { every: "off" | "daily" | "weekly"; keep: number; folder: string };
+export type BackupPlan = { folder: string };
+/** How the server a world lives on backs it up by itself. */
+export type ServerBackupPlan = { every: "off" | "daily" | "weekly"; keep: number };
+export type ServerBackups = { plan: ServerBackupPlan; count: number; last: number };
 export type BackupView = { plan: BackupPlan; folder: string; backups: { at: number; path: string }[] };
 
 export type WorldCheck = { records: number; missing: number; new: number; parts: number; intact: number; lacking: number; repaired: number };
@@ -1072,6 +1075,8 @@ export const api = {
   backupView: (world: string) => invoke<BackupView>("backup_view", { world }),
   backupPlanSet: (world: string, plan: BackupPlan) => invoke<BackupView>("backup_plan_set", { world, plan }),
   backupNow: (world: string) => invoke<BackupView>("backup_now", { world }),
+  /** The server's backups of a world it holds — with a plan, set first. */
+  serverBackups: (world: string, plan: ServerBackupPlan | null = null) => invoke<ServerBackups>("server_backups", { world, plan }),
   backupOpen: (world: string) => invoke<void>("backup_open", { world }),
   /** Brings a world back from a backup — `path` is its `backup.awbackup`. */
   backupRestore: async (path: string) => toWorld(await invoke<Raw>("backup_restore", { path })),
