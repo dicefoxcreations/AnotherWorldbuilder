@@ -1221,8 +1221,7 @@ export const api = {
   windowOpen: (world: string, place: Place, title: string, part?: string) =>
     invoke<void>("window_open", { world, place: JSON.stringify(place), title, part: part ?? null }),
   /** Whether the tools for developing show — see `DEV_TOOLS` in Rust. */
-  devTools: () => invoke<boolean>("dev_tools"),
-  /** Shows the window as a phone, or as it was. A development tool. */
+  /** Shows the window as a phone, or as it was — for layout checks in tests. */
   phoneView: (on: boolean) => invoke<void>("phone_view", { on }),
   /** Opens a document as code — only with what this reader can decrypt. */
   documentOpen: async (world: string, article: string) =>

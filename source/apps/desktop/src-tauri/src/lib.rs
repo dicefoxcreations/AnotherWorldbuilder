@@ -2036,24 +2036,11 @@ fn query_part(value: &str) -> String {
         .collect()
 }
 
-/// The tools for developing — the phone view. On in every build while the
-/// app is still being developed; off before the first public release.
-const DEV_TOOLS: bool = true;
-
-/// Whether the tools for developing show.
-#[cfg_attr(feature = "gui", tauri::command)]
-fn dev_tools() -> bool {
-    DEV_TOOLS
-}
-
 #[cfg(feature = "gui")]
 /// Shows the main window as a phone — or at another size, a tablet's — or
-/// as it was: a development tool.
+/// as it was: for layout checks from the tests (`invoke`), no button in the app.
 #[cfg_attr(feature = "gui", tauri::command)]
 fn phone_view(window: tauri::WebviewWindow, on: bool, size: Option<(f64, f64)>) -> Answer<()> {
-    if !DEV_TOOLS {
-        return Err(AppError("The phone view is a development tool".into()));
-    }
     window_state::phone(&window, on, size).map_err(AppError::from)
 }
 
@@ -2262,7 +2249,6 @@ pub fn run() {
             texts_written,
             markdown_read,
             legend_open,
-            dev_tools,
             phone_view,
             window_open,
             today_in_world,

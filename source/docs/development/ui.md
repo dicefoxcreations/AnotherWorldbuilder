@@ -71,7 +71,7 @@ Whether infobox and side column stand beside the text is decided by the room of 
 
 On the phone (below 600 px) the header is one row: ☰, back, the page's name, dice and ⋮. The path before it is dropped – back and the outline lead there. ⋮ opens a sheet with all other tools one below the other, each with its name (the button's `title`); a click beside it closes it, profile and notices open above it at screen width. "In a new window" and the developer tools are missing there.
 
-Checking is done with the phone view (📱, Ctrl+Shift+M) and with every new screen. For other sizes the command `phone_view` takes a size: `invoke("phone_view", {on: true, size: [768, 1024]})` (tablet portrait), `[1024, 768]` (landscape).
+Checking is done with every new screen through the command `phone_view` (no button in the app): `invoke("phone_view", {on: true})` for a phone; other sizes: `invoke("phone_view", {on: true, size: [768, 1024]})` (tablet portrait), `[1024, 768]` (landscape).
 
 ## The outline on the left and the path at the top
 

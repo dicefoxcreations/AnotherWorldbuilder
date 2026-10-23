@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { api, type ArticleView, type IdentityInfo, type Template, type WorldInfo } from "../api/client";
 import { label } from "../shared/ui/Visibility";
@@ -98,36 +98,6 @@ export function HeaderBar({
   const held = (preview ?? []).filter((a) => !EVERY_PLAYER.includes(a));
   const named = (a: string) => (world ? label(a, world, false, names && { self: null, ...names }) : a);
 
-  // A development tool: the window as a phone, to see the layout an
-  // Android device gets. Ctrl+Shift+M like in the browser's tools — the
-  // button may well be out of reach on a phone-wide bar.
-  const [dev, setDev] = useState(false);
-  const [phone, setPhone] = useState(false);
-  useEffect(() => {
-    api
-      .devTools()
-      .then(setDev)
-      .catch(() => setDev(false));
-  }, []);
-  const togglePhone = useCallback(() => {
-    const next = !phone;
-    api
-      .phoneView(next)
-      .then(() => setPhone(next))
-      .catch(onError);
-  }, [phone, onError]);
-  useEffect(() => {
-    if (!dev) return;
-    const key = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "m") {
-        e.preventDefault();
-        togglePhone();
-      }
-    };
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
-  }, [dev, togglePhone]);
-
   // What sits fixed below the bar — the versions — needs to know where it ends.
   const bar = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -210,16 +180,6 @@ export function HeaderBar({
       <div className={more ? "header-right open" : "header-right"}>
         {people}
         <div className="header-tools" ref={toolsRef} />
-
-        {dev && (
-          <button
-            className={phone ? "dev-tool ghost icon round on" : "dev-tool ghost icon round"}
-            onClick={togglePhone}
-            title={phone ? "Back to the desktop window (Ctrl+Shift+M)" : "Phone view — a development tool (Ctrl+Shift+M)"}
-          >
-            📱
-          </button>
-        )}
 
         <DiceButton />
 

@@ -203,7 +203,6 @@ fieldset input, fieldset textarea, fieldset select { width: 100%; margin-bottom:
 .header-tools .segmented button { height: 30px; padding: 0 9px; display: grid; place-items: center; }
 .header-tools .badge { position: absolute; top: -6px; right: -7px; }
 /* A development tool — dashed, so it is never taken for part of the app. */
-.header-right > button.dev-tool { border: 1px dashed var(--track); }
 
 .eye-count { position: absolute; right: -1px; bottom: -1px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 9px; font-weight: 700; display: grid; place-items: center; }
 .header-right .dropdown > button { position: relative; }
@@ -243,7 +242,7 @@ button.icon.more-button, .phone-only { display: none; }
   .header-right .dropdown { width: 100%; }
   .header-right .popover { position: fixed; left: 8px; right: 8px; top: 60px; width: auto; max-height: calc(100dvh - 76px); overflow-y: auto; }
   /* In the bar already, or no use on a phone — after the rows above, which would show them again. */
-  .header-right > button.icon[title="Dice"], .header-tools > button.icon.apart-button, .header-right > button.icon.dev-tool { display: none; }
+  .header-right > button.icon[title="Dice"], .header-tools > button.icon.apart-button { display: none; }
 }
 
 .preview-banner { flex-basis: 100%; margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent-line); font-size: 13px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
