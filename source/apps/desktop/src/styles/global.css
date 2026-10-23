@@ -92,7 +92,8 @@ button.ghost { background: transparent; border-color: transparent; }
 button.ghost:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
 button.ghost.on { background: var(--accent-soft); border-color: var(--accent); }
 button.compact { padding: 3px 9px; font-size: 13px; }
-button.icon { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; line-height: 1; }
+/* An icon button keeps its size beside long text — never squeezed into an oval. */
+button.icon { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; line-height: 1; flex: none; }
 button.icon.compact { width: 26px; height: 26px; font-size: 13px; }
 button.round { border-radius: 50%; }
 .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; white-space: nowrap; }
@@ -461,6 +462,14 @@ button.icon.more-button, .phone-only { display: none; }
   .gallery-body, .gallery-body.with-detail, .gallery-body.flat.with-detail { grid-template-columns: minmax(0, 1fr); }
   .gallery-body > :first-child:not(.gallery-grid-area) { max-height: 180px; overflow-y: auto; border-bottom: 1px solid var(--border); }
   .gallery-head .search { width: 100%; order: 3; }
+}
+/* Wide: the head stays where it is; folders, pictures and the one picture
+   shown each scroll on their own. */
+@media (min-width: 1151px) {
+  .type-page.wide.gallery { overflow: hidden; }
+  .gallery-body { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  .gallery-body > * { min-height: 0; overflow-y: auto; }
+  .gallery-body > .gallery-detail { position: static; align-self: start; max-height: 100%; }
 }
 @media (max-width: 1150px) {
   .gallery-body.with-detail { grid-template-columns: 200px minmax(0, 1fr); }
