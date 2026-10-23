@@ -678,6 +678,8 @@ main:has(.side-column) { overflow-x: clip; }
 /* Who sees and changes the box, like a section's — at its top right. */
 /* Whom the infobox is for, where it differs: on its top line, as at the head. */
 .infobox { position: relative; }
+/* Room between the access on its line and what comes first — the picture. */
+.infobox:has(> .infobox-access) { padding-top: 24px; }
 .infobox-access { position: absolute; top: 0; right: 12px; transform: translateY(-50%); display: flex; padding: 0 6px; border-radius: 999px; background: var(--base); z-index: 1; }
 .infobox dl { margin: 0; display: flex; flex-direction: column; gap: 10px; }
 .infobox-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

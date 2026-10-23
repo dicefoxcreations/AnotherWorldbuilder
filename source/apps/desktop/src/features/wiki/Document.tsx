@@ -23,7 +23,7 @@ import {
 } from "../../api/client";
 import { FoldBlock, SideColumn } from "../../shared/ui/BlockFold";
 import { addSection, BlockSettings, moveBlock, ownerOf, ShapeRows } from "./BlockSettings";
-import { ArticlePage } from "./ArticlePage";
+import { ArticlePage, DeleteDocument } from "./ArticlePage";
 import { makeDocument } from "./Article";
 import { nameFrom, nextNumber } from "../templates/NamePattern";
 import { linkIcon } from "./DocLink";
@@ -335,6 +335,7 @@ export function DocumentPage({
             marks={chosen ? version.marks : null}
             session={session}
             switches={switches}
+            deleteButton={<DeleteDocument world={world} article={article} templates={templates} onPlace={onPlace} onChanged={onChanged} onError={onError} />}
             historyButton={
               <>
                 {apartButton}
@@ -576,6 +577,7 @@ function DocumentEditor({
   session,
   switches,
   historyButton,
+  deleteButton,
   onSaved,
   onError,
 }: {
@@ -583,6 +585,8 @@ function DocumentEditor({
   article: ArticleView;
   templates: Template[];
   all: ArticleView[];
+  /** Deleting the document — here, while editing, not beside what one reads. */
+  deleteButton?: React.ReactNode;
   layout: Layout;
   side: Side;
   /** A version to show beside the document — the editor then shows both. */
@@ -951,13 +955,16 @@ function DocumentEditor({
           title={doc.name || article.name}
           type={typeOf(templates, article.articleType) ? <span className="chip">{typeOf(templates, article.articleType)!.name}</span> : null}
           marks={
-            <AccessLine
-              world={world}
-              view={doc.access.view}
-              edit={doc.access.edit}
-              onView={world.isGm ? (view) => changeDoc({ ...doc, access: { ...doc.access, view } }) : undefined}
-              onEdit={world.isGm ? (edit) => changeDoc({ ...doc, access: { ...doc.access, edit } }) : undefined}
-            />
+            <>
+              <AccessLine
+                world={world}
+                view={doc.access.view}
+                edit={doc.access.edit}
+                onView={world.isGm ? (view) => changeDoc({ ...doc, access: { ...doc.access, view } }) : undefined}
+                onEdit={world.isGm ? (edit) => changeDoc({ ...doc, access: { ...doc.access, edit } }) : undefined}
+              />
+              {deleteButton}
+            </>
           }
         />
       </CurrentDocument.Provider>
@@ -1307,8 +1314,8 @@ type SectionChoice = {
 };
 type SectionEntry = { article: ArticleView; anchor: string; shown: string; line: string };
 
-/** Every anchor of the documents — named, or by the words of its line. */
-function sectionsOf(all: ArticleView[]): SectionEntry[] {
+/** Every anchor of the documents — named, or by the words of its line, links read by their names. */
+function sectionsOf(all: ArticleView[], resolve: (link: Link) => ArticleView | undefined): SectionEntry[] {
   const out: SectionEntry[] = [];
   for (const article of all) {
     const seen = new Set<string>();
@@ -1318,7 +1325,7 @@ function sectionsOf(all: ArticleView[]): SectionEntry[] {
         seen.add(anchor);
         // What one reads of the line: links by their text, no marks.
         const read = scanLinks(line)
-          .map((p) => (typeof p === "string" ? p : p.text))
+          .map((p) => (typeof p === "string" ? p : p.text !== p.name ? p.text : (resolve(p)?.name ?? "")))
           .join("")
           .replace(/[*_`|>#]/g, " ")
           .replace(/^\s*([-+]|\d+[.)])\s+/, "")
@@ -1549,6 +1556,7 @@ function useBricks(gm: boolean, text: string, onText: (t: string) => void, links
     };
   };
   /** Sections: the selection marked as one, a link to one put in at the selection. */
+  const resolve = linker(links.all, links.templates);
   const sectionsFor = ([from, to]: [number, number]): SectionChoice => {
     const put = (next: string, at: number) => {
       setMenu(null);
@@ -1565,14 +1573,14 @@ function useBricks(gm: boolean, text: string, onText: (t: string) => void, links
               const base = anchorName(name);
               if (!base) return;
               // Unique in the document: a second of the same name gets a number.
-              const taken = new Set(sectionsOf(links.all.filter((a) => a.id === links.selfId)).map((s) => s.anchor));
+              const taken = new Set(sectionsOf(links.all.filter((a) => a.id === links.selfId), resolve).map((s) => s.anchor));
               let anchor = base;
               for (let n = 2; taken.has(anchor) || anchorsIn(text).some((a) => a.anchor === anchor); n++) anchor = `${base}-${n}`;
               const next = markSection(text, from, to, anchor);
               if (next) put(next, to);
             }
           : undefined,
-      found: sectionsOf(links.all),
+      found: sectionsOf(links.all, resolve),
       onLink: (s) => {
         const words = text.slice(from, to);
         const shown = words.trim() && !/[\n@|]/.test(words) ? words : s.shown;

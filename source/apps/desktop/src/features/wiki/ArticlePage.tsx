@@ -18,10 +18,10 @@ import { headingOf, MarkdownText, useMarkdowns, type TopFolds, type ValueOf } fr
 import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
 import { InfoboxForm, NumberHow, PropertyValue } from "./InfoboxForm";
 import { linker, linksIn, type Resolve } from "../../shared/Links";
-import { idsIn, propertyNamed, isProperties, pageOwner, typeOf } from "../../shared/types";
+import { findType, idsIn, propertyNamed, isProperties, pageOwner, typeOf } from "../../shared/types";
 import { explain, lookupFor, sumOf, summedValues } from "../../shared/Sheet";
 import { RollScopeContext, type RollScope } from "../dice/DiceTray";
-import { CurrentDocument, ReadableParts, useWorldData } from "../worlds/WorldData";
+import { CurrentDocument, ReadableParts } from "../worlds/WorldData";
 import { FoldBlock, SideColumn, useFoldedHeadings } from "../../shared/ui/BlockFold";
 import { sectioned } from "../../shared/Sections";
 import { joinPins } from "../../shared/GraphText";
@@ -108,10 +108,6 @@ export function ArticlePage({
    */
   glance?: boolean;
 }) {
-  const [remove, setRemove] = useState(false);
-  const data = useWorldData();
-  // A preview looks as the player would: no game master's controls either.
-  const gm = world.isGm && !data?.previewing;
   const template = typeOf(templates, article.articleType);
   const resolve = useMemo(() => linker(all, templates), [all, templates]);
   const readableParts = useMemo(() => new Set(article.layers.map((l) => l.section)), [article]);
@@ -290,9 +286,6 @@ export function ArticlePage({
             {actions}
             {/* Who views and who changes it — to know whom to ask; changed while editing. */}
             {!glance && article.visibility && <AccessLine world={world} view={article.visibility} edit={article.edit} />}
-            {/* The world's and a type's page belong to them — they go only
-                with their owner. */}
-            {!glance && gm && !owner && <DeleteButton what={article.name} onClick={() => setRemove(true)} />}
           </>
         }
       />
@@ -352,24 +345,6 @@ export function ArticlePage({
             more than you.
           </p>
         </section>
-      )}
-      {remove && (
-        <DeleteDialog
-          title={`Delete ${article.name}`}
-          name={article.name}
-          warning="The article goes with every one of its parts — including the ones you cannot see right now. This cannot be undone."
-          onCancel={() => setRemove(false)}
-          onDelete={(confirmation) =>
-            api
-              .articleDelete(world.id, article.id, confirmation)
-              .then(() => {
-                setRemove(false);
-                onPlace(template ? { kind: "list", articleType: article.articleType } : { kind: "types" });
-                onChanged();
-              })
-              .catch(onError)
-          }
-        />
       )}
     </article>
     </NumberHow.Provider>
@@ -503,3 +478,50 @@ export function ownBlock(key: string, first: { title: string; fields: unknown })
     parts: [],
   };
 }
+
+/**
+ * Deleting a document — while editing only, never beside what one reads.
+ * The world's and a type's page belong to them: they go only with their owner.
+ */
+export function DeleteDocument({
+  world,
+  article,
+  templates,
+  onPlace,
+  onChanged,
+  onError,
+}: {
+  world: WorldInfo;
+  article: ArticleView;
+  templates: Template[];
+  onPlace: (o: Place) => void;
+  onChanged: () => void;
+  onError: (e: unknown) => void;
+}) {
+  const [remove, setRemove] = useState(false);
+  if (!world.isGm || pageOwner(templates, world.home, article)) return null;
+  return (
+    <>
+      <DeleteButton what={article.name} onClick={() => setRemove(true)} />
+      {remove && (
+        <DeleteDialog
+          title={`Delete ${article.name}`}
+          name={article.name}
+          warning="The article goes with every one of its parts — including the ones you cannot see right now. This cannot be undone."
+          onCancel={() => setRemove(false)}
+          onDelete={(confirmation) =>
+            api
+              .articleDelete(world.id, article.id, confirmation)
+              .then(() => {
+                setRemove(false);
+                onPlace(findType(templates, article.articleType) ? { kind: "list", articleType: article.articleType } : { kind: "types" });
+                onChanged();
+              })
+              .catch(onError)
+          }
+        />
+      )}
+    </>
+  );
+}
+
