@@ -112,3 +112,7 @@ folder `D&D 5e.awpack`.
 | [`programs/`](programs/) | Checksums, license notices and server files of the current version; the programs themselves are under [Releases](../../releases/latest) |
 | [`templates/`](templates/) | Templates to start a world with |
 | [`source/`](source/) | Source code, [build guide](source/README.md) and [documentation](source/docs/README.md) |
+
+## License
+
+© 2026 DiceFox Creations. All rights reserved — see [LICENSE](LICENSE).

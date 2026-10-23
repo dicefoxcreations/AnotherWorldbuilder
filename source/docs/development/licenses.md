@@ -4,7 +4,7 @@ As of 14 October 2026. Not legal advice but a technical inventory; before sellin
 
 ## The project's own license
 
-`Cargo.toml` declares the project as **AGPL-3.0-or-later**. A `LICENSE` file with the text is still missing from the repository. The AGPL allows selling, but every buyer may pass the program on together with its source code, for free as well. If the app is to be sold as proprietary software, the own license has to change; the third-party libraries below allow that (no GPL in the program itself).
+The project has no open-source license: `LICENSE` at the top of the repository reserves all rights (as of 23 October 2026). The notices in the app say the same. The third-party libraries below allow selling the app as proprietary software (no GPL in the program itself).
 
 ## What is inside the app
 

@@ -6,8 +6,8 @@ As of October 2026. Code: `crates/aw-model/src/link.rs` (reading and writing), `
 
 | Written | Shows |
 | --- | --- |
-| `@@Place:Waterdeep@@` | the document, with its type in front for documents of the same name |
-| `@@Waterdeep|the city@@` | the document, under text of its own |
+| `@@Place:Gullwind@@` | the document, with its type in front for documents of the same name |
+| `@@Gullwind|the city@@` | the document, under text of its own |
 | `@@Character:Tim#Status@@` | the value of Tim's property *Status* |
 | `@@Session 1#^c70ff9|the inn@@` | the line of *Session 1* closed by the anchor `^c70ff9` |
 | `@@#^c70ff9|the inn@@` | the same, in this document |

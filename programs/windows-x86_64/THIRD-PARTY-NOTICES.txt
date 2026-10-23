@@ -1,4 +1,4 @@
-AnotherWorldbuilder is licensed under AGPL-3.0-or-later.
+AnotherWorldbuilder © 2026 DiceFox Creations. All rights reserved.
 It is built with the third-party software listed below, each under its own
 license. Their copyright notices and license texts follow.
 

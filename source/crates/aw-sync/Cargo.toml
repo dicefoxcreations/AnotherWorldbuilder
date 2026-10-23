@@ -3,7 +3,6 @@ publish = false
 name = "aw-sync"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 rust-version = "1.91"
 
 [dependencies]

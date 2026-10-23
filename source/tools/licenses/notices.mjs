@@ -63,8 +63,7 @@ const js = [...seen.values()]
   .map(({ pkg, text }) => `------------------------------------------------------------------------\n${pkg.name} ${pkg.version} (${pkg.license})\n\n${text}\n`)
   .join("\n");
 
-const license = /^license = "([^"]+)"/m.exec(fs.readFileSync(path.join(root, "Cargo.toml"), "utf8"))?.[1] ?? "see LICENSE";
-const text = `AnotherWorldbuilder is licensed under ${license}.
+const text = `AnotherWorldbuilder © 2026 DiceFox Creations. All rights reserved.
 It is built with the third-party software listed below, each under its own
 license. Their copyright notices and license texts follow.
 
