@@ -22,6 +22,12 @@ impl Journal {
         self.append(Record::Proposal(proposal))
     }
 
+    /// How one is shown in the world — see `Badge`.
+    pub fn badge(&mut self, author: &Identity, colour: &str, of: Vec<String>, at: u64) -> Result<String> {
+        let badge = Badge::new(self.world.world_id.as_str(), author, colour, of, at)?;
+        self.append(Record::Badge(badge))
+    }
+
     /// A gallery entry of one's own: a new image, or a new name.
     pub fn put_image(&mut self, entry: crate::media::ImageEntry) -> Result<String> {
         self.append(Record::Image(entry))

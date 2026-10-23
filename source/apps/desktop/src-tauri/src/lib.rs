@@ -103,6 +103,8 @@ pub struct WorldInfo {
     pub invited: Vec<String>,
     /// New ids that take a player's place once let in: new id → old id.
     pub takeovers: std::collections::BTreeMap<String, String>,
+    /// Members' colours by the terms that name them — `player:<name>`, `doc:…`.
+    pub colours: std::collections::BTreeMap<String, String>,
     /// The member the GM hands the world over to, once they show up.
     pub handover: Option<String>,
     /// Whether players' writing waits for the GM before the others see it.
@@ -420,6 +422,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         requests: if is_gm { store.load_requests(&id)?.len() } else { 0 },
         invited: if is_gm { meta.invited.clone() } else { Vec::new() },
         takeovers: if is_gm { store.takeovers(&id)? } else { Default::default() },
+        colours: store.colours(&id)?,
         handover: if is_gm { store.pending_handover(&id)? } else { None },
         moderated: store.moderated(&id)?,
         version_limit: store.version_limit(&id)?,
@@ -904,6 +907,16 @@ pub(crate) fn admit(
         Some(old) => Ok(store.remove_member(world, old.identity.id.as_str())?),
         None => Ok(meta),
     }
+}
+
+#[cfg(feature = "gui")]
+/// One's own colour in a world — on one's name and the documents assigned to one.
+#[cfg_attr(feature = "gui", tauri::command)]
+fn member_colour_set(app: tauri::AppHandle, world: String, colour: String) -> Answer<WorldInfo> {
+    let store = store(&app)?;
+    let me = store.load_identity()?;
+    store.set_badge(&world, &colour)?;
+    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
 }
 
 #[cfg(feature = "gui")]
@@ -2218,6 +2231,7 @@ pub fn run() {
             member_add,
             member_remove,
             member_replace,
+            member_colour_set,
             backup::backup_view,
             backup::backup_plan_set,
             backup::backup_now,

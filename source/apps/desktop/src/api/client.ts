@@ -50,6 +50,8 @@ export type WorldInfo = {
   invited: string[];
   /** New ids that take a player's place once let in: new id → old id. */
   takeovers: Record<string, string>;
+  /** Members' own colours by the terms that name them — `player:<name>`, `doc:…`. */
+  colours: Record<string, string>;
   /** The member the GM hands the world over to, once they show up. */
   handover: string | null;
   /** Whether players' writing waits for the GM before the others see it. */
@@ -499,6 +501,7 @@ const toWorld = (r: Raw): WorldInfo => ({
   requests: r.requests ?? 0,
   invited: r.invited ?? [],
   takeovers: (r.takeovers as Record<string, string>) ?? {},
+  colours: (r.colours as Record<string, string>) ?? {},
   handover: r.handover ?? null,
   moderated: !!r.moderated,
   waiting: r.waiting ?? 0,
@@ -1083,6 +1086,8 @@ export const api = {
   /** Takes a member out — or an id let in ahead of time. */
   memberRemove: async (world: string, id: string) =>
     toWorld(await invoke<Raw>("member_remove", { world, id })),
+  /** One's own colour in a world: on one's name and the documents assigned to one. */
+  memberColourSet: async (world: string, colour: string) => toWorld(await invoke<Raw>("member_colour_set", { world, colour })),
   /** A player's new id takes the old one's place — at once, or once it is let in. */
   memberReplace: async (world: string, old: string, id: string) =>
     toWorld(await invoke<Raw>("member_replace", { world, old, new: id })),

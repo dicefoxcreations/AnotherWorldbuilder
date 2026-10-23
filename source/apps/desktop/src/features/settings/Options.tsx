@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { StorageArea } from "./Storage";
 import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
@@ -873,6 +873,7 @@ function PlayersArea({
               <strong>{me.name}</strong> <span className="role-badge player">Player</span>
               <small className="small">{world.attributes.filter((a) => !PLAIN.includes(a)).join(", ")}</small>
             </div>
+            <OwnColour world={world} me={me} onChanged={onChanged} onError={onError} />
           </li>
         </ul>
       </div>
@@ -966,6 +967,7 @@ function PlayersArea({
                   <small key={fresh} className="accent">Moves to {fresh} as soon as it connects.</small>
                 ))}
               </div>
+              {m.id === me.id && <OwnColour world={world} me={me} onChanged={onChanged} onError={onError} />}
               {m.id !== me.id && (
                 <div className="line">
                   {world.moderated && (
@@ -1068,6 +1070,31 @@ function PlayersArea({
  * network it happens when they next connect; a file is sealed for them
  * alone, and this device steps down at once.
  */
+/**
+ * One's own colour in this world — on one's name and the characters
+ * assigned to one, for everyone. Signed by oneself; no GM needed.
+ */
+function OwnColour({ world, me, onChanged, onError }: { world: WorldInfo; me: IdentityInfo; onChanged: () => void; onError: (e: unknown) => void }) {
+  const now = world.colours[`player:${me.name.toLowerCase()}`] ?? "#2fc6b2";
+  // Kept once chosen — not at every step while the picker is dragged.
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    const chosen = () => {
+      if (el.value !== now) api.memberColourSet(world.id, el.value).then(onChanged).catch(onError);
+    };
+    el.addEventListener("change", chosen);
+    return () => el.removeEventListener("change", chosen);
+  }, [world.id, now]);
+  return (
+    <label className="own-colour" title="Your colour — on your name and your characters, for everyone">
+      <input ref={input} type="color" key={now} defaultValue={now} />
+      <span className="small">Your colour</span>
+    </label>
+  );
+}
+
 /** A player's new id: what was theirs goes to it, the old one leaves. */
 function NewIdDialog({ member, onCancel, onGive }: { member: MemberInfo; onCancel: () => void; onGive: (id: string) => void }) {
   const [id, setId] = useState("");

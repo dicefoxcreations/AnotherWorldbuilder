@@ -60,6 +60,7 @@ const SUGGESTION: &str = "anotherworldbuilder/suggestion/1";
 const BLOCK: &str = "anotherworldbuilder/block/1";
 const VERSION: &str = "anotherworldbuilder/version/1";
 const PROPOSAL: &str = "anotherworldbuilder/proposal/1";
+const BADGE: &str = "anotherworldbuilder/badge/1";
 /// A whole document travels in one version — texts are not that big.
 pub const MAX_RECORD: usize = 16 * 1024 * 1024;
 /// Versions kept per document when the game master has not said otherwise.
@@ -528,6 +529,59 @@ pub enum Record {
     Version(Version),
     Image(crate::media::ImageEntry),
     Proposal(Proposal),
+    Badge(Badge),
+}
+
+/// How a member is shown in a world: their colour — on their name, and on
+/// the documents assigned to them they name (`of`, `doc:…`), which only
+/// they and the GM know otherwise. Signed by them; of each member the newest
+/// counts. Every device of the world takes it in — no game master needed.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Badge {
+    pub world: String,
+    pub author: IdentityPublic,
+    /// Milliseconds since 1970, by the author's clock.
+    pub at: u64,
+    /// `#rrggbb`.
+    pub colour: String,
+    pub of: Vec<String>,
+    pub signature: String,
+}
+
+impl Badge {
+    pub fn new(world: &str, author: &Identity, colour: &str, of: Vec<String>, at: u64) -> Result<Self> {
+        let mut b = Badge { world: world.to_string(), author: author.public(), at, colour: colour.to_string(), of, signature: String::new() };
+        b.check()?;
+        b.signature = hex::encode(author.sign(&b.signed_bytes()?));
+        Ok(b)
+    }
+
+    fn signed_bytes(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&(BADGE, &self.world, &self.author, self.at, &self.colour, &self.of))?)
+    }
+
+    fn check(&self) -> Result<()> {
+        let hex = self.colour.strip_prefix('#').is_some_and(|h| h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit()));
+        if !hex {
+            return Err("a colour is #rrggbb".into());
+        }
+        if self.of.len() > 32 || self.of.iter().any(|a| !a.starts_with("doc:") || a.len() > 64) {
+            return Err("a badge names documents only".into());
+        }
+        Ok(())
+    }
+
+    fn verify(&self, world: &str) -> Result<()> {
+        if self.world != world {
+            return Err("a record of another world".into());
+        }
+        if !self.author.is_genuine() {
+            return Err("an author whose id does not match their keys".into());
+        }
+        self.check()?;
+        self.author.verify(&self.signed_bytes()?, &signature(&self.signature)?)?;
+        Ok(())
+    }
 }
 
 /// A member's new document, for the game master's device to make.
@@ -651,6 +705,7 @@ fn place(id: &str, record: &Record) -> Option<(Vec<String>, String)> {
         Record::Version(v) => Some((vec!["articles".into(), dir_name(&v.article.to_string())], format!("{id}.json"))),
         Record::Image(_) => Some((vec!["media".into()], format!("{id}.json"))),
         Record::Proposal(_) => Some((vec!["proposals".into()], format!("{id}.json"))),
+        Record::Badge(_) => Some((vec!["members".into()], format!("{id}.json"))),
         Record::Draft(_) => None,
     }
 }
@@ -839,6 +894,8 @@ pub struct Journal {
     images: BTreeMap<String, crate::media::ImageEntry>,
     /// New documents members asked for, by the proposal's id.
     proposals: BTreeMap<String, Proposal>,
+    /// The newest badge of each member, by member id — with its record's id.
+    badges: BTreeMap<String, (String, Badge)>,
     /// Blocks whose changes checked out on this device.
     trusted: HashSet<String>,
     /// Versions known from the index, whose files need no reading.
@@ -916,6 +973,7 @@ fn order(record: &Record) -> (u8, u64) {
         Record::Draft(d) => (2, d.time),
         Record::Image(i) => (3, i.time),
         Record::Proposal(p) => (4, p.at),
+        Record::Badge(b) => (5, b.at),
     }
 }
 
@@ -944,6 +1002,7 @@ impl Journal {
             full: Default::default(),
             images: BTreeMap::new(),
             proposals: BTreeMap::new(),
+            badges: BTreeMap::new(),
             attached: index.attached,
             trusted: index.trusted.into_iter().collect(),
             indexed: index.versions,
@@ -998,7 +1057,7 @@ impl Journal {
 
     /// The folders records lie in.
     fn folders(&self) -> Vec<PathBuf> {
-        let mut out = vec![self.dir.join("control"), self.dir.join("media"), self.dir.join("proposals")];
+        let mut out = vec![self.dir.join("control"), self.dir.join("media"), self.dir.join("proposals"), self.dir.join("members")];
         if let Ok(entries) = std::fs::read_dir(self.dir.join("articles")) {
             out.extend(entries.filter_map(|e| e.ok()).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()));
         }
@@ -1248,7 +1307,7 @@ impl Journal {
                 _ => None,
             },
             Record::Draft(d) => Some(Some(d.article)),
-            Record::Proposal(_) => Some(None),
+            Record::Proposal(_) | Record::Badge(_) => Some(None),
             Record::Image(_) | Record::Version(_) => None,
         };
         match record {
@@ -1276,6 +1335,24 @@ impl Journal {
                 self.raw.insert(id.clone(), raw);
                 self.arrived.entry(id.clone()).or_insert_with(now);
                 self.images.insert(id.clone(), entry);
+            }
+            Record::Badge(badge) => {
+                badge.verify(self.world.world_id.as_str())?;
+                // Only a member's — whose grant may still be on its way.
+                if !self.is_member(&badge.author) {
+                    self.waiting.insert(id, Pending::Record(raw, Box::new(Record::Badge(badge)), write));
+                    return Ok(Added::Waiting);
+                }
+                self.waiting.remove(&id);
+                if write {
+                    self.store(&id, &raw, &Record::Badge(badge.clone()))?;
+                }
+                self.raw.insert(id.clone(), raw);
+                self.arrived.entry(id.clone()).or_insert_with(now);
+                let member = badge.author.id.to_string();
+                if self.badges.get(&member).is_none_or(|(_, b)| b.at <= badge.at) {
+                    self.badges.insert(member, (id.clone(), badge));
+                }
             }
             Record::Proposal(proposal) => {
                 proposal.verify(self.world.world_id.as_str())?;
@@ -1498,6 +1575,7 @@ impl Journal {
             Record::Draft(d) => self.head_of(d.layer, d.generation).is_some(),
             Record::Version(v) => matches!(self.check_version(v), Ok(Some(_))),
             Record::Proposal(p) => self.is_member(&p.author),
+            Record::Badge(b) => self.is_member(&b.author),
         }
     }
 
@@ -1811,6 +1889,11 @@ impl Journal {
     /// Whether a member's writing counts without waiting.
     pub fn trusted(&self, member: &str) -> bool {
         matches!(self.item(&format!("trust {member}")).map(|c| &c.item), Some(Item::Trust { trusted: true, .. }))
+    }
+
+    /// How each member is shown — the newest badge of each.
+    pub fn badges(&self) -> impl Iterator<Item = &Badge> {
+        self.badges.values().map(|(_, b)| b)
     }
 
     /// New documents members asked for, by the proposal's id.
@@ -2469,11 +2552,18 @@ impl Journal {
         out
     }
 
-    /// What every member gets: control, versions, gallery entries and
-    /// proposals.
+    /// What every member gets: control, versions, gallery entries,
+    /// proposals and each member's newest badge.
     pub fn shared(&self) -> Vec<String> {
-        let mut out: Vec<String> =
-            self.controls.keys().chain(self.versions.keys()).chain(self.images.keys()).chain(self.proposals.keys()).cloned().collect();
+        let mut out: Vec<String> = self
+            .controls
+            .keys()
+            .chain(self.versions.keys())
+            .chain(self.images.keys())
+            .chain(self.proposals.keys())
+            .chain(self.badges.values().map(|(id, _)| id))
+            .cloned()
+            .collect();
         out.sort();
         out
     }
@@ -2502,7 +2592,7 @@ impl Journal {
     }
 
     /// Records in an order the receiver can take them in: control first,
-    /// then versions, then drafts.
+    /// then versions, then drafts — gallery entries, proposals and badges last.
     pub fn in_order(&self, ids: &[String]) -> Vec<String> {
         let mut out: Vec<(u8, u64, String)> = ids
             .iter()
@@ -2515,8 +2605,14 @@ impl Journal {
                     Some((2, d.time, id.clone()))
                 } else if let Some(i) = self.images.get(id) {
                     Some((3, i.time, id.clone()))
+                } else if let Some(p) = self.proposals.get(id) {
+                    Some((4, p.at, id.clone()))
                 } else {
-                    self.proposals.get(id).map(|p| (4, p.at, id.clone()))
+                    // A badge — the newest of its member, or one before it.
+                    match serde_json::from_slice::<Record>(self.raw.get(id)?).ok()? {
+                        Record::Badge(b) => Some((5, b.at, id.clone())),
+                        _ => None,
+                    }
                 }
             })
             .collect();

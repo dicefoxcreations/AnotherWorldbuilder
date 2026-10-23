@@ -2273,6 +2273,45 @@ impl Store {
         Ok(())
     }
 
+    /// How this device's member is shown in the world: their colour — on
+    /// their name and on the documents assigned to them (`journal::Badge`).
+    pub fn set_badge(&self, world_id: &str, colour: &str) -> Result<()> {
+        let me = self.load_identity()?;
+        let of: Vec<String> = self
+            .load_world_meta(world_id)?
+            .member(me.id().as_str())
+            .map(|m| m.attributes.iter().filter(|a| a.starts_with("doc:")).cloned().collect())
+            .unwrap_or_default();
+        self.with_journal(world_id, |journal| {
+            journal.badge(&me, colour, of, now())?;
+            Ok(())
+        })
+    }
+
+    /// Members' colours by the terms that name them: `player:<name>`, and
+    /// the documents their badges name — one two badges name, by neither.
+    pub fn colours(&self, world_id: &str) -> Result<std::collections::BTreeMap<String, String>> {
+        if !self.holds(world_id) {
+            return Ok(Default::default());
+        }
+        self.with_journal(world_id, |journal| {
+            let mut out = std::collections::BTreeMap::new();
+            let mut claimed: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+            for badge in journal.badges() {
+                out.insert(format!("player:{}", badge.author.name.to_lowercase()), badge.colour.clone());
+                for doc in &badge.of {
+                    claimed.entry(doc.clone()).or_default().push(badge.colour.clone());
+                }
+            }
+            for (doc, colours) in claimed {
+                if colours.len() == 1 {
+                    out.insert(doc, colours[0].clone());
+                }
+            }
+            Ok(out)
+        })
+    }
+
     /// Ids that take a player's place once they are let in: new id → old id.
     /// For someone whose device was set up anew without their keys.
     pub fn takeovers(&self, world_id: &str) -> Result<std::collections::BTreeMap<String, String>> {

@@ -1992,3 +1992,9 @@ button.region-access:hover .bubble { border-color: var(--accent-line); }
 .anchor-lit { animation: anchor-lit 2.4s ease-out; border-radius: 4px; }
 /* An anchor closing a line (`^2f9e17`): the page shows nothing, the editor shows it faint. */
 .flow-anchor { color: var(--muted); font-size: 11px; opacity: .8; margin-left: 4px; cursor: pointer; user-select: none; }
+
+/* One's own colour in a world, beside one's name in Players. */
+.own-colour { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.own-colour input[type="color"] { width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 999px; background: none; overflow: hidden; cursor: pointer; }
+.own-colour input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.own-colour input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 999px; }

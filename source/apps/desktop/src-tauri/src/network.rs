@@ -2622,6 +2622,34 @@ mod tests {
     }
 
     #[test]
+    fn a_player_picks_their_colour_and_everyone_sees_it_on_their_character() {
+        let (dir, gm_store, gm, player_store, bob) = stores();
+        let world = new_world(&gm_store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        admit(&gm_store, &world, bob.public(), vec!["doc:BOBSCHARACTER".into()]).unwrap();
+        let carla_store = Store::new(dir.path().join("carla"));
+        let carla = Identity::create("Carla").unwrap();
+        carla_store.save_identity(&carla).unwrap();
+        admit(&gm_store, &world, carla.public(), Vec::new()).unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+
+        // Bob's own word, signed by him — no GM needed to take it.
+        player_store.set_badge(&world, "#3366cc").unwrap();
+        assert!(player_store.set_badge(&world, "blue").is_err(), "a colour is #rrggbb");
+        swap_here(&gm_store, &player_store, &bob, &world);
+        let colours = gm_store.colours(&world).unwrap();
+        assert_eq!(colours.get("player:bob").map(String::as_str), Some("#3366cc"));
+        assert_eq!(colours.get("doc:BOBSCHARACTER").map(String::as_str), Some("#3366cc"));
+        swap_here(&gm_store, &carla_store, &carla, &world);
+        assert_eq!(carla_store.colours(&world).unwrap().get("doc:BOBSCHARACTER").map(String::as_str), Some("#3366cc"), "Carla sees it too");
+
+        // The newest counts.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        player_store.set_badge(&world, "#aa2200").unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+        assert_eq!(gm_store.colours(&world).unwrap().get("player:bob").map(String::as_str), Some("#aa2200"));
+    }
+
+    #[test]
     fn a_removed_player_gets_nothing_more() {
         let (_dir, gm_store, gm, player_store, bob) = stores();
         let world = new_world(&gm_store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();

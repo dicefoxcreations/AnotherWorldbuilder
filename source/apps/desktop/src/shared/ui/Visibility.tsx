@@ -31,8 +31,10 @@ export { effective, samePolicy, terms } from "../Policies";
 /** Colours for names — not the GM's red, not everyone's green. */
 const TONES = ["var(--relation-0)", "var(--relation-1)", "var(--relation-2)", "var(--relation-5)", "#d2b55b"];
 
-/** The colour of a named term — a player, a character, a type: always the same one. */
-function tone(term: string): string {
+/** The colour of a named term — the one its player chose, or always the same one of a few. */
+function tone(term: string, world: WorldInfo): string {
+  const chosen = world.colours?.[term];
+  if (chosen) return chosen;
   let h = 0;
   for (const c of term.toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return TONES[h % TONES.length];
@@ -220,7 +222,7 @@ export function VisibilityPicker({
             key={t}
             // The GM cannot be taken away.
             className={`bubble ${t === "gm" ? "gm" : t === "all" ? "all" : "named"}${readOnly || t === "gm" ? " plain" : ""}`}
-            style={t === "gm" || t === "all" ? undefined : ({ "--tone": tone(t) } as CSSProperties)}
+            style={t === "gm" || t === "all" ? undefined : ({ "--tone": tone(t, world) } as CSSProperties)}
             title={label(t, world, false, around)}
           >
             {t === "gm" && parts.length > 1 ? "GM" : label(t, world, small, around)}
