@@ -23,7 +23,7 @@ import { EyeIcon, PenIcon } from "./Icons";
  * is added by name comes to the GM, who always stays (`effective`).
  */
 
-import { BASICS, effective, OR } from "../Policies";
+import { BASICS, effective, OR, samePolicy } from "../Policies";
 
 export { effective, samePolicy, terms } from "../Policies";
 
@@ -345,3 +345,47 @@ export function AccessLine({
     </span>
   );
 }
+
+/**
+ * Who a region of a section is for — a quiet line at its top: the names
+ * only, the GM left out (they see everything anyway). The pen joins the
+ * eye where the same may change it; otherwise it names its own.
+ */
+export function RegionAccess({
+  world,
+  view,
+  edit,
+  onClick,
+}: {
+  world: WorldInfo;
+  view: string;
+  edit: string;
+  /** Editing: where its access is changed. */
+  onClick?: () => void;
+}) {
+  const data = useWorldData();
+  const self = useContext(CurrentDocument);
+  const around = { self, articles: data?.articles ?? [], templates: data?.templates ?? [] };
+  // Unencrypted, no view or right counts — nothing to show.
+  if (!world.encrypted) return null;
+  const names = (policy: string) => {
+    const named = effective(policy).filter((t) => t.toLowerCase() !== "gm");
+    return named.length === 0 ? "GM" : named.map((t) => label(t, world, true, around)).join(", ");
+  };
+  const same = samePolicy(view, edit);
+  const Tag = onClick ? "button" : "span";
+  return (
+    <Tag className="region-access" onClick={onClick} title={onClick ? "Who sees and changes it" : undefined}>
+      <EyeIcon />
+      {same && <PenIcon />}
+      <span>{names(view)}</span>
+      {!same && (
+        <>
+          <PenIcon />
+          <span>{names(edit)}</span>
+        </>
+      )}
+    </Tag>
+  );
+}
+

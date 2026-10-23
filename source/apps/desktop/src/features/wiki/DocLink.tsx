@@ -19,6 +19,7 @@ export function DocLink({
   articleType,
   templates,
   context,
+  anchor,
   onOpen,
   children,
 }: {
@@ -27,11 +28,13 @@ export function DocLink({
   templates: Template[];
   /** The type the spot already names — a field's target, a list's type. */
   context?: string;
+  /** A line of it (`^2f9e17`): resting on the link shows that part alone. */
+  anchor?: string;
   onOpen: () => void;
   children: ReactNode;
 }) {
   return (
-    <button className="wikilink" data-preview={id} data-icon={linkIcon(templates, articleType, context)} onClick={onOpen}>
+    <button className="wikilink" data-preview={id} data-preview-anchor={anchor} data-icon={linkIcon(templates, articleType, context)} onClick={onOpen}>
       {children}
     </button>
   );

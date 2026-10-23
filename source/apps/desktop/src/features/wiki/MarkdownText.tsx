@@ -392,6 +392,7 @@ function Element({
             id={doc.id}
             articleType={doc.articleType}
             templates={world?.templates ?? []}
+            anchor={node.property.slice(1)}
             onOpen={() => leadTo(doc.id, node.property.slice(1), current, () => onPlace({ kind: "article", id: doc.id }))}
           >
             {shown}

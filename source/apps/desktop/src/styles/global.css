@@ -1040,9 +1040,9 @@ button.ability-also:hover { border-color: var(--accent); background: var(--accen
 .block-view.quiet { opacity: 0; transition: opacity .12s; }
 .block:hover .block-view.quiet, .block-view.quiet:focus-within { opacity: 1; }
 .block-part + .block-part { margin-top: 10px; }
-.block-part.guarded { padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--sunken); border-radius: 0 8px 8px 0; }
-.block-part.level-gm-only { border-left-color: var(--danger-line); }
-.block-part.level-sealed { border-left-color: var(--accent-line); }
+.block-part.guarded { padding: 6px 12px 8px; border: 1px dashed var(--accent-line); border-radius: 8px; }
+.block-part.level-gm-only { border-color: var(--danger-line); }
+.block-part.level-sealed { border-color: var(--accent-line); }
 .block-part .block-view { margin-left: 0; }
 
 /* Click access instead of typing it — the same choice as everywhere else. */
@@ -1327,6 +1327,11 @@ svg.graph.fit { max-width: 100%; height: auto; }
 }
 /* The page as it reads, laid out narrower and drawn smaller — a look, not a read. */
 .link-preview-page { zoom: .9; width: 808px; }
+/* A link to a line: that part alone, the page drawn out of sight for it. */
+.link-preview.anchored { width: auto; max-width: min(640px, calc(100vw - 16px)); }
+.link-preview-part > .markdown > :first-child { margin-top: 0; }
+.link-preview-part > .markdown > :last-child { margin-bottom: 0; }
+.link-preview-page.out-of-sight { position: absolute; visibility: hidden; height: 0; overflow: hidden; pointer-events: none; }
 .link-preview .article-page { width: 100%; margin: 0; }
 .group-preview { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px; }
 .group-preview .property-row dt { padding-top: 0; }
@@ -1970,11 +1975,16 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 7px; font: 12px/1.6 v
 .quick-none { padding: 6px 8px; }
 .keys-help h3 { margin: 4px 4px 0; }
 
-/* A part with access of its own says whom it is for — at its top, always. */
-.part-access { display: flex; justify-content: flex-end; margin: -2px 0 4px; font-size: 12px; }
+/* A region with access of its own: a quiet frame, whom it is for at its top. */
+.region-access { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 4px; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; line-height: 1.4; }
+.region-access svg { width: 13px; height: 13px; flex: none; opacity: .8; }
+.region-access span { margin-left: 2px; }
+.region-access span + svg { margin-left: 8px; }
+button.region-access { cursor: pointer; }
+button.region-access:hover { color: var(--text); }
 
 /* Where a link to an anchor (`@@#^2f9e17|…@@`) arrives: lit up for a moment. */
-@keyframes anchor-lit { from { background: var(--accent-soft); } to { background: transparent; } }
-.anchor-lit { animation: anchor-lit 1.8s ease-out; border-radius: 4px; }
+@keyframes anchor-lit { 0%, 40% { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-line); } 100% { background: transparent; box-shadow: 0 0 0 2px transparent; } }
+.anchor-lit { animation: anchor-lit 2.4s ease-out; border-radius: 4px; }
 /* An anchor closing a line (`^2f9e17`): the page shows nothing, the editor shows it faint. */
 .flow-anchor { color: var(--muted); font-size: 11px; opacity: .7; }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { anchorIn, anchoredPart } from "../../shared/Anchors";
 import { useWorldData } from "../worlds/WorldData";
 import { ArticlePage } from "./ArticlePage";
 
@@ -20,7 +21,8 @@ const SHOW_MS = 450;
 const HIDE_MS = 300;
 const WIDTH = 760;
 
-type Card = { id: string; box: DOMRect };
+/** `anchor`: a link to a line of the document — the card shows that part alone. */
+type Card = { id: string; anchor?: string; box: DOMRect };
 
 export function LinkPreview() {
   const data = useWorldData();
@@ -47,13 +49,15 @@ export function LinkPreview() {
       const depth = depthOf(e.target);
       const link = (e.target as Element | null)?.closest?.("[data-preview]");
       const id = link ? link.getAttribute("data-preview") : null;
+      const anchor = link?.getAttribute("data-preview-anchor") ?? undefined;
       clearTimeout(showTimer.current);
       clearTimeout(hideTimer.current);
       if (link && id) {
         // The card this link opened already: it stays, and those above it.
-        if (current.current[depth + 1]?.id === id) return;
+        const open = current.current[depth + 1];
+        if (open?.id === id && open.anchor === anchor) return;
         showTimer.current = setTimeout(() => {
-          setStack((s) => [...s.slice(0, depth + 1), { id, box: link.getBoundingClientRect() }]);
+          setStack((s) => [...s.slice(0, depth + 1), { id, anchor, box: link.getBoundingClientRect() }]);
         }, SHOW_MS);
         return;
       }
@@ -110,25 +114,70 @@ export function LinkPreview() {
             ref={(el) => {
               cards.current[i] = el;
             }}
-            className="link-preview"
+            className={card.anchor ? "link-preview anchored" : "link-preview"}
             style={style}
             role="tooltip"
           >
-            <div className="link-preview-page">
-              <ArticlePage
-                world={data.world}
-                article={article}
-                templates={data.templates}
-                all={data.articles}
-                onPlace={data.onPlace}
-                onChanged={data.onChanged}
-                onError={() => {}}
-                glance
-              />
-            </div>
+            {(() => {
+              const page = (
+                <ArticlePage
+                  world={data.world}
+                  article={article}
+                  templates={data.templates}
+                  all={data.articles}
+                  onPlace={data.onPlace}
+                  onChanged={data.onChanged}
+                  onError={() => {}}
+                  glance
+                />
+              );
+              return card.anchor ? <PartOnly anchor={card.anchor}>{page}</PartOnly> : <div className="link-preview-page">{page}</div>;
+            })()}
           </div>
         );
       })}
     </>
   );
 }
+
+/**
+ * Of a page, the part an anchor stands for — a paragraph, a list item, a
+ * table. The page is drawn out of sight; once the anchor is in it, a copy of
+ * its part is shown. Not there (closed to this reader, or gone): the page.
+ */
+function PartOnly({ anchor, children }: { anchor: string; children: ReactNode }) {
+  const hidden = useRef<HTMLDivElement>(null);
+  const shown = useRef<HTMLDivElement>(null);
+  const [missing, setMissing] = useState(false);
+  useLayoutEffect(() => {
+    const page = hidden.current;
+    if (!page) return;
+    const take = () => {
+      const spot = anchorIn(page, anchor);
+      const part = spot && anchoredPart(spot);
+      if (!part || !shown.current) return false;
+      const copy = part.cloneNode(true) as Element;
+      // A table stands with its frame; a lone row or item with the list around it.
+      const holder = document.createElement(part.tagName === "LI" ? (part.parentElement?.tagName === "OL" ? "ol" : "ul") : "div");
+      holder.className = "markdown";
+      holder.appendChild(copy);
+      shown.current.replaceChildren(holder);
+      return true;
+    };
+    if (take()) return;
+    // The text is read after the page is drawn — wait for it.
+    const watch = new MutationObserver(() => take() && watch.disconnect());
+    watch.observe(page, { childList: true, subtree: true });
+    const give = setTimeout(() => (watch.disconnect(), setMissing(true)), 2000);
+    return () => (watch.disconnect(), clearTimeout(give));
+  }, [anchor]);
+  return (
+    <>
+      <div ref={shown} className="link-preview-part" />
+      <div ref={hidden} className={missing ? "link-preview-page" : "link-preview-page out-of-sight"}>
+        {children}
+      </div>
+    </>
+  );
+}
+

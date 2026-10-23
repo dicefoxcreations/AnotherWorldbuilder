@@ -15,7 +15,7 @@ import {
 import { ArticleHead } from "./ArticleHead";
 import { DeleteButton, DeleteDialog } from "../../shared/ui/Delete";
 import { headingOf, MarkdownText, useMarkdowns, type TopFolds, type ValueOf } from "./MarkdownText";
-import { AccessLine, samePolicy } from "../../shared/ui/Visibility";
+import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
 import { InfoboxForm, NumberHow, PropertyValue } from "./InfoboxForm";
 import { linker, linksIn, type Resolve } from "../../shared/Links";
 import { idsIn, propertyNamed, isProperties, pageOwner, typeOf } from "../../shared/types";
@@ -208,6 +208,11 @@ export function ArticlePage({
     const edit = samePolicy(part.edit, article.edit) ? undefined : part.edit;
     return view === undefined && edit === undefined ? null : <AccessLine world={world} view={view} edit={edit} />;
   };
+  // At the top of a region with access of its own: whom it is for.
+  const region = (part: { policy: string; edit: string }) =>
+    samePolicy(part.policy, article.visibility) && samePolicy(part.edit, article.edit) ? null : (
+      <RegionAccess world={world} view={part.policy} edit={part.edit} />
+    );
   const drawBlock = (block: TemplateBlock) => {
     const parts = (partsOf.get(block.key) ?? []).filter((l) => l.text.trim() !== "");
     if (parts.length === 0) return null;
@@ -223,7 +228,7 @@ export function ArticlePage({
           block={block.key}
           layers={parts}
           base={article.visibility}
-          access={glance ? undefined : differs}
+          access={glance ? undefined : region}
           resolve={resolve}
           values={valueOf}
           onPlace={onPlace}
@@ -245,7 +250,7 @@ export function ArticlePage({
           block={block}
           access={!glance && differs(layers[0])}
         >
-          <BlockText article={article.id} block={section} layers={layers} base={article.visibility} access={glance ? undefined : differs} resolve={resolve} values={valueOf} onPlace={onPlace} />
+          <BlockText article={article.id} block={section} layers={layers} base={article.visibility} access={glance ? undefined : region} resolve={resolve} values={valueOf} onPlace={onPlace} />
         </FoldBlock>
       ));
 
@@ -476,7 +481,7 @@ function PartDisplay({
         layer.level !== "open" ? ` level-${layer.level}` : ""
       }`}
     >
-      {access && <div className="part-access">{access}</div>}
+      {access}
       <MarkdownText text={layer.text} nodes={nodes} folds={folds} resolve={resolve} value={values} onPlace={onPlace} />
     </div>
     </RollScopeContext.Provider>

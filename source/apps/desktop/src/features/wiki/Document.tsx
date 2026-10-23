@@ -28,7 +28,7 @@ import { makeDocument } from "./Article";
 import { nameFrom, nextNumber } from "../templates/NamePattern";
 import { linkIcon } from "./DocLink";
 import { ArticleHead } from "./ArticleHead";
-import { AccessLine, samePolicy } from "../../shared/ui/Visibility";
+import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
 import { late, VersionsPanel } from "./Versions";
 import { linker, linkIn, linksIn, linkText, linkTo, MARK, scanLinks, typeNames, type Link } from "../../shared/Links";
 import { withClosingTag } from "../../shared/editor/Closing";
@@ -2135,17 +2135,9 @@ export function VisualEditor({
                 part={part}
                 title={block.title}
                 inherited={part.view === base && part.level === "open"}
-                access={
+                region={
                   // The first part's stands at the section's title.
-                  p > 0 && !(samePolicy(part.view, doc.access.view) && samePolicy(part.edit, doc.access.edit)) && (
-                    <AccessLine
-                      world={world}
-                      view={samePolicy(part.view, doc.access.view) ? undefined : part.view}
-                      edit={samePolicy(part.edit, doc.access.edit) ? undefined : part.edit}
-                      onView={world.isGm ? (view) => setPart(b, p, { view }) : undefined}
-                      onEdit={world.isGm ? (edit) => setPart(b, p, { edit }) : undefined}
-                    />
-                  )
+                  p > 0 && !(samePolicy(part.view, doc.access.view) && samePolicy(part.edit, doc.access.edit))
                 }
                 removable={world.isGm && block.parts.length > 1}
                 links={links}
@@ -2909,15 +2901,15 @@ function PartEditor({
   onRemove,
   onCaret,
   graph,
-  access,
+  region,
 }: {
   world: WorldInfo;
   part: BlockPart;
   /** The section's title — to name the part by. */
   title: string;
   inherited: boolean;
-  /** Who views and changes it, where it differs from the document. */
-  access?: React.ReactNode;
+  /** A region with access of its own: says whom it is for at its top. */
+  region?: boolean;
   removable: boolean;
   links: Links;
   carets: RemoteCaret[];
@@ -2992,7 +2984,9 @@ function PartEditor({
         part.level !== "open" ? ` level-${part.level}` : ""
       }`}
     >
-      {access && <div className="part-access">{access}</div>}
+      {region && (
+        <RegionAccess world={world} view={part.view} edit={part.edit} onClick={world.isGm ? () => (setDismissed(false), setInspecting(true)) : undefined} />
+      )}
       {inspecting && (
         <Inspector title={title ? `Part · ${title}` : "Part"} onClose={() => (setInspecting(false), setDismissed(true))}>
           <AccessSection />
