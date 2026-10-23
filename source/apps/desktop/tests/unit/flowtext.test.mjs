@@ -72,3 +72,7 @@ test("a link in italic or bold text stays a link", () => {
   assert.equal(flat(runs("_A @@#^x|link@@ here._")), "italic(mark-hidden:_|A |link:@@#^x|link@@| here.|mark-hidden:_)");
   assert.equal(flat(runs("`@@not a link@@`")), "code(mark-hidden:`|@@not a link@@|mark-hidden:`)");
 });
+
+test("an anchor in a table's last cell is drawn on its own too", () => {
+  assert.equal(flat(runs("| Very rare | 5,000 pp ^rewards |")), "| Very rare | 5,000 pp|anchor: ^rewards| |");
+});

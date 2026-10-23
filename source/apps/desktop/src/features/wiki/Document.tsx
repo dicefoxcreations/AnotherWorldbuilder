@@ -2795,7 +2795,7 @@ function PropertyInput({
     const names = ids.map((id) => all.find((a) => a.id === id)?.name).filter(Boolean);
     return (
       <span className="small muted" title={`Set by their “${field.from}”`}>
-        {names.length ? names.join(", ") : "—"}
+        {names.length ? names.join(", ") : "—"} · from their “{field.from}”
       </span>
     );
   }

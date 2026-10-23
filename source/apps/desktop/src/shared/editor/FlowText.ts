@@ -21,8 +21,8 @@ const RULE = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*(\n|$)/;
 /** A roll: `[[…]]`, or dice as written — `2d6 + 3`, `1W20` — as Rust cuts them out. */
 const DICE = String.raw`(?<![\p{L}\p{N}_])\d{0,3}[dDwW]\d{1,4}(?:[ ]*[+-][ ]*(?:\d{0,3}[dDwW]\d{1,4}|\d{1,4})(?![\p{L}\p{N}_]))*(?![\p{L}\p{N}_])`;
 const ROLL = String.raw`\[\[(?:(?!\]\])[^\n])+\]\]`;
-/** `^2f9e17` closing a line: where a link leads to (`shared/Anchors`). */
-const ANCHOR = /(\s+\^[\p{L}\p{N}-]{1,64})(\s*)$/u;
+/** `^2f9e17` closing a line — in a table row before its last bar: where a link leads to (`shared/Anchors`). */
+const ANCHOR = /(\s+\^[\p{L}\p{N}-]{1,64})(\s*\|?\s*)$/u;
 // A link first: what stands between its marks is its own, not bold or italic.
 const INLINE = new RegExp(
   String.raw`(@@(?:(?!@@)[^\n])+?@@|${ROLL}|\*\*\*[^*\n]+\*\*\*|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|\x60[^\x60\n]+\x60|${DICE})`,
