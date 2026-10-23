@@ -30,6 +30,9 @@ import {
 } from "../../shared/types";
 import { relationsOf } from "../../shared/Relations";
 import { WorldImage } from "../../shared/ui/WorldImage";
+import { AddPick } from "../../shared/ui/MultiPick";
+import { editOnOpen } from "./Document";
+import { makeDocument } from "./Article";
 
 type ListingNode = Extract<Node, { kind: "listing" }>;
 
@@ -107,6 +110,8 @@ function ListingOf({ node }: { node: ListingNode }) {
   const [sorted, setSorted] = useState<SortKey | null>(null);
   // What a long list is searched for — by name and what it shows.
   const [needle, setNeedle] = useState("");
+  // A delete asked for once: the second click on its × does it.
+  const [asking, setAsking] = useState<string | null>(null);
   if (!data) {
     return (
       <p className="listing-placeholder small">
@@ -264,6 +269,75 @@ function ListingOf({ node }: { node: ListingNode }) {
       </select>
     ) : null;
 
+  // A list of what names this document — `where="Owner=self"`: the GM adds
+  // and takes away right here. `add=new` makes one naming this document (a
+  // kill) and × deletes it; else ＋ picks one that is there (an item) and ×
+  // lets go of it.
+  const backType = type && !node.from && !node.count ? typeOf(templates, type.id) : undefined;
+  const back =
+    backType && current && node.filter.length === 1 && node.filter[0][1] === "self" ? propertyNamed(backType, node.filter[0][0]) : undefined;
+  const here = back ? articles.find((a) => a.id === current) : undefined;
+  const backTarget = back && type ? targetOf(templates, type.id, back) : "";
+  const making = node.add === "new";
+  const mayBack =
+    !!back &&
+    !!here &&
+    back.kind === "reference" &&
+    !!backTarget &&
+    isA(templates, here.articleType, backTarget) &&
+    data.world.isGm &&
+    (making || !!back.multiple);
+  const letGo = (a: ArticleView) =>
+    mayBack ? (
+      <span
+        role="button"
+        tabIndex={0}
+        className={making && asking === a.id ? "pick-x asking" : "pick-x"}
+        title={making ? `Delete ${a.name}` : `Remove ${a.name} from ${here!.name}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (making && asking !== a.id) return setAsking(a.id);
+          setAsking(null);
+          const done = making
+            ? api.articleDelete(data.world.id, a.id, a.name)
+            : api.referencesSet(data.world.id, a.id, back!.key, idsIn(a, back!.key).filter((id) => id !== current));
+          done.then(data.onChanged).catch(() => {});
+        }}
+      >
+        {making && asking === a.id ? "Delete?" : "×"}
+      </span>
+    ) : null;
+  const makeOne = async () => {
+    const base = `${here!.name} – ${type!.name}`;
+    const taken = new Set(articles.map((a) => a.name));
+    let name = base;
+    for (let n = 2; taken.has(name); n++) name = `${base} (${n})`;
+    const id = await makeDocument(data.world.id, templates, articles, backType!, name, { [back!.key]: back!.kind === "reference" && back!.multiple ? [current] : current });
+    editOnOpen(id);
+    data.onChanged();
+    onPlace({ kind: "article", id });
+  };
+  const backAdd = !mayBack ? null : making ? (
+    <button className="compact listing-add" title={`New ${type!.name} for ${here!.name}`} onClick={() => void makeOne().catch(() => {})}>
+      ＋ {type!.name}
+    </button>
+  ) : (
+    <AddPick
+      title={`Add to ${here!.name}`}
+      open={articles
+        .filter((a) => isA(templates, a.articleType, type!.id) && !idsIn(a, back!.key).includes(current!))
+        .sort((a, b) => a.name.localeCompare(b.name))}
+      onAdd={(a) =>
+        void api
+          .referencesSet(data.world.id, a.id, back!.key, [...idsIn(a, back!.key), current!])
+          .then(data.onChanged)
+          .catch(() => {})
+      }
+    />
+  );
+  const adding = add ?? (backAdd ? <span className="listing-add-back">{backAdd}</span> : null);
+  const taking = mayPick ? remove : letGo;
+
   // What only follows the picks — a path, a condition — is simply not there when empty.
   if (docs.length === 0 && q)
     return (
@@ -272,7 +346,15 @@ function ListingOf({ node }: { node: ListingNode }) {
         <p className="small muted">Nothing found.</p>
       </div>
     );
-  if (docs.length === 0) return add ?? (along || node.when?.trim() || node.style === "inline" ? null : <p className="small muted">Nothing here yet.</p>);
+  if (docs.length === 0)
+    return adding ? (
+      <div className="listing-box">
+        <p className="small muted">Nothing here yet.</p>
+        {adding}
+      </div>
+    ) : along || node.when?.trim() || node.style === "inline" ? null : (
+      <p className="small muted">Nothing here yet.</p>
+    );
 
   const open = (a: ArticleView) => onPlace({ kind: "article", id: a.id });
   if (node.count) return <Tally node={node} docs={docs} templates={templates} articles={articles} type={type} open={open} />;
@@ -280,10 +362,10 @@ function ListingOf({ node }: { node: ListingNode }) {
   const sorting = picked || along ? undefined : { sorted, onSort: setSorted };
   if (node.style === "inline")
     return (
-      <Drawn node={node} docs={docs} scopes={entries} templates={templates} articles={articles} type={type} open={open} remove={remove} counter={counter} data={data} />
+      <Drawn node={node} docs={docs} scopes={entries} templates={templates} articles={articles} type={type} open={open} remove={taking} counter={counter} data={data} />
     );
   return (
-    <div className={`listing-box${mayPick ? " picking" : ""}`}>
+    <div className={`listing-box${mayPick || mayBack ? " picking" : ""}`}>
       {search}
       <Drawn
         node={node}
@@ -293,12 +375,12 @@ function ListingOf({ node }: { node: ListingNode }) {
         articles={articles}
         type={type}
         open={open}
-        remove={remove}
+        remove={taking}
         counter={counter}
         data={data}
         sorting={sorting}
       />
-      {add}
+      {adding}
     </div>
   );
 }

@@ -1335,12 +1335,15 @@ svg.graph.fit { max-width: 100%; height: auto; }
 .multi-pick .pick { display: inline-flex; align-items: center; gap: 2px; color: var(--accent); white-space: nowrap; padding: 1px 2px 1px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--accent-soft); }
 .multi-pick .pick-x { border: 0; background: transparent; padding: 0 5px; height: auto; min-height: 0; color: var(--muted); font-size: 13px; line-height: 1; }
 .multi-pick .pick-x:hover { color: var(--text); }
-.multi-pick .pick-add { position: relative; }
-.multi-pick .pick-add > button { padding: 1px 9px; border-radius: 999px; }
-.multi-pick .pick-menu { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; width: 240px; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .3); }
-.multi-pick .pick-menu input { width: 100%; }
-.multi-pick .pick-options { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; }
-.multi-pick .pick-options button { justify-content: flex-start; text-align: left; padding: 4px 8px; }
+/* A delete asked for once: it says so, the second click does it. */
+.pick-x.asking { color: var(--danger-text); opacity: 1; font-size: 12px; white-space: nowrap; }
+.listing-add-back { display: inline-flex; margin-top: 6px; }
+.pick-add { position: relative; }
+.pick-add > button { padding: 1px 9px; border-radius: 999px; }
+.pick-menu { position: absolute; z-index: 40; top: calc(100% + 4px); left: 0; width: 240px; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .3); }
+.pick-menu input { width: 100%; }
+.pick-options { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; }
+.pick-options button { justify-content: flex-start; text-align: left; padding: 4px 8px; }
 .multi-pick .pick-x:hover { color: var(--danger-text); }
 /* A pick's own number — the levels in a class — small, beside its name. */
 .multi-pick .pick-count, .every-pick .pick-count { width: 2.6em; min-width: 0; margin-left: 4px; padding: 0 4px; height: 22px; text-align: center; font-size: 13px; color: var(--text); }

@@ -44,6 +44,7 @@ export function listNode(a: ImageAttrs): ListingNode {
     sort: listed(attr(a, "sort")),
     count: attr(a, "count"),
     by: attr(a, "by"),
+    add: attr(a, "add"),
   };
 }
 

@@ -793,6 +793,8 @@ export type Node =
       count?: string;
       /** With `count`: a column for each value of this property too (`by=Kind`). */
       by?: string;
+      /** On a list of what names this document: `new` — ＋ makes one, × deletes it; else ＋ picks, × lets go. */
+      add?: string;
     }
   /** `<timeline type="Event, Session">` — what happened when. */
   | { kind: "timeline"; of: string[]; show: string[]; around: string; until: string; text: string[] }

@@ -124,6 +124,11 @@ pub enum Node {
         /// `by=Kind`: how many of them are bosses, how many minions.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         by: String,
+        /// On a list of what names this document (`where="Owner=self"`):
+        /// `new` — ＋ makes one, naming this document, and × deletes it; else
+        /// ＋ picks what is there and × lets go of it.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        add: String,
     },
     /// `<timeline type="Event, Session">` — what happened when: every dated
     /// property of the documents of these types, along the world's calendar.
@@ -993,6 +998,7 @@ fn read_list(rest: &str) -> Node {
     let mut sort = Vec::new();
     let mut count = String::new();
     let mut by = String::new();
+    let mut add = String::new();
 
     for (attr, value) in attributes(rest) {
         match attr.as_str() {
@@ -1014,6 +1020,7 @@ fn read_list(rest: &str) -> Node {
             "sort" => sort = listed(&value),
             "count" => count = value.trim().to_string(),
             "by" => by = value.trim().to_string(),
+            "add" => add = value.trim().to_string(),
             _ => {}
         }
     }
@@ -1031,6 +1038,7 @@ fn read_list(rest: &str) -> Node {
         sort,
         count,
         by,
+        add,
     }
 }
 
@@ -1549,7 +1557,7 @@ mod tests {
     #[test]
     fn a_list_is_read_with_everything_it_asks_for() {
         let tree = split(
-            "Our world.\n\n<list type=Place style=cards columns=5 show=\"image, Climate\" where=\"Role=NPC\" below=\"North America\" filter=Climate sort=\"Climate desc, name\" count=Mayor by=Climate>\n</list>\n\nAfter.",
+            "Our world.\n\n<list type=Place style=cards columns=5 show=\"image, Climate\" where=\"Role=NPC\" below=\"North America\" filter=Climate sort=\"Climate desc, name\" count=Mayor by=Climate add=new>\n</list>\n\nAfter.",
         );
         let list = tree
             .iter()
@@ -1570,6 +1578,7 @@ mod tests {
                 sort: vec!["Climate desc".into(), "name".into()],
                 count: "Mayor".into(),
                 by: "Climate".into(),
+                add: "new".into(),
             }
         );
         // The closing tag is swallowed, not shown as text.

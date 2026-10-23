@@ -255,7 +255,7 @@ Spells: @@Spell@@ multiple
     CHARACTER_SHOWN,
     ['<block title="Appearance">', '<block title="Personality">', '<block title="Biography">', '<block title="Relationships">', '<block title="Motivation">', '<block title="Notes">',
      '<block title="Items" bottom fold=folded>\n      <list type=Item where="Owner=self" style=table show="Type, Rarity, Attunement, Acquired">',
-     '<block title="Kills" bottom fold=folded>\n      <list type=Kill where="Killer=self" style=table show="Session, Kind, Enemy, With, How" sort=Session>'],
+     '<block title="Kills" bottom fold=folded>\n      <list type=Kill where="Killer=self" style=table show="Session, Kind, Enemy, With, How" sort=Session add=new>'],
 ))
 # Who someone is at the table: a player's character, the GM's people, those
 # who travel along — and the people of a character's own story, below them.

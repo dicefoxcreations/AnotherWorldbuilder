@@ -145,20 +145,21 @@ function QuickArticle({
   );
 }
 
-/** Makes a document of a type at once, as the type starts it — the GM's way. Its id. */
+/** Makes a document of a type at once, as the type starts it — the GM's way; `preset` values win over the type's. Its id. */
 export async function makeDocument(
   world: string,
   templates: Template[],
   articles: ArticleView[],
   template: Template,
   name: string,
+  preset: Values = {},
 ): Promise<string> {
   const start = startTexts(template);
   const keys = Object.keys(start);
   const visibility = template.auth?.view ?? "all";
   const written = await api.textsWritten(world, template.id, keys.map((k) => start[k]));
   const texts = Object.fromEntries(keys.map((k, i) => [k, written[i]]));
-  const layers = layersFor(template, defaults(template, articles, templates), texts, {}, visibility);
+  const layers = layersFor(template, { ...defaults(template, articles, templates), ...preset }, texts, {}, visibility);
   return api.articleCreate(world, template.id, slugify(name), name, visibility, layers);
 }
 

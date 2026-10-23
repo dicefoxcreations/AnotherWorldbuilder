@@ -53,7 +53,7 @@ export function MultiPick({
  * ＋ and what may be added: a search over the names, the matches below it —
  * Enter takes the first, Escape closes. One after another, it stays open.
  */
-function AddPick({ open, onAdd }: { open: ArticleView[]; onAdd: (a: ArticleView) => void }) {
+export function AddPick({ open, onAdd, title = "Add" }: { open: ArticleView[]; onAdd: (a: ArticleView) => void; title?: string }) {
   const [shown, setShown] = useState(false);
   const [text, setText] = useState("");
   const box = useRef<HTMLSpanElement>(null);
@@ -73,7 +73,7 @@ function AddPick({ open, onAdd }: { open: ArticleView[]; onAdd: (a: ArticleView)
   };
   return (
     <span className="pick-add" ref={box}>
-      <button className="compact" title="Add" onClick={() => setShown((s) => !s)}>
+      <button className="compact" title={title} onClick={() => setShown((s) => !s)}>
         ＋
       </button>
       {shown && (
