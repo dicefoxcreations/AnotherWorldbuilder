@@ -113,6 +113,10 @@ folder `D&D 5e.awpack`.
 | [`templates/`](templates/) | Templates to start a world with |
 | [`source/`](source/) | Source code, [build guide](source/README.md) and [documentation](source/docs/README.md) |
 
+## Made with AI support
+
+AnotherWorldbuilder is conceived, designed and tested by DiceFox Creations. Code and documentation are written with the help of the AI assistant Claude (Anthropic). The app itself contains no AI and sends nothing to AI services.
+
 ## License
 
 © 2026 DiceFox Creations. All rights reserved — see [LICENSE](LICENSE).
