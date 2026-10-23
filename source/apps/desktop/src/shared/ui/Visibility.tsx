@@ -64,11 +64,11 @@ export function label(
   if (term === "all") return "Everyone";
   if (term === "players") return short ? "Players" : "All players";
   if (term === "gm") return short ? "GM" : "GM only";
-  // `self`: whoever is assigned to the document — saved as its `doc:…`.
-  if (term === "self") return "Assigned";
+  // `self`: whoever is assigned to the document — saved as its `doc:…`,
+  // and called by its name: on Yen's page, “Yen”.
+  if (term === "self") return (around?.self && around.articles.find((a) => a.id === around.self)?.name) || "Assigned";
   if (term.startsWith("doc:")) {
     const id = `art:${term.slice(4)}`;
-    if (around?.self === id) return "Assigned";
     const named = around?.articles.find((a) => a.id === id);
     if (named) return named.name;
   }
@@ -162,7 +162,7 @@ export function VisibilityPicker({
       ? [
           {
             value: "self",
-            text: "Assigned",
+            text: label("self", world, false, around),
             hint: "Whoever is assigned to this document — Options → Players → Assign",
           },
         ]
