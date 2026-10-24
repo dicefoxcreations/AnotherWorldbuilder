@@ -517,7 +517,7 @@ fn take_home(store: &Store, world: &str, home: &str) -> Answer<()> {
 
 #[cfg(feature = "gui")]
 /// Writes a package into a folder — plain text.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn package_export(app: tauri::AppHandle, world: String, path: String, choice: Choice) -> Answer<Summary> {
     let store = store(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -530,7 +530,7 @@ pub async fn package_export(app: tauri::AppHandle, world: String, path: String, 
 
 #[cfg(feature = "gui")]
 /// What a package would bring into a world.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn package_read(app: tauri::AppHandle, world: String, path: String) -> Answer<Summary> {
     let store = store(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -544,7 +544,7 @@ pub async fn package_read(app: tauri::AppHandle, world: String, path: String) ->
 
 #[cfg(feature = "gui")]
 /// Takes a package in; tells the page how far it is (`package-progress`).
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn package_import(app: tauri::AppHandle, world: String, path: String) -> Answer<Summary> {
     #[cfg(feature = "gui")]
     use tauri::Emitter;

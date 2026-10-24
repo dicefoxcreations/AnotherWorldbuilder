@@ -243,7 +243,7 @@ fn view(app: &tauri::AppHandle, at: Option<&Locations>, state: &str, problem: Op
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn storage_status(app: tauri::AppHandle) -> Answer<StorageView> {
     let Some(at) = remembered(&app)? else { return Ok(view(&app, None, "unset", None)) };
     Ok(match claim(&at, &app.path().app_local_data_dir()?.join("storage-locks")) {
@@ -285,7 +285,7 @@ impl Choice {
 #[cfg(feature = "gui")]
 /// Chooses where the data lies — on first start, or when the place
 /// remembered is gone. Takes whatever already lies there; copies nothing.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn storage_choose(app: tauri::AppHandle, choice: Choice) -> Answer<StorageView> {
     let at = choice.locations()?;
     std::fs::create_dir_all(&at.profile)?;
@@ -315,7 +315,7 @@ pub struct Peek {
     pub worlds: bool,
 }
 
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn storage_peek(choice: Choice) -> Answer<Peek> {
     let at = choice.locations()?;
     Ok(Peek { profile: holds(&at.profile, true), worlds: holds(&at.worlds, false) })
@@ -346,7 +346,7 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<usize> {
 /// Changes where the profile or the worlds lie. With `carry`, this device's
 /// data is copied there first — into a folder that holds none of it yet.
 /// Without, the folder is used as it is. The old folder stays either way.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn storage_move(app: tauri::AppHandle, choice: Choice, carry: bool) -> Answer<StorageView> {
     let old = store(&app)?;
     let old = Locations { profile: old.profile_dir().to_path_buf(), worlds: old.worlds_dir(), additional: old.local_roots().iter().skip(1).cloned().collect() };
@@ -374,7 +374,7 @@ pub fn storage_move(app: tauri::AppHandle, choice: Choice, carry: bool) -> Answe
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn storage_locations(app: tauri::AppHandle, paths: Vec<String>) -> Answer<StorageView> {
     let mut at = remembered(&app)?.ok_or_else(|| AppError("Choose storage first.".into()))?;
     let mut additional = Vec::new();
@@ -396,7 +396,7 @@ pub fn storage_locations(app: tauri::AppHandle, paths: Vec<String>) -> Answer<St
 #[cfg(feature = "gui")]
 /// Shows a folder in the system's file manager — the profile, the worlds, or
 /// a shared folder; nothing else.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn storage_open(app: tauri::AppHandle, path: String) -> Answer<()> {
     let store = store(&app)?;
     let path = PathBuf::from(path);

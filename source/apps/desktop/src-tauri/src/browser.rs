@@ -413,12 +413,12 @@ fn view(store: &Store) -> View {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_settings(app: tauri::AppHandle) -> Answer<View> {
     Ok(view(&store(&app)?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_enable(app: tauri::AppHandle, enabled: bool) -> Answer<View> {
     let store = store(&app)?;
     let mut s = load(&store);
@@ -433,7 +433,7 @@ pub fn browser_enable(app: tauri::AppHandle, enabled: bool) -> Answer<View> {
 }
 
 /// A new code to pair a browser with — six digits, for five minutes.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_pair(app: tauri::AppHandle) -> Answer<View> {
     let store = store(&app)?;
     let n = u32::from_le_bytes(aw_crypto::random_bytes::<4>()?) % 1_000_000;
@@ -441,7 +441,7 @@ pub fn browser_pair(app: tauri::AppHandle) -> Answer<View> {
     Ok(view(&store))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_forget(app: tauri::AppHandle, id: String) -> Answer<View> {
     let store = store(&app)?;
     let mut s = load(&store);

@@ -947,7 +947,7 @@ pub(crate) fn document_read_in(store: &Store, world: String, article: String, te
 }
 
 /// Writes a document as code — after a change on the visual side.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn document_write(document: DocumentText) -> Answer<String> {
     Ok(aw_model::document::to_code(&document))
 }
@@ -2105,7 +2105,7 @@ pub(crate) fn version_document_in(store: &Store, world: String, article: String,
 /// Takes a version's lines into the text that a change of access left
 /// behind — for when their author may not write there any more and the game
 /// master decides they belong in.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn version_carry(app: tauri::AppHandle, world: String, article: String, session: String) -> Answer<usize> {
     let store = store(&app)?;
     let identity = store.load_identity()?;
@@ -2131,7 +2131,7 @@ pub fn version_carry(app: tauri::AppHandle, world: String, article: String, sess
 #[cfg(feature = "gui")]
 /// The GM's word on a waiting version: taken into the text, or turned down.
 /// The versions it builds on, or that build on it, go with it.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn version_verdict(app: tauri::AppHandle, world: String, article: String, session: String, accepted: bool) -> Answer<()> {
     let store = store(&app)?;
     if !store.is_gm(&world) {
@@ -2372,7 +2372,7 @@ fn plain_value(value: &serde_json::Value) -> String {
 
 #[cfg(feature = "gui")]
 /// Deletes a version for good — the GM's. The newest stays.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn version_delete(app: tauri::AppHandle, world: String, article: String, session: String) -> Answer<()> {
     let store = store(&app)?;
     if !store.is_gm(&world) {
@@ -2386,7 +2386,7 @@ pub fn version_delete(app: tauri::AppHandle, world: String, article: String, ses
 #[cfg(feature = "gui")]
 /// Takes a version back — in every part the reader may edit. What others
 /// wrote since stays.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn version_revert(
     app: tauri::AppHandle,
     world: String,

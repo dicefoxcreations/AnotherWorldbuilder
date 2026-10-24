@@ -291,7 +291,7 @@ pub fn backup_now(app: tauri::AppHandle, world: String) -> Answer<View> {
 
 #[cfg(feature = "gui")]
 /// Opens the folder of a world's backups.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn backup_open(app: tauri::AppHandle, world: String) -> Answer<()> {
     let store = store(&app)?;
     let at = folder(&store, &world, &plan(&store, &world)?)?;

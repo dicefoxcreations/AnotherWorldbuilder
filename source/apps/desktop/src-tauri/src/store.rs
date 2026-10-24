@@ -531,6 +531,12 @@ pub(crate) fn copy_dir(from: &Path, to: &Path, tell: &dyn Fn(usize, usize)) -> s
     Ok(())
 }
 
+/// One opening at a time per world — see `Store::journal`.
+fn opening() -> &'static Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<()>>>> {
+    static OPENING: OnceLock<Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<()>>>>> = OnceLock::new();
+    OPENING.get_or_init(Default::default)
+}
+
 fn open_journals() -> &'static Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<Open>>>> {
     static OPEN: OnceLock<Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<Open>>>>> = OnceLock::new();
     OPEN.get_or_init(Default::default)
@@ -775,15 +781,24 @@ impl Store {
         self.require_online_access(world_id)?;
         let local = self.load_local(world_id)?;
         let dir = self.world_dir(world_id);
-        let (open, fresh) = {
-            let mut all = open_journals().lock().map_err(poisoned)?;
-            match all.get(&(self.profile.clone(), dir.clone())) {
-                Some(open) => (open.clone(), false),
-                None => {
-                    let journal = Journal::open(&dir, &self.private_world_dir(world_id), &local.public)?;
-                    let open = Arc::new(Mutex::new(Open { journal, projection: None }));
-                    all.insert((self.profile.clone(), dir.clone()), open.clone());
-                    (open, true)
+        let key = (self.profile.clone(), dir.clone());
+        let held = open_journals().lock().map_err(poisoned)?.get(&key).cloned();
+        let (open, fresh) = match held {
+            Some(open) => (open, false),
+            None => {
+                // Opened by one at a time, world by world: a big world being
+                // read keeps no other world waiting.
+                let gate = opening().lock().map_err(poisoned)?.entry(key.clone()).or_default().clone();
+                let _turn = gate.lock().map_err(poisoned)?;
+                let meanwhile = open_journals().lock().map_err(poisoned)?.get(&key).cloned();
+                match meanwhile {
+                    Some(open) => (open, false),
+                    None => {
+                        let journal = Journal::open(&dir, &self.private_world_dir(world_id), &local.public)?;
+                        let open = Arc::new(Mutex::new(Open { journal, projection: None }));
+                        open_journals().lock().map_err(poisoned)?.insert(key, open.clone());
+                        (open, true)
+                    }
                 }
             }
         };
@@ -881,6 +896,17 @@ impl Store {
 
     pub fn list_worlds(&self) -> Result<Vec<WorldMeta>> {
         let mut out = Vec::new();
+        for id in self.held_worlds()? {
+            if let Ok(meta) = self.load_world_meta(&id) { out.push(meta); }
+        }
+        out.sort_by(|a, b| a.public.name.cmp(&b.public.name));
+        Ok(out)
+    }
+
+    /// The worlds lying here, by id — from their descriptors alone, without
+    /// reading a journal.
+    pub fn held_worlds(&self) -> Result<Vec<String>> {
+        let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for root in self.roots.clone().into_iter().chain(std::iter::once(self.fleeting_root())) {
             if !root.is_dir() { continue; }
@@ -892,10 +918,9 @@ impl Store {
                 if !seen.insert(id.to_string()) {
                     return Err(StoreError::Journal(format!("World {id} exists in more than one storage location. Remove the duplicate location from Storage.")));
                 }
-                if let Ok(meta) = self.load_world_meta(id) { out.push(meta); }
+                out.push(id.to_string());
             }
         }
-        out.sort_by(|a, b| a.public.name.cmp(&b.public.name));
         Ok(out)
     }
 
@@ -1115,6 +1140,11 @@ impl Store {
             return Ok(None);
         }
         self.with_journal(world_id, |journal| Ok(journal.since(epoch, at)))
+    }
+
+    /// Whether the world's journal is read and kept in memory already.
+    pub fn journal_is_open(&self, world_id: &str) -> bool {
+        open_journals().lock().is_ok_and(|all| all.contains_key(&(self.profile.clone(), self.world_dir(world_id))))
     }
 
     pub fn journal_version(&self, world_id: &str) -> Result<u64> {

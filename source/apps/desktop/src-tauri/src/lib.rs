@@ -391,6 +391,40 @@ fn info_from(store: &Store, identity: &Identity) -> IdentityInfo {
     }
 }
 
+/// A world as the list of worlds shows it. A big world takes seconds to read:
+/// until it is, the list shows it as it was last seen and reads it meanwhile.
+fn summary(store: &Store, id: &str, me: &str) -> Answer<Option<serde_json::Value>> {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Mutex, OnceLock};
+    static WRITTEN: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
+    static READING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let id = id.to_string();
+    let file = store.private_world_dir(&id).join("summary.json");
+    if !store.journal_is_open(&id) {
+        if let Some(known) = std::fs::read(&file).ok().and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok()) {
+            if READING.get_or_init(Default::default).lock().map_err(AppError::from)?.insert(id.clone()) {
+                let (store, world) = (store.clone(), id.clone());
+                std::thread::spawn(move || {
+                    let _ = store.article_count(&world);
+                    if let Ok(mut reading) = READING.get_or_init(Default::default).lock() {
+                        reading.remove(&world);
+                    }
+                });
+            }
+            return Ok(Some(known));
+        }
+    }
+    let Ok(meta) = store.load_world_meta(&id) else { return Ok(None) };
+    let info = serde_json::to_value(world_info(store, &meta, me)?)?;
+    let bytes = serde_json::to_vec(&info)?;
+    let mut written = WRITTEN.get_or_init(Default::default).lock().map_err(AppError::from)?;
+    if written.get(&id) != Some(&bytes) {
+        aw_store::durable::replace(&file, &bytes)?;
+        written.insert(id, bytes);
+    }
+    Ok(Some(info))
+}
+
 fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, AppError> {
     let id = meta.public.world_id.to_string();
     // The game master is whoever is listed as such *and* holds the world
@@ -458,7 +492,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
 // --- Identity -----------------------------------------------------------
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_status(app: tauri::AppHandle) -> Answer<Option<IdentityInfo>> {
     let store = store(&app)?;
     if !store.has_identity() {
@@ -469,7 +503,7 @@ fn identity_status(app: tauri::AppHandle) -> Answer<Option<IdentityInfo>> {
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_create(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> {
     let store = store(&app)?;
     let identity = Identity::create(name)?;
@@ -479,7 +513,7 @@ fn identity_create(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> 
 
 #[cfg(feature = "gui")]
 /// Renaming does not change the id — access hangs on the key.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_rename(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> {
     let store = store(&app)?;
     let mut identity = store.load_identity()?;
@@ -493,7 +527,7 @@ fn identity_rename(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> 
 ///
 /// That is the player card: you send it to the game master so they can
 /// admit you. No private keys are in it.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_export(app: tauri::AppHandle, path: String) -> Answer<String> {
     let store = store(&app)?;
     let identity = store.load_identity()?;
@@ -518,7 +552,7 @@ fn with_extension(path: &str, extension: &str) -> PathBuf {
 /// The image is copied and returned as a `data:` URL — so it lives in our own
 /// storage and not as a reference to someone else's file that may have moved
 /// by tomorrow.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn avatar_set(app: tauri::AppHandle, path: String) -> Answer<String> {
     const MAX: u64 = 4 * 1024 * 1024;
     let store = store(&app)?;
@@ -546,7 +580,7 @@ fn avatar_set(app: tauri::AppHandle, path: String) -> Answer<String> {
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn avatar_remove(app: tauri::AppHandle) -> Answer<()> {
     Ok(store(&app)?.remove_avatar()?)
 }
@@ -560,16 +594,17 @@ fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<serde_json::Value>> {
     let store = store(&app)?.for_sync();
     let me = store.load_identity()?.id().to_string();
     let mut out = Vec::new();
-    for meta in store.list_worlds()? {
-        if unfinished_copy(&store, meta.public.world_id.as_str()) {
+    for id in store.held_worlds()? {
+        if unfinished_copy(&store, &id) {
             continue;
         }
-        let mut info = serde_json::to_value(world_info(&store, &meta, &me)?)?;
-        if online::is_server_world(&store, meta.public.world_id.as_str()) {
+        let Some(mut info) = summary(&store, &id, &me)? else { continue };
+        if online::is_server_world(&store, &id) {
             info["online"] = true.into();
         }
         out.push(info);
     }
+    out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     // Worked on online: as their host last showed them — and where it is.
     let settings = store.load_network()?;
     out.extend(network::online_worlds(&store).into_iter().filter(|w| !store.holds(&w.world)).map(|mut w| {
@@ -593,7 +628,7 @@ enum Destination {
 
 #[cfg(feature = "gui")]
 /// Creates a world at the chosen location — a folder here, or one a cloud drive mounts.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 async fn world_create(app: tauri::AppHandle, name: String, destination: Destination) -> Answer<WorldInfo> {
     let store = store(&app)?.for_sync();
     tauri::async_runtime::spawn_blocking(move || match destination {
@@ -617,7 +652,7 @@ async fn world_create(app: tauri::AppHandle, name: String, destination: Destinat
 /// server: a world of its own, with the types, documents and images, without
 /// its players and versions. Tells how far it is (`copy-progress`). Broken
 /// off, the half copy goes again — at once, or at the next start.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 async fn world_copy(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
     use tauri::Emitter;
     let store = store(&app)?;
@@ -672,7 +707,7 @@ async fn world_copy(app: tauri::AppHandle, world: String, destination: Destinati
 /// Moves a GM's world: into another folder here — off its server, if it was
 /// on one — or onto a server, which keeps it for the players; the GM's copy
 /// stays in its folder then. Tells how far a folder is (`copy-progress`).
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 async fn world_move(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
     use tauri::Emitter;
     let store = store(&app)?.for_sync();
@@ -835,7 +870,7 @@ struct WorldFile {
 ///
 /// Every record is checked as if it came over the network: a forged world
 /// leaves nothing behind.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_open(app: tauri::AppHandle, path: String, location: String) -> Answer<WorldInfo> {
     let store = store(&app)?.destination(Path::new(&location))?;
     let identity = store.load_identity()?;
@@ -863,7 +898,7 @@ fn world_open(app: tauri::AppHandle, path: String, location: String) -> Answer<W
 
 #[cfg(feature = "gui")]
 /// Admits a player to the world — from their player card.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_add(
     app: tauri::AppHandle,
     world: String,
@@ -938,7 +973,7 @@ pub(crate) fn admit(
 
 #[cfg(feature = "gui")]
 /// One's own colour in a world — on one's name and the documents assigned to one.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_colour_set(app: tauri::AppHandle, world: String, colour: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -951,7 +986,7 @@ fn member_colour_set(app: tauri::AppHandle, world: String, colour: String) -> An
 /// device was set up anew without their keys. What was assigned to the old
 /// id goes to the new one, and the old one leaves: its keys turn over. A
 /// new id not let in yet takes over as soon as it is.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_replace(app: tauri::AppHandle, world: String, old: String, new: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -990,7 +1025,7 @@ pub(crate) fn replace_member(store: &Store, world: &str, old: &str, new: &str) -
 
 #[cfg(feature = "gui")]
 /// Ties up the world file for a member.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_share(
     app: tauri::AppHandle,
     world: String,
@@ -1009,7 +1044,7 @@ fn world_share(
 
 #[cfg(feature = "gui")]
 /// Takes a member out of the world — or an id let in ahead of time.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_remove(app: tauri::AppHandle, world: String, id: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1022,7 +1057,7 @@ fn member_remove(app: tauri::AppHandle, world: String, id: String) -> Answer<Wor
 
 #[cfg(feature = "gui")]
 /// Switches review on or off: whether what players write waits for the GM.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_moderation_set(app: tauri::AppHandle, world: String, on: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1035,7 +1070,7 @@ fn world_moderation_set(app: tauri::AppHandle, world: String, on: bool) -> Answe
 
 #[cfg(feature = "gui")]
 /// Sets how many versions of each document stay — the GM's.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_versions_set(app: tauri::AppHandle, world: String, max: u32) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1050,7 +1085,7 @@ fn world_versions_set(app: tauri::AppHandle, world: String, max: u32) -> Answer<
 /// Starts the app anew — after an update. An AppImage's old mount stays as
 /// long as anything holds what it was started with: the new one is started
 /// with none of the old one's open files.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn app_restart(app: tauri::AppHandle) {
     #[cfg(target_os = "linux")]
     if let Some(image) = std::env::var_os("APPIMAGE") {
@@ -1074,7 +1109,7 @@ fn app_restart(app: tauri::AppHandle) {
 
 #[cfg(feature = "gui")]
 /// Lets go of what newer records replaced — the GM's. How many went.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_tidy(app: tauri::AppHandle, world: String) -> Answer<usize> {
     let store = store(&app)?;
     if !store.is_gm(&world) {
@@ -1085,7 +1120,7 @@ fn world_tidy(app: tauri::AppHandle, world: String) -> Answer<usize> {
 
 #[cfg(feature = "gui")]
 /// How far switching the world's encryption is — asked while it runs.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_switch_progress(app: tauri::AppHandle, world: String) -> Answer<Option<store::SwitchProgress>> {
     let _ = store(&app)?;
     Ok(store::switch_progress(&world))
@@ -1093,7 +1128,7 @@ fn world_switch_progress(app: tauri::AppHandle, world: String) -> Answer<Option<
 
 #[cfg(feature = "gui")]
 /// Keeps a readable copy of the world beside the profile, or not.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_readable_set(app: tauri::AppHandle, world: String, on: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1118,7 +1153,7 @@ fn world_encryption_set(app: tauri::AppHandle, world: String, on: bool) -> Answe
 #[cfg(feature = "gui")]
 /// Sets the dice the world rolls with — the GM's. Each between 2 and 1000
 /// sides, each once, in the order given.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_dice_set(app: tauri::AppHandle, world: String, sides: Vec<u32>) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1151,7 +1186,7 @@ pub(crate) fn navigation_load_in(store: &Store, world: String) -> Answer<Option<
 
 #[cfg(feature = "gui")]
 /// Sets the side bar's entries — the GM's.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn navigation_set(app: tauri::AppHandle, world: String, entries: Vec<aw_model::navigation::NavEntry>) -> Answer<()> {
     store(&app)?.set_navigation(&world, &entries)?;
     Ok(())
@@ -1159,7 +1194,7 @@ fn navigation_set(app: tauri::AppHandle, world: String, entries: Vec<aw_model::n
 
 #[cfg(feature = "gui")]
 /// Trusts a member — their writing counts without review — or no longer.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_trust_set(app: tauri::AppHandle, world: String, member: String, trusted: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1177,7 +1212,7 @@ fn member_trust_set(app: tauri::AppHandle, world: String, member: String, truste
 #[cfg(feature = "gui")]
 /// Hands the world over to a member as soon as they show up on the network
 /// — or, without `member`, takes that back.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn gm_handover(app: tauri::AppHandle, world: String, member: Option<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1197,7 +1232,7 @@ fn gm_handover(app: tauri::AppHandle, world: String, member: Option<String>) -> 
 #[cfg(feature = "gui")]
 /// Hands the world over as a file, sealed for the member alone. This device
 /// steps down at once — keep the file safe until it has arrived.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn gm_handover_file(app: tauri::AppHandle, world: String, member: String, path: String) -> Answer<String> {
     let store = store(&app)?;
     let meta = store.load_world_meta(&world)?;
@@ -1219,7 +1254,7 @@ fn gm_handover_file(app: tauri::AppHandle, world: String, member: String, path: 
 /// `confirmation` has to be the world's name. The check deliberately lives
 /// here too and not only in the interface: what deletes the world token,
 /// nobody brings back.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_delete(app: tauri::AppHandle, world: String, confirmation: String) -> Answer<()> {
     let store = store(&app)?;
     // Worked on online: only this device's note of it goes; the world stays with its host.
@@ -1239,7 +1274,7 @@ fn world_delete(app: tauri::AppHandle, world: String, confirmation: String) -> A
 
 #[cfg(feature = "gui")]
 /// Sets the world's emoji.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_icon_set(app: tauri::AppHandle, world: String, icon: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1253,7 +1288,7 @@ fn world_icon_set(app: tauri::AppHandle, world: String, icon: String) -> Answer<
 #[cfg(feature = "gui")]
 /// Sets how the world counts its days — the game master's. Dates already
 /// written stay the same days; they are only written in the new calendar.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn calendar_set(app: tauri::AppHandle, world: String, calendar: WorldCalendar) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1269,7 +1304,7 @@ fn calendar_set(app: tauri::AppHandle, world: String, calendar: WorldCalendar) -
 
 #[cfg(feature = "gui")]
 /// Checks whether the world token is still there and matches the public key.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_token_check(app: tauri::AppHandle, world: String) -> Answer<bool> {
     let store = store(&app)?;
     let meta = store.load_world_meta(&world)?;
@@ -1280,7 +1315,7 @@ fn world_token_check(app: tauri::AppHandle, world: String) -> Answer<bool> {
 // --- Attributes ---------------------------------------------------------
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn attribute_create(app: tauri::AppHandle, world: String, attribute: String) -> Answer<Vec<String>> {
     let store = store(&app)?;
     let mut ring = store.load_keyring(&world)?;
@@ -1295,7 +1330,7 @@ fn attribute_create(app: tauri::AppHandle, world: String, attribute: String) -> 
 /// class) and attributes — and so what they may see. The game master's. An
 /// attribute taken away is rotated: what is written from then on is closed
 /// to them; what they had, they keep.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_attributes_set(app: tauri::AppHandle, world: String, member: String, attributes: Vec<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1337,7 +1372,7 @@ fn member_attributes_set(app: tauri::AppHandle, world: String, member: String, a
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn attribute_revoke(app: tauri::AppHandle, world: String, attribute: String) -> Answer<u32> {
     let store = store(&app)?;
     let mut ring = store.load_keyring(&world)?;
@@ -1363,7 +1398,7 @@ pub(crate) fn templates_load_in(store: &Store, world: String) -> Answer<Vec<Temp
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn template_save(
     app: tauri::AppHandle,
     world: String,
@@ -1471,7 +1506,7 @@ fn save_template(store: &Store, identity: &Identity, world: &str, mut template: 
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn template_delete(app: tauri::AppHandle, world: String, slug: String) -> Answer<Vec<Template>> {
     delete_template(&store(&app)?, &world, &slug)
 }
@@ -1869,7 +1904,7 @@ fn layer_content(entry: &StoredLayer, held: &HeldKeys) -> Result<LayerContent, A
 #[cfg(feature = "gui")]
 /// Sets who may see an article or one of its sections: a new generation of
 /// the layer, with fresh keys.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn visibility_set(
     app: tauri::AppHandle,
     world: String,
@@ -1918,7 +1953,7 @@ fn visibility_set(
 ///
 /// `confirmation` has to be the article's name. Deleted is deleted — there is
 /// no trash bin, and without the keys a copy would be worth nothing anyway.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn article_delete(
     app: tauri::AppHandle,
     world: String,
@@ -1971,7 +2006,7 @@ fn article_delete(
 /// The logic lives in `aw_model::editor` — it belongs to the model and not to
 /// Tauri. Only so can the test bench call it too, without a second version of
 /// the same rules.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn template_read(
     app: tauri::AppHandle,
     world: String,
@@ -2000,7 +2035,7 @@ fn directory(app: &tauri::AppHandle, world: &str) -> Result<template_text::Direc
 
 #[cfg(feature = "gui")]
 /// Writes a template into its text form.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn template_write(
     app: tauri::AppHandle,
     world: String,
@@ -2045,7 +2080,7 @@ fn template_write(
 /// No dialog in the main window: looking something up while typing only
 /// works if one can be pushed to the edge of the screen while the other keeps
 /// the focus. If the window already exists, it comes to the front.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn legend_open(app: tauri::AppHandle) -> Answer<()> {
     if let Some(existing) = app.get_webview_window("legend") {
         existing.show().map_err(AppError::from)?;
@@ -2071,7 +2106,7 @@ fn legend_open(app: tauri::AppHandle) -> Answer<()> {
 /// another, to read one while writing the other. Every such window is the
 /// whole app, opened at that place; `part` scrolls to a part by its title.
 /// The windows share this process, and with it the profile.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn window_open(app: tauri::AppHandle, world: String, place: String, title: String, part: Option<String>) -> Answer<()> {
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2103,7 +2138,7 @@ fn query_part(value: &str) -> String {
 #[cfg(feature = "gui")]
 /// Shows the main window as a phone — or at another size, a tablet's — or
 /// as it was: for layout checks from the tests (`invoke`), no button in the app.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn phone_view(window: tauri::WebviewWindow, on: bool, size: Option<(f64, f64)>) -> Answer<()> {
     window_state::phone(&window, on, size).map_err(AppError::from)
 }
@@ -2113,7 +2148,7 @@ fn phone_view(window: tauri::WebviewWindow, on: bool, size: Option<(f64, f64)>) 
 /// Deliberately here and not in the frontend: so there is only one
 /// implementation, it can be tested in Rust, and no HTML string comes into
 /// being anywhere that someone might insert by accident.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 fn markdown_read(text: String) -> Answer<Vec<markdown::Node>> {
     Ok(markdown::split(&text))
 }

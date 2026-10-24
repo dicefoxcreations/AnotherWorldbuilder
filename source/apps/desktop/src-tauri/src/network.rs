@@ -280,7 +280,7 @@ fn save_dice(store: &Store, world: &str, log: &DiceLog) -> Answer<()> {
 
 #[cfg(feature = "gui")]
 /// This device's dice of a world.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_log(app: tauri::AppHandle, world: String) -> Answer<DiceLog> {
     Ok(load_dice(&store(&app)?, &world))
 }
@@ -288,7 +288,7 @@ pub fn dice_log(app: tauri::AppHandle, world: String) -> Answer<DiceLog> {
 #[cfg(feature = "gui")]
 /// Keeps a roll in the log — one's own or one that came. A clearing roll
 /// empties it, where it comes from the world's GM.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_log_add(app: tauri::AppHandle, world: String, roll: Roll) -> Answer<DiceLog> {
     add_to_log(&store(&app)?, &world, roll)
 }
@@ -315,7 +315,7 @@ fn add_to_log(store: &Store, world: &str, roll: Roll) -> Answer<DiceLog> {
 
 #[cfg(feature = "gui")]
 /// Clears the log — the GM's: here, and on every device in the session.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_log_clear(app: tauri::AppHandle, world: String) -> Answer<DiceLog> {
     let store = store(&app)?;
     if !store.is_gm(&world) {
@@ -348,7 +348,7 @@ pub fn dice_log_clear(app: tauri::AppHandle, world: String) -> Answer<DiceLog> {
 
 #[cfg(feature = "gui")]
 /// Sets the favourites — this device's.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_favorites_set(app: tauri::AppHandle, world: String, favorites: Vec<Favorite>) -> Answer<DiceLog> {
     let store = store(&app)?;
     let mut log = load_dice(&store, &world);
@@ -402,7 +402,7 @@ fn recent_rolls(world: &str, keep: impl Fn(&Roll) -> bool) -> Vec<Roll> {
 #[cfg(feature = "gui")]
 /// Rolls the dice for everyone in the session: kept here, and passed on
 /// with the next digest — to the host, or by the host to its players.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_roll(app: tauri::AppHandle, world: String, roll: Roll) -> Answer<()> {
     dice_roll_in(&store(&app)?, world, roll)
 }
@@ -420,7 +420,7 @@ pub(crate) fn dice_roll_in(store: &Store, world: String, roll: Roll) -> Answer<(
 }
 
 /// The dice rolled lately in a world, by anyone — oldest first.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_rolls(world: String) -> Answer<Vec<Roll>> {
     Ok(recent_rolls(&world, |_| true))
 }
@@ -1064,13 +1064,13 @@ pub(crate) fn view(store: &Store) -> Answer<NetworkView> {
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn network_settings(app: tauri::AppHandle) -> Answer<NetworkView> {
     view(&store(&app)?)
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn network_enable(app: tauri::AppHandle, enabled: bool) -> Answer<NetworkView> {
     let store = store(&app)?;
     let mut settings = store.load_network()?;
@@ -1083,7 +1083,7 @@ pub async fn network_enable(app: tauri::AppHandle, enabled: bool) -> Answer<Netw
 #[cfg(feature = "gui")]
 /// Direct connections over the internet — and whom to ask how this device
 /// looks from outside.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn network_internet(app: tauri::AppHandle, enabled: bool, stun: Vec<String>) -> Answer<NetworkView> {
     let store = store(&app)?;
     let mut settings = store.load_network()?;
@@ -1096,7 +1096,7 @@ pub async fn network_internet(app: tauri::AppHandle, enabled: bool, stun: Vec<St
 
 #[cfg(feature = "gui")]
 /// Peer to peer through shared folders: devices of a world in a cloud folder meet there.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn network_folders(app: tauri::AppHandle, enabled: bool) -> Answer<NetworkView> {
     let store = store(&app)?;
     let mut settings = store.load_network()?;
@@ -1108,7 +1108,7 @@ pub async fn network_folders(app: tauri::AppHandle, enabled: bool) -> Answer<Net
 
 #[cfg(feature = "gui")]
 /// The port to answer on — for a router's forwarding. None: the usual one.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn network_port(app: tauri::AppHandle, port: Option<u16>) -> Answer<NetworkView> {
     let store = store(&app)?;
     let mut settings = store.load_network()?;
@@ -1121,7 +1121,7 @@ pub async fn network_port(app: tauri::AppHandle, port: Option<u16>) -> Answer<Ne
 #[cfg(feature = "gui")]
 /// Whether players of an encrypted world get a copy — or work online, with
 /// this device as their host.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn network_copies_set(app: tauri::AppHandle, world: String, copies: bool) -> Answer<NetworkView> {
     let store = store(&app)?;
     if !store.is_gm(&world) {
@@ -1137,7 +1137,7 @@ pub fn network_copies_set(app: tauri::AppHandle, world: String, copies: bool) ->
 
 #[cfg(feature = "gui")]
 /// The servers to keep worlds with, by their code or address.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn network_servers(app: tauri::AppHandle, servers: Vec<String>) -> Answer<NetworkView> {
     let store = store(&app)?;
     let mut codes = Vec::new();
@@ -1156,7 +1156,7 @@ pub async fn network_servers(app: tauri::AppHandle, servers: Vec<String>) -> Ans
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn network_share(app: tauri::AppHandle, world: String, shared: bool) -> Answer<NetworkView> {
     let store = store(&app)?;
     if !store.is_gm(&world) {
@@ -1186,7 +1186,7 @@ pub struct NetWorld {
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn network_worlds(app: tauri::AppHandle) -> Answer<Vec<NetWorld>> {
     let store = store(&app)?;
     let Some(net) = running() else { return Ok(Vec::new()) };
@@ -1426,7 +1426,7 @@ async fn refresh_online(store: &Store, net: &WorldNet, me: &Identity, world: &st
 #[cfg(feature = "gui")]
 /// A command for a world worked on online — done by its host, in this
 /// member's name.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn remote_call(app: tauri::AppHandle, world: String, command: String, args: serde_json::Value) -> Answer<serde_json::Value> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1604,7 +1604,7 @@ pub(crate) fn offer_taken_over(store: &Store, world: &str) -> Answer<()> {
 
 #[cfg(feature = "gui")]
 /// Asks the host of a found world for it — or, with `join`, to become a member.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn network_join(app: tauri::AppHandle, world: String, join: bool) -> Answer<JoinOutcome> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -1791,7 +1791,7 @@ pub struct SyncOutcome {
 /// Keeps the worlds held here — and those asked for — current, both ways:
 /// with the hosts on the local network and those met through shared folders.
 /// Asked every few seconds; costs a digest per world unless something changed.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
     let mut out = SyncOutcome::default();
     if SYNCING.swap(true, Ordering::AcqRel) {
@@ -2116,7 +2116,7 @@ pub struct Check {
 /// longer whole, are given again — the usual sync only asks for missing
 /// ones. Entries missing there follow with the next sync. Tells how far it
 /// is (`copy-progress`, `checking`).
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn world_check(app: tauri::AppHandle, world: String) -> Answer<Check> {
     use tauri::Emitter;
     let store = store(&app)?;
@@ -2171,7 +2171,7 @@ pub async fn world_check(app: tauri::AppHandle, world: String) -> Answer<Check> 
 
 #[cfg(feature = "gui")]
 /// Asks a server's admin to let this device bring worlds there.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn server_host_worlds(app: tauri::AppHandle, server: String) -> Answer<NetworkView> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -2191,7 +2191,7 @@ fn status(code: &str) -> ServerStatus {
 #[cfg(feature = "gui")]
 /// What a server holds and who uses it — for its admin; with an order,
 /// carried out first.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn server_manage(app: tauri::AppHandle, server: String, order: Option<aw_sync::world::Order>) -> Answer<aw_sync::world::ServerState> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -2205,7 +2205,7 @@ pub async fn server_manage(app: tauri::AppHandle, server: String, order: Option<
 
 #[cfg(feature = "gui")]
 /// How the server a world lives on backs it up — with a plan, set first. Its GM asks.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn server_backups(app: tauri::AppHandle, world: String, plan: Option<aw_sync::world::BackupPlan>) -> Answer<aw_sync::world::ServerBackups> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -2227,7 +2227,7 @@ pub struct RequestInfo {
 }
 
 #[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn join_requests(app: tauri::AppHandle, world: String) -> Answer<Vec<RequestInfo>> {
     let store = store(&app)?;
     if !store.is_gm(&world) {
@@ -2247,7 +2247,7 @@ pub fn join_requests(app: tauri::AppHandle, world: String) -> Answer<Vec<Request
 
 #[cfg(feature = "gui")]
 /// The game master takes someone in — or turns them away.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn join_answer(app: tauri::AppHandle, world: String, id: String, accept: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
@@ -2273,7 +2273,7 @@ pub fn join_answer(app: tauri::AppHandle, world: String, id: String, accept: boo
 #[cfg(feature = "gui")]
 /// Lets a player in ahead of time, by their id alone. Their keys come when
 /// they first show up on the network — and only keys that make that id.
-#[cfg_attr(feature = "gui", tauri::command)]
+#[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn member_invite(app: tauri::AppHandle, world: String, id: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
