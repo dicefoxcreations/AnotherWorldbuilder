@@ -200,3 +200,29 @@ async fn many_asks_share_one_connection_and_a_restarted_host_is_reached_again() 
     let reply = player_net.ask_at(again.loopback_addr(), "world:eldermere", &bob, Ask::Digest { presence: None, rolls: Vec::new() }).await.unwrap();
     assert!(matches!(reply, Reply::Digest { .. }), "{reply:?}");
 }
+
+/// One address holds a few connections at once, not every place there is;
+/// once one of them goes, the next may come.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_address_cannot_take_every_connection() {
+    let host = gm();
+    let bob = Identity::create("Bob").unwrap();
+    host.members.lock().unwrap().push(bob.id().to_string());
+    let gm_net = WorldNet::start(host.clone(), aw_sync::world::Reach::default()).await.unwrap();
+    let at = gm_net.loopback_addr();
+    let mut devices = Vec::new();
+    for _ in 0..9 {
+        devices.push(WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach::default()).await.unwrap());
+    }
+    let mut answered = 0;
+    for device in &devices {
+        if device.ask_at(at.clone(), "world:eldermere", &bob, Ask::Digest { presence: None, rolls: Vec::new() }).await.is_ok() {
+            answered += 1;
+        }
+    }
+    assert_eq!(answered, 8, "the ninth from the same address is refused");
+    drop(devices.remove(0));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let last = devices.last().unwrap();
+    assert!(last.ask_at(at, "world:eldermere", &bob, Ask::Digest { presence: None, rolls: Vec::new() }).await.is_ok(), "a place came free");
+}

@@ -465,6 +465,8 @@ pub struct WorldNet {
     /// One open connection per host or server, kept for the next ask: each
     /// ask is a stream of its own on it, with its own proof.
     links: Mutex<HashMap<EndpointId, Connection>>,
+    /// One connection is made at a time per host: asks at once wait for it.
+    connecting: Mutex<HashMap<EndpointId, Arc<tokio::sync::Mutex<()>>>>,
     task: JoinHandle<()>,
 }
 
@@ -579,11 +581,27 @@ impl WorldNet {
         let task = tokio::spawn(async move {
             // Connections stay open between asks now — one per device.
             let slots = Arc::new(Semaphore::new(64));
+            let per_address: Arc<Mutex<HashMap<std::net::IpAddr, usize>>> = Default::default();
             let punches = punching;
             let mut tick = tokio::time::interval(Duration::from_millis(250));
             loop {
                 tokio::select! {
                     Some(incoming) = ep.accept() => {
+                        // Whoever comes proves first that the address is theirs:
+                        // a forged sender gets nothing and holds nothing.
+                        if !incoming.remote_addr_validated() {
+                            let _ = incoming.retry();
+                            continue;
+                        }
+                        let ip = match incoming.remote_addr() {
+                            iroh::endpoint::IncomingAddr::Ip(addr) => Some(addr.ip()),
+                            _ => None,
+                        };
+                        // A few connections per address: one alone cannot keep everyone else out.
+                        let Some(seat) = ip.map(|ip| Seat::take(&per_address, ip)).unwrap_or(Some(Seat::none())) else {
+                            incoming.refuse();
+                            continue;
+                        };
                         let Ok(permit) = slots.clone().try_acquire_owned() else {
                             incoming.refuse();
                             continue;
@@ -592,6 +610,7 @@ impl WorldNet {
                         let local = ep.id();
                         tokio::spawn(async move {
                             let _permit = permit;
+                            let _seat = seat;
                             if let Ok(Ok(conn)) = tokio::time::timeout(STEP, incoming).await {
                                 let _ = serve(conn, local, host).await;
                             }
@@ -659,6 +678,7 @@ impl WorldNet {
             knocks: AtomicU64::new(0),
             contact: Mutex::new(HashMap::new()),
             links: Mutex::new(HashMap::new()),
+            connecting: Mutex::new(HashMap::new()),
             task,
         };
         net.publish()?;
@@ -771,12 +791,20 @@ impl WorldNet {
                 Err(_) => self.forget_link(id, &conn),
             }
         }
+        let gate = self.connecting.lock().map_err(|_| "connections poisoned")?.entry(id).or_default().clone();
+        let turn = gate.lock().await;
+        // Made meanwhile by an ask that was first.
+        if let Some(conn) = self.link(id) {
+            drop(turn);
+            return self.ask_on(&conn, world, me, &ask).await;
+        }
         let conn = tokio::time::timeout(STEP, self.endpoint.connect(addr, ALPN))
             .await
             .map_err(|_| "The game master's device does not answer.")??;
         if let Ok(mut links) = self.links.lock() {
             links.insert(id, conn.clone());
         }
+        drop(turn);
         let reply = self.ask_on(&conn, world, me, &ask).await;
         if reply.is_err() {
             self.forget_link(id, &conn);
@@ -1075,11 +1103,52 @@ fn proof_bytes(world: &str, asking: EndpointId, host: EndpointId, nonce: &str) -
 const IDLE: Duration = Duration::from_secs(300);
 /// Asks answered at once on one connection.
 const STREAMS: usize = 8;
+/// Connections at once from one address.
+const PER_ADDRESS: usize = 8;
+/// Asks per second one connection may make in the long run, and in a burst:
+/// working together asks a few times a second; more is slowed down.
+const RATE: f64 = 20.0;
+const BURST: f64 = 60.0;
+
+/// A connection's place among those of its address — given back when it ends.
+struct Seat {
+    of: Option<(Arc<Mutex<HashMap<std::net::IpAddr, usize>>>, std::net::IpAddr)>,
+}
+
+impl Seat {
+    fn take(all: &Arc<Mutex<HashMap<std::net::IpAddr, usize>>>, ip: std::net::IpAddr) -> Option<Self> {
+        let mut map = all.lock().ok()?;
+        let n = map.entry(ip).or_default();
+        if *n >= PER_ADDRESS {
+            return None;
+        }
+        *n += 1;
+        Some(Seat { of: Some((all.clone(), ip)) })
+    }
+
+    fn none() -> Self {
+        Seat { of: None }
+    }
+}
+
+impl Drop for Seat {
+    fn drop(&mut self) {
+        let Some((all, ip)) = self.of.take() else { return };
+        let Ok(mut map) = all.lock() else { return };
+        if let Some(n) = map.get_mut(&ip) {
+            *n -= 1;
+            if *n == 0 {
+                map.remove(&ip);
+            }
+        }
+    }
+}
 
 /// The host's side of one connection: one ask per stream, as many as come,
 /// until it is closed or stays quiet.
 async fn serve(conn: Connection, local: EndpointId, host: Arc<dyn Host>) -> Result<()> {
     let at_once = Arc::new(Semaphore::new(STREAMS));
+    let (mut tokens, mut filled) = (BURST, Instant::now());
     loop {
         let (send, recv) = match tokio::time::timeout(IDLE, conn.accept_bi()).await {
             Ok(Ok(stream)) => stream,
@@ -1089,6 +1158,15 @@ async fn serve(conn: Connection, local: EndpointId, host: Arc<dyn Host>) -> Resu
                 return Ok(());
             }
         };
+        // Too many asks: the next one waits its turn.
+        tokens = (tokens + filled.elapsed().as_secs_f64() * RATE).min(BURST);
+        filled = Instant::now();
+        if tokens < 1.0 {
+            tokio::time::sleep(Duration::from_secs_f64((1.0 - tokens) / RATE)).await;
+            tokens = 1.0;
+            filled = Instant::now();
+        }
+        tokens -= 1.0;
         let permit = at_once.clone().acquire_owned().await?;
         let (conn, host) = (conn.clone(), host.clone());
         tokio::spawn(async move {
