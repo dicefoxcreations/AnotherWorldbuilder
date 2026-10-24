@@ -159,3 +159,44 @@ async fn a_server_at_one_address_answers_there_again_and_again() {
         assert!(matches!(reply, Reply::Digest { .. }), "{reply:?}");
     }
 }
+
+/// Asks share one connection, many at once; a host started anew at the same
+/// port is reached again, without anyone noticing the old one went.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn many_asks_share_one_connection_and_a_restarted_host_is_reached_again() {
+    let host = gm();
+    let bob = Identity::create("Bob").unwrap();
+    host.members.lock().unwrap().push(bob.id().to_string());
+    let secret = Some([9u8; 32]);
+    let reach = aw_sync::world::Reach { secret, port: Some(0), ..Default::default() };
+    let gm_net = WorldNet::start(host.clone(), reach.clone()).await.unwrap();
+    let at = gm_net.loopback_addr();
+    let player_net = Arc::new(WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach::default()).await.unwrap());
+    let bob = Arc::new(bob);
+    let started = std::time::Instant::now();
+    let asks: Vec<_> = (0..40)
+        .map(|_| {
+            let (net, at, bob) = (player_net.clone(), at.clone(), bob.clone());
+            tokio::spawn(async move { net.ask_at(at, "world:eldermere", &bob, Ask::Digest { presence: None, rolls: Vec::new() }).await })
+        })
+        .collect();
+    for ask in asks {
+        assert!(matches!(ask.await.unwrap().unwrap(), Reply::Digest { .. }));
+    }
+    assert!(started.elapsed() < Duration::from_secs(5), "40 asks took {:?}", started.elapsed());
+
+    let port = at.ip_addrs().next().unwrap().port();
+    drop(gm_net);
+    // The old socket goes a moment later: the port is taken again once free.
+    let mut again = None;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Ok(net) = WorldNet::start(host.clone(), aw_sync::world::Reach { port: Some(port), port_required: true, ..reach.clone() }).await {
+            again = Some(net);
+            break;
+        }
+    }
+    let again = again.expect("the port is free again");
+    let reply = player_net.ask_at(again.loopback_addr(), "world:eldermere", &bob, Ask::Digest { presence: None, rolls: Vec::new() }).await.unwrap();
+    assert!(matches!(reply, Reply::Digest { .. }), "{reply:?}");
+}

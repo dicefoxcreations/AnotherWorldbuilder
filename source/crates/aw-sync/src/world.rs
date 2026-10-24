@@ -444,6 +444,9 @@ pub struct WorldNet {
     knocks: AtomicU64,
     /// When each host last answered.
     contact: Mutex<HashMap<EndpointId, Instant>>,
+    /// One open connection per host or server, kept for the next ask: each
+    /// ask is a stream of its own on it, with its own proof.
+    links: Mutex<HashMap<EndpointId, Connection>>,
     task: JoinHandle<()>,
 }
 
@@ -460,6 +463,14 @@ impl Drop for WorldNet {
                 }
             }
             let _ = mdns.shutdown();
+        }
+        // Connections kept open would hold the port: the endpoint goes with them.
+        if let Ok(mut links) = self.links.lock() {
+            links.clear();
+        }
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let endpoint = self.endpoint.clone();
+            runtime.spawn(async move { endpoint.close().await });
         }
     }
 }
@@ -548,7 +559,8 @@ impl WorldNet {
         let punches = Arc::new(Semaphore::new(PUNCHES));
         let punching = punches.clone();
         let task = tokio::spawn(async move {
-            let slots = Arc::new(Semaphore::new(16));
+            // Connections stay open between asks now — one per device.
+            let slots = Arc::new(Semaphore::new(64));
             let punches = punching;
             let mut tick = tokio::time::interval(Duration::from_millis(250));
             loop {
@@ -628,6 +640,7 @@ impl WorldNet {
             announced: Mutex::new(Vec::new()),
             knocks: AtomicU64::new(0),
             contact: Mutex::new(HashMap::new()),
+            links: Mutex::new(HashMap::new()),
             task,
         };
         net.publish()?;
@@ -730,10 +743,53 @@ impl WorldNet {
     }
 
     /// Asks a host at a known address — the way `ask` does after finding it.
+    /// An open connection to it is used again; one that turns out to be gone
+    /// is opened anew once.
     pub async fn ask_at(&self, addr: EndpointAddr, world: &str, me: &Identity, ask: Ask) -> Result<Reply> {
+        let id = addr.id;
+        if let Some(conn) = self.link(id) {
+            match self.ask_on(&conn, world, me, &ask).await {
+                Ok(reply) => return Ok(reply),
+                Err(_) => self.forget_link(id, &conn),
+            }
+        }
         let conn = tokio::time::timeout(STEP, self.endpoint.connect(addr, ALPN))
             .await
             .map_err(|_| "The game master's device does not answer.")??;
+        if let Ok(mut links) = self.links.lock() {
+            links.insert(id, conn.clone());
+        }
+        let reply = self.ask_on(&conn, world, me, &ask).await;
+        if reply.is_err() {
+            self.forget_link(id, &conn);
+        }
+        reply
+    }
+
+    /// The open connection to `id`, if it still stands.
+    fn link(&self, id: EndpointId) -> Option<Connection> {
+        let mut links = self.links.lock().ok()?;
+        match links.get(&id) {
+            Some(conn) if conn.close_reason().is_none() => Some(conn.clone()),
+            Some(_) => {
+                links.remove(&id);
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn forget_link(&self, id: EndpointId, conn: &Connection) {
+        if let Ok(mut links) = self.links.lock() {
+            if links.get(&id).is_some_and(|c| c.stable_id() == conn.stable_id()) {
+                links.remove(&id);
+            }
+        }
+        conn.close(0u32.into(), b"done");
+    }
+
+    /// One ask on a connection: a stream of its own, proven anew.
+    async fn ask_on(&self, conn: &Connection, world: &str, me: &Identity, ask: &Ask) -> Result<Reply> {
         let remote = conn.remote_id();
         let (mut send, mut recv) = tokio::time::timeout(STEP, conn.open_bi()).await??;
         let hello = Hello { world: world.to_string(), identity: me.public() };
@@ -744,20 +800,23 @@ impl WorldNet {
         write(&mut send, &proof).await?;
         // What is asked comes only after the proof — nobody unknown gets to
         // send more than a few bytes.
-        write(&mut send, &ask).await?;
+        write(&mut send, ask).await?;
         let _ = send.finish();
         let reply: Reply = tokio::time::timeout(Duration::from_secs(120), read(&mut recv, MAX_ANSWER)).await??;
-        conn.close(0u32.into(), b"done");
         Ok(reply)
     }
 
-    /// Asks a server, at the addresses its code names.
+    /// Asks a server, at the addresses its code names — looked up only when
+    /// no connection to it stands.
     pub async fn ask_server(&self, server: &Server, world: &str, me: &Identity, ask: Ask) -> Result<Reply> {
-        let mut addr = EndpointAddr::new(server.endpoint.parse::<EndpointId>()?);
-        for a in &server.addrs {
-            if let Ok(found) = tokio::net::lookup_host(a.as_str()).await {
-                for a in found {
-                    addr = addr.with_ip_addr(a);
+        let id = server.endpoint.parse::<EndpointId>()?;
+        let mut addr = EndpointAddr::new(id);
+        if self.link(id).is_none() {
+            for a in &server.addrs {
+                if let Ok(found) = tokio::net::lookup_host(a.as_str()).await {
+                    for a in found {
+                        addr = addr.with_ip_addr(a);
+                    }
                 }
             }
         }
@@ -994,10 +1053,36 @@ fn proof_bytes(world: &str, asking: EndpointId, host: EndpointId, nonce: &str) -
     Ok(serde_json::to_vec(&(ALPN, world, asking.to_string(), host.to_string(), nonce))?)
 }
 
-/// The host's side of one connection.
+/// How long a connection stays open without anything asked on it.
+const IDLE: Duration = Duration::from_secs(300);
+/// Asks answered at once on one connection.
+const STREAMS: usize = 8;
+
+/// The host's side of one connection: one ask per stream, as many as come,
+/// until it is closed or stays quiet.
 async fn serve(conn: Connection, local: EndpointId, host: Arc<dyn Host>) -> Result<()> {
+    let at_once = Arc::new(Semaphore::new(STREAMS));
+    loop {
+        let (send, recv) = match tokio::time::timeout(IDLE, conn.accept_bi()).await {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(_)) => return Ok(()),
+            Err(_) => {
+                conn.close(0u32.into(), b"idle");
+                return Ok(());
+            }
+        };
+        let permit = at_once.clone().acquire_owned().await?;
+        let (conn, host) = (conn.clone(), host.clone());
+        tokio::spawn(async move {
+            let _permit = permit;
+            let _ = serve_stream(&conn, send, recv, local, host).await;
+        });
+    }
+}
+
+/// One ask: hello, the host's challenge, the proof — then the ask itself.
+async fn serve_stream(conn: &Connection, mut send: SendStream, mut recv: RecvStream, local: EndpointId, host: Arc<dyn Host>) -> Result<()> {
     let remote = conn.remote_id();
-    let (mut send, mut recv) = tokio::time::timeout(STEP, conn.accept_bi()).await??;
     let hello: Hello = timed(read(&mut recv, MAX_SMALL)).await?;
     let nonce = hex::encode(aw_crypto::random_bytes::<32>()?);
     write(&mut send, &Challenge { nonce: nonce.clone() }).await?;
@@ -1024,8 +1109,8 @@ async fn serve(conn: Connection, local: EndpointId, host: Arc<dyn Host>) -> Resu
     };
     write(&mut send, &reply).await?;
     let _ = send.finish();
-    // Wait for the other side to have read everything before closing.
-    let _ = tokio::time::timeout(Duration::from_secs(120), conn.closed()).await;
+    // The connection stays; the stream is done once the other side has it.
+    let _ = tokio::time::timeout(Duration::from_secs(120), send.stopped()).await;
     Ok(())
 }
 

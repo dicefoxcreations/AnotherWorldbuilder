@@ -239,6 +239,9 @@ impl Drop for Writing<'_> {
 }
 
 /// Whether an ask brings records or image parts along.
+/// How long a write waits for the one before it.
+const WRITE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 fn writes(ask: &Ask) -> bool {
     match ask {
         Ask::Swap { give, .. } => !give.is_empty(),
@@ -296,6 +299,21 @@ impl Keeper {
         }
         writing.insert(world.to_string());
         Ok(Some(Some(Writing { keeper: self, world: world.to_string() })))
+    }
+
+    /// A write's turn: waits a moment for the write before it, then says
+    /// busy — the app asks again.
+    fn claim_soon(&self, world: &str) -> Answer<Option<Option<Writing<'_>>>> {
+        let until = std::time::Instant::now() + WRITE_WAIT;
+        loop {
+            if let Some(writing) = self.claim(world, true)? {
+                return Ok(Some(writing));
+            }
+            if std::time::Instant::now() >= until {
+                return Ok(None);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     /// GM and form of a world — as last known while it is being written,
@@ -403,9 +421,13 @@ impl Keeper {
         if world.is_empty() || self.book()?.closed.contains_key(world) {
             return Ok(Reply::NotOffered);
         }
-        // One write at a time, and nobody waits behind it.
-        let Some(_writing) = self.claim(world, writes(&ask))? else {
-            return Ok(Reply::Busy);
+        // One write at a time; a write waits a moment for the one before
+        // it, reading never waits.
+        let _writing = if writes(&ask) {
+            let Some(writing) = self.claim_soon(world)? else { return Ok(Reply::Busy) };
+            writing
+        } else {
+            None
         };
         if !self.store.holds(world) {
             return self.bring(world, who, ask);
@@ -536,6 +558,7 @@ impl Keeper {
     /// Backs up the worlds whose time has come — not one being written right
     /// now; it comes the next time round.
     fn due(&self) {
+        self.release_receipts(std::time::Duration::from_secs(10 * 60));
         let Ok(worlds) = self.store.list_worlds() else { return };
         for meta in worlds {
             let world = meta.public.world_id.to_string();
@@ -706,6 +729,8 @@ mod tests {
         lose_ack: AtomicBool,
         stop_before_commit: AtomicBool,
         record_limit: usize,
+        asks: std::sync::atomic::AtomicUsize,
+        swaps: std::sync::atomic::AtomicUsize,
     }
 
     impl crate::online::Transport for OnlineWire<'_> {
@@ -719,7 +744,11 @@ mod tests {
                     self.alive.store(false, Ordering::SeqCst);
                     return Err(AppError(crate::online::UNAVAILABLE.into()));
                 }
-                let mut reply = self.keeper.answer(world, &self.who.public(), ask);
+                if matches!(ask, Ask::Swap { .. }) { self.swaps.fetch_add(1, Ordering::SeqCst); }
+                let mut reply = crate::online::patiently(std::time::Duration::from_secs(10), || {
+                    self.asks.fetch_add(1, Ordering::SeqCst);
+                    std::future::ready(Ok(self.keeper.answer(world, &self.who.public(), ask.clone())))
+                }).await?;
                 if let Reply::Records { records, .. } = &mut reply {
                     records.truncate(self.record_limit);
                 }
@@ -733,7 +762,8 @@ mod tests {
     }
 
     fn online_wire<'a>(keeper: &'a Keeper, who: &'a Identity) -> OnlineWire<'a> {
-        OnlineWire { keeper, who, alive: AtomicBool::new(true), lose_ack: AtomicBool::new(false), stop_before_commit: AtomicBool::new(false), record_limit: usize::MAX }
+        OnlineWire { keeper, who, alive: AtomicBool::new(true), lose_ack: AtomicBool::new(false), stop_before_commit: AtomicBool::new(false), record_limit: usize::MAX,
+                     asks: Default::default(), swaps: Default::default() }
     }
 
     fn on_server(gm: &Someone, world: &str) -> Server {
@@ -929,6 +959,8 @@ mod tests {
         assert!(keeper.store.load_keyring(&world).unwrap().attributes().next().is_none());
         assert!(keeper.store.view_keys(&world, &keeper.store.load_identity().unwrap()).is_err(), "the server cannot decrypt the world");
         wire.alive.store(false, Ordering::SeqCst);
+        // What the server said a moment ago still counts; then it asks again.
+        tokio::time::sleep(crate::online::FRESH).await;
         let refused = run_online(&gm.store, &world, &server, &wire, |_| {
             panic!("a disconnected server world must not execute a local command");
             #[allow(unreachable_code)] Ok(())
@@ -1033,6 +1065,66 @@ mod tests {
         }).await.unwrap();
         assert!(!code.contains("Must not appear later."));
         assert_eq!(keeper.store.inventory(&world).unwrap(), before);
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_read_right_after_the_server_asks_nothing_and_a_failed_save_downloads_nothing_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        swap(&keeper, &gm, &world);
+        let server = on_server(&gm, &world);
+        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
+        let wire = online_wire(&keeper, &gm.me);
+        let read = |cache: Store| document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code);
+        run_online(&gm.store, &world, &server, &wire, read).await.unwrap();
+        let asked = wire.asks.load(Ordering::SeqCst);
+        assert!(asked > 0, "the first command reads the server");
+        for _ in 0..5 {
+            run_online(&gm.store, &world, &server, &wire, read).await.unwrap();
+        }
+        assert_eq!(wire.asks.load(Ordering::SeqCst), asked, "reads right after read nothing from the network");
+
+        wire.stop_before_commit.store(true, Ordering::SeqCst);
+        let failed = run_online(&gm.store, &world, &server, &wire, |cache| {
+            let code = document::code_of(&cache, &gm.me, &world, &article)?;
+            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Not sent."), &code.base, "lost")
+        }).await;
+        assert!(failed.is_err());
+        wire.alive.store(true, Ordering::SeqCst);
+        let swaps = wire.swaps.load(Ordering::SeqCst);
+        let code = run_online(&gm.store, &world, &server, &wire, read).await.unwrap();
+        assert!(!code.contains("Not sent."), "what was not acknowledged is gone here too");
+        assert_eq!(wire.swaps.load(Ordering::SeqCst), swaps, "the acknowledged world stays on this device, not downloaded again");
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_save_while_someone_else_writes_waits_its_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        swap(&keeper, &gm, &world);
+        let server = on_server(&gm, &world);
+        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
+        let wire = online_wire(&keeper, &gm.me);
+        let other = async {
+            let writing = keeper.claim(&world, true).unwrap().unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            drop(writing);
+        };
+        let save = run_online(&gm.store, &world, &server, &wire, |cache| {
+            let code = document::code_of(&cache, &gm.me, &world, &article)?;
+            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "After the other one."), &code.base, "busy")
+        });
+        let ((), saved) = tokio::join!(other, save);
+        saved.unwrap();
+        let read = run_online(&gm.store, &world, &server, &wire, |cache| document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)).await.unwrap();
+        assert!(read.contains("After the other one."));
         crate::online::close_session(&gm.store, &world).await.unwrap();
     }
 
@@ -1187,10 +1279,14 @@ mod tests {
         assert_eq!(there, here);
         assert_eq!(keeper.offers().unwrap().iter().map(|o| o.gm.clone()).collect::<Vec<_>>(), vec!["Marla"]);
 
-        // Being written: asked about meanwhile, the server says so at once,
-        // and lists it as it last knew it.
+        // Being written: reading goes on; another write waits a moment, then
+        // hears busy. The world is listed as last known.
         let writing = keeper.claim(&eldermere, true).unwrap().unwrap();
-        assert_eq!(keeper.answer(&eldermere, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Busy);
+        assert!(matches!(keeper.answer(&eldermere, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Digest { .. }));
+        let started = std::time::Instant::now();
+        let record = marla.store.records(&eldermere, &marla.store.inventory(&eldermere).unwrap()[..1]).unwrap();
+        assert_eq!(keeper.answer(&eldermere, &marla.me.public(), Ask::Give { records: record }), Reply::Busy);
+        assert!(started.elapsed() >= WRITE_WAIT);
         let Reply::Worlds { worlds, .. } = keeper.answer("", &marla.me.public(), Ask::Worlds) else { panic!("the worlds") };
         assert_eq!(worlds.iter().map(|o| o.gm.clone()).collect::<Vec<_>>(), vec!["Marla"]);
         assert!(!state(&keeper, &marla).worlds.is_empty());

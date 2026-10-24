@@ -27,13 +27,37 @@ impl Transport for Connection<'_> {
     fn ask<'a>(&'a self, world: &'a str, ask: Ask) -> Pin<Box<dyn Future<Output = Answer<Reply>> + Send + 'a>> {
         Box::pin(async move {
             let quick = matches!(ask, Ask::Digest { .. });
-            let limit = if quick { 6 } else { 120 };
-            tokio::time::timeout(std::time::Duration::from_secs(limit), self.net.ask_server(self.server, world, self.me, ask))
-                .await.map_err(|_| AppError(UNAVAILABLE.into()))?
-                .map_err(|e| AppError(format!("{UNAVAILABLE} {e}")))
+            let limit = std::time::Duration::from_secs(if quick { 6 } else { 120 });
+            patiently(limit, || async {
+                tokio::time::timeout(limit, self.net.ask_server(self.server, world, self.me, ask.clone()))
+                    .await.map_err(|_| AppError(UNAVAILABLE.into()))?
+                    .map_err(|e| AppError(format!("{UNAVAILABLE} {e}")))
+            }).await
         })
     }
 }
+
+/// Asks again while the server is busy writing this world for someone
+/// else — a moment later, up to `limit`.
+pub(crate) async fn patiently<F, Fut>(limit: std::time::Duration, mut ask: F) -> Answer<Reply>
+where F: FnMut() -> Fut, Fut: Future<Output = Answer<Reply>> {
+    let until = std::time::Instant::now() + limit;
+    let mut pause = std::time::Duration::from_millis(100);
+    loop {
+        let reply = ask().await?;
+        if reply != Reply::Busy || std::time::Instant::now() + pause > until {
+            return Ok(reply);
+        }
+        tokio::time::sleep(pause).await;
+        pause = (pause * 2).min(std::time::Duration::from_secs(1));
+    }
+}
+
+/// How long what the server last said counts as current for a command.
+/// The poll asks every two seconds, writing together more often.
+pub(crate) const FRESH: std::time::Duration = std::time::Duration::from_millis(1500);
+/// Missed polls in a row before the open world says it is cut off.
+const MISSES: u32 = 3;
 
 struct Session {
     world: String,
@@ -41,6 +65,12 @@ struct Session {
     _temporary: tempfile::TempDir,
     endpoint: String,
     copies: bool,
+    /// When it last matched the server — none: not yet, or not since a miss.
+    synced: Option<std::time::Instant>,
+    /// What the server has acknowledged: only this survives a failed command.
+    confirmed: HashSet<String>,
+    /// Polls missed in a row.
+    misses: u32,
 }
 
 type Slot = Arc<tokio::sync::Mutex<Option<Session>>>;
@@ -92,10 +122,52 @@ impl Session {
         let store = Store::online_cache(temporary.path().join("profile"), temporary.path().join("worlds"));
         std::fs::create_dir_all(store.worlds_dir())?;
         copy_private(base, &store, world)?;
-        Ok(Self { world: world.into(), store, _temporary: temporary, endpoint: endpoint.into(), copies: false })
+        Ok(Self { world: world.into(), store, _temporary: temporary, endpoint: endpoint.into(), copies: false,
+                  synced: None, confirmed: HashSet::new(), misses: 0 })
     }
 
-    async fn synchronize(&mut self, world: &str, transport: &impl Transport) -> Answer<String> {
+    fn fresh(&self) -> bool {
+        self.synced.is_some_and(|at| at.elapsed() < FRESH)
+    }
+
+    /// A new session with only what the server acknowledged — what a failed
+    /// command wrote here is gone, never uploaded later. Read from this
+    /// device, not downloaded again.
+    fn without_unsent(&self, base: &Store) -> Answer<Self> {
+        let world = self.world.as_str();
+        let mut next = Session::new(base, world, &self.endpoint)?;
+        let kept: Vec<String> = self.confirmed.iter().cloned().collect();
+        let ordered = self.store.in_order(world, &kept)?;
+        for batch in ordered.chunks(2000) {
+            next.store.receive(world, &self.store.records(world, batch)?)?;
+        }
+        let missing = next.store.missing_parts(world)?;
+        for batch in missing.chunks(16) {
+            next.store.take_parts(world, &self.store.parts(world, batch))?;
+        }
+        if next.store.holds(world) {
+            next.store.refresh_online_members(world).map_err(|e| AppError(format!("[online] {e}")))?;
+            next.store.view_keys(world, &next.store.load_identity()?).map_err(|e| AppError(format!("[online] {e}")))?;
+        }
+        next.copies = self.copies;
+        next.confirmed = next.store.inventory(world)?.into_iter().collect();
+        Ok(next)
+    }
+
+    /// Reads what the server has; true when anything came.
+    async fn synchronize(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
+        let held = self.store.holds(world);
+        let before = if held { self.store.inventory(world)?.len() } else { 0 };
+        let parts_before = if held { self.store.wanted_parts(world)?.len() } else { 0 };
+        self.read_server(world, transport).await?;
+        self.synced = Some(std::time::Instant::now());
+        let inventory = self.store.inventory(world)?;
+        let brought = inventory.len() != before || self.store.wanted_parts(world)?.len() != parts_before;
+        self.confirmed = inventory.into_iter().collect();
+        Ok(brought)
+    }
+
+    async fn read_server(&mut self, world: &str, transport: &impl Transport) -> Answer<String> {
         let reply = transport.ask(world, network::live_digest(world, self.store.load_identity()?.id().as_str())?).await?;
         network::receive_live(world, &reply);
         let Reply::Digest { digest, requests, no_copy, .. } = reply else {
@@ -283,31 +355,52 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
         .map(|((_, world), handle)| (world.clone(), handle.clone())).collect();
     let mut changed = Vec::new();
     for (world, handle) in current {
+        // Busy with a command: that one reads the server itself.
         let Ok(mut held) = handle.try_lock() else { continue };
         let Some(session) = held.as_mut() else { continue };
         let result = async {
             let server = server_for(base, &world)?;
             if session.endpoint != server.endpoint { return Err(AppError(UNAVAILABLE.into())) }
-            let before = Journal::digest(&session.store.inventory(&world)?);
             let transport = Connection { net, server: &server, me };
-            session.synchronize(&world, &transport).await?;
+            // One digest when nothing changed — it carries who is here and the dice too.
+            if !session.synchronize(&world, &transport).await? {
+                return Ok(false);
+            }
             let confirmed = session.store.inventory(&world)?;
             let parts = session.store.wanted_parts(&world)?;
             crate::answer_proposals(&session.store, &world)?;
             publish(session, base, &world, &transport, &confirmed, &parts).await?;
-            let after = Journal::digest(&session.store.inventory(&world)?);
+            session.confirmed.extend(session.store.inventory(&world)?);
             session.persist_metadata(base, &world)?;
             remember_info(base, &world, &server, session.info(base, &world, &server)?, session.store.journal_version(&world)?)?;
             session.keep_allowed_copy(base, &world)?;
-            Ok(before != after)
+            Ok(true)
         }.await;
         match result {
-            Ok(true) => changed.push(world),
-            Ok(false) => {}
+            Ok(brought) => {
+                if session.misses >= MISSES {
+                    let _ = app.emit("online-available", serde_json::json!({ "world": world }));
+                }
+                session.misses = 0;
+                if brought { changed.push(world) }
+            }
             Err(error) => {
-                *held = None;
-                let message = if error.0.starts_with("[online]") { error.0 } else { format!("{UNAVAILABLE} {}", error.0) };
-                let _ = app.emit("online-unavailable", serde_json::json!({ "world": world, "error": message }));
+                // What was answered here but not acknowledged is not kept.
+                if session.store.inventory(&world).map_or(true, |i| i.len() != session.confirmed.len()) {
+                    match session.without_unsent(base) {
+                        Ok(clean) => *session = clean,
+                        Err(_) => { *held = None; continue }
+                    }
+                }
+                // Not reached for a moment: the session stays, read again
+                // in full before the next command. Only a longer silence
+                // stops the open world.
+                session.synced = None;
+                session.misses += 1;
+                if session.misses == MISSES {
+                    let message = if error.0.starts_with("[online]") { error.0 } else { format!("{UNAVAILABLE} {}", error.0) };
+                    let _ = app.emit("online-unavailable", serde_json::json!({ "world": world, "error": message }));
+                }
             }
         }
     }
@@ -337,6 +430,7 @@ pub(crate) async fn adopt_uploaded(base: &Store, world: &str, server: &Server) -
     }
     session.store.refresh_online_members(world)?;
     session.copies = copies;
+    session.confirmed = session.store.inventory(world)?.into_iter().collect();
     let version = session.store.journal_version(world)?;
     let info = session.info(base, world, server)?;
     remember_info(base, world, server, info, version)?;
@@ -457,11 +551,6 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
     let added: Vec<_> = session.store.inventory(world)?.into_iter().filter(|id| !known.contains(id)).collect();
     let parts: Vec<_> = session.store.wanted_parts(world)?.difference(before_parts).cloned().collect();
     if added.is_empty() && parts.is_empty() {
-        let reply = transport.ask(world, network::live_digest(world, session.store.load_identity()?.id().as_str())?).await?;
-        network::receive_live(world, &reply);
-        if !matches!(reply, Reply::Digest { .. }) {
-            return Err(AppError(UNAVAILABLE.into()));
-        }
         return Ok(());
     }
     session.remember_keys(base, world)?;
@@ -480,6 +569,10 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
             }
             if some.is_empty() { return Err(AppError("An online record could not be read.".into())) }
             at += some.len();
+            // A usual edit fits in one piece: staged and committed in one ask.
+            if at == records.len() && parts.is_empty() {
+                return finish(transport, world, &transaction, &revision, some).await;
+            }
             let reply = transport.ask(world, Ask::Commit { transaction: transaction.clone(), base: revision.clone(), records: some, parts: Vec::new(), finish: false }).await?;
             if reply != Reply::Staged { return Err(AppError(format!("{UNAVAILABLE} The server needs an update for online commands."))) }
         }
@@ -490,20 +583,23 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
                 return Err(AppError(UNAVAILABLE.into()));
             }
         }
-        match transport.ask(world, Ask::Commit { transaction: transaction.clone(), base: revision, records: Vec::new(), parts: Vec::new(), finish: true }).await? {
-            Reply::Committed { .. } => {
-                // Housekeeping cannot turn an acknowledged save into a failure.
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(1), transport.ask(world, Ask::Release { transaction: transaction.clone() })).await;
-                Ok(())
-            }
-            Reply::Conflict => Err(AppError("The server world changed meanwhile. This edit was not saved; please try again.".into())),
-            _ => Err(AppError(UNAVAILABLE.into())),
-        }
+        finish(transport, world, &transaction, &revision, Vec::new()).await
     }.await;
     if result.is_err() {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(1), transport.ask(world, Ask::Abort { transaction })).await;
     }
     result
+}
+
+/// The last piece of a command, and the commit. The server keeps the
+/// receipt a while for a repeated ask, then lets it go by itself.
+async fn finish(transport: &impl Transport, world: &str, transaction: &str, revision: &str, records: Vec<String>) -> Answer<()> {
+    let ask = Ask::Commit { transaction: transaction.into(), base: revision.into(), records, parts: Vec::new(), finish: true };
+    match transport.ask(world, ask).await? {
+        Reply::Committed { .. } => Ok(()),
+        Reply::Conflict => Err(AppError("The server world changed meanwhile. This edit was not saved; please try again.".into())),
+        _ => Err(AppError(UNAVAILABLE.into())),
+    }
 }
 
 pub(crate) async fn execute<T, F, Fut, R>(base: &Store, world: &str, server: &Server, transport: &T, operation: F) -> Answer<R>
@@ -512,26 +608,59 @@ where T: Transport, F: FnOnce(Store) -> Fut, Fut: Future<Output = Answer<R>> {
     let mut held = handle.lock().await;
     if held.as_ref().is_some_and(|s| s.endpoint != server.endpoint) { *held = None }
     if held.is_none() { *held = Some(Session::new(base, world, &server.endpoint)?) }
-    let result = async {
-        let session = held.as_mut().unwrap();
-        session.synchronize(world, transport).await?;
-        let before = session.store.inventory(world)?;
-        let before_parts = session.store.wanted_parts(world)?;
-        crate::answer_proposals(&session.store, world)?;
-        let value = operation(session.store.clone()).await?;
-        publish(session, base, world, transport, &before, &before_parts).await?;
-        session.copies = session.store.copies(world)?;
-        session.persist_metadata(base, world)?;
-        let info = session.info(base, world, server)?;
-        remember_info(base, world, server, info, session.store.journal_version(world)?)?;
-        session.keep_allowed_copy(base, world)?;
-        Ok(value)
-    }.await;
-    if result.is_err() {
-        // A failed command must never become a background upload later.
-        *held = None;
+    let session = held.as_mut().unwrap();
+    // What the poll read a moment ago is current enough; a command asks
+    // the server only when it has to write, or when that is longer ago.
+    let mut changed = false;
+    if !session.fresh() {
+        match session.synchronize(world, transport).await {
+            Ok(brought) => changed = brought,
+            Err(error) => {
+                // Never read at all: nothing to keep.
+                if session.confirmed.is_empty() { *held = None }
+                return Err(error);
+            }
+        }
     }
-    result
+    let before = session.store.inventory(world)?;
+    let before_parts = session.store.wanted_parts(world)?;
+    // What players asked to be made goes with this command.
+    if changed { crate::answer_proposals(&session.store, world)?; }
+    let result = operation(session.store.clone()).await;
+    let wrote = session.store.inventory(world)?.len() != before.len() || session.store.wanted_parts(world)? != before_parts;
+    let sent = match (&result, wrote) {
+        (_, false) => Ok(false),
+        (Ok(_), true) => publish(session, base, world, transport, &before, &before_parts).await.map(|_| true),
+        // A command that failed halfway: what it wrote is not sent.
+        (Err(_), true) => Err(AppError(String::new())),
+    };
+    match sent {
+        Ok(published) => {
+            if published {
+                session.confirmed.extend(session.store.inventory(world)?);
+                session.copies = session.store.copies(world)?;
+            }
+            if published || changed {
+                session.persist_metadata(base, world)?;
+                let info = session.info(base, world, server)?;
+                remember_info(base, world, server, info, session.store.journal_version(world)?)?;
+                session.keep_allowed_copy(base, world)?;
+            }
+            result
+        }
+        Err(error) => {
+            // A failed command must never become a background upload later:
+            // the session goes on with only what the server acknowledged.
+            *held = match held.as_ref().map(|s| s.without_unsent(base)) {
+                Some(Ok(clean)) => Some(clean),
+                _ => None,
+            };
+            match result {
+                Err(e) => Err(e),
+                Ok(_) => Err(error),
+            }
+        }
+    }
 }
 
 #[cfg(feature = "gui")]

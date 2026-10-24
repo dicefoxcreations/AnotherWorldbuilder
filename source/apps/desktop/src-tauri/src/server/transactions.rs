@@ -127,6 +127,23 @@ impl Keeper {
         Ok(reply)
     }
 
+    /// Receipts answer a commit asked again after its answer got lost; after
+    /// a while nobody asks again, and they go.
+    pub(super) fn release_receipts(&self, older: std::time::Duration) {
+        let Ok(scopes) = std::fs::read_dir(self.transactions()) else { return };
+        for scope in scopes.flatten() {
+            let Ok(entries) = std::fs::read_dir(scope.path()) else { continue };
+            for entry in entries.flatten() {
+                let receipt = entry.path().join("receipt.json");
+                let old = std::fs::metadata(&receipt).and_then(|m| m.modified()).ok()
+                    .and_then(|at| at.elapsed().ok()).is_some_and(|age| age > older);
+                if old {
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
+    }
+
     pub(super) fn recover_online_commands(&self) -> Answer<()> {
         let root = self.transactions();
         if !root.exists() {
