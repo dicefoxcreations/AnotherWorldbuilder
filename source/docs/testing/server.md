@@ -29,6 +29,12 @@ On upgrade, an old GM working copy is never silently uploaded. Existing server a
 
 Online operation cannot prevent someone deliberately copying information they can see. Explicit backups are independent of the automatic copy setting.
 
+## Who sees a world
+
+A world on a server is seen by its GM, its members, the ids its GM let in ahead of time (*Players → by id*) and the server's admin — nobody else. Asked about it, anyone else hears that it is not there (`Reply::NotOffered`): it is neither named nor can it be asked for. The GM's switch *Options → World → Where it lives → Seen by everyone on the server* (`Item::Listing`, signed by the GM, off by default) names it to everyone and lets anyone ask to join. The ids let in ahead of time stand in the same record — ids only — so the server can tell them apart; a request from one of them is taken in by the GM's device at once. At most 50 requests wait per world.
+
+The network side: a connection is accepted only from an address that proved itself (QUIC retry), one address holds at most eight connections at once, and past 20 asks a second (bursts of 60) a connection is slowed down. A flood of traffic that fills the line itself is beyond any program: that is for the router or the provider.
+
 ## Admin
 
 At start one GM is named as **admin** (`AW_ADMIN`, her ID under *Profile* in the app). The admin manages the server in the app under *Options → Network → Servers and hosts → Manage*:
