@@ -24,7 +24,7 @@ impl Host for Gm {
         if self.members.lock().unwrap().contains(&id) {
             return match ask {
                 Ask::Swap { give, .. } => Reply::Records { records: vec![format!("the world for {}", who.name)], wanted: give, digest: "d".into() },
-                _ => Reply::Digest { digest: "d".into(), presence: Vec::new(), rolls: Vec::new(), handover: false, requests: Vec::new(), no_copy: false },
+                _ => Reply::Digest { digest: "d".into(), presence: Vec::new(), rolls: Vec::new(), handover: false, requests: Vec::new(), no_copy: false, mark: None },
             };
         }
         match ask {

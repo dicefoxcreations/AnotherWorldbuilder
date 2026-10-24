@@ -12,7 +12,17 @@ const same = (a: string, b: string) => a.replace(/[\\/]+$/, "") === b.replace(/[
 
 /** What a server is called — its own name, or its address while it has not answered. */
 export function serverName(entry: { code: string; name: string }): string {
-  return entry.name || `Server @ ${entry.code.split("@")[1] ?? entry.code}`;
+  return entry.name || serverAddress(entry.code);
+}
+
+/** The address one entered — first in the code; the others the server names itself stay unseen. */
+export function serverAddress(code: string): string {
+  return code.split("@")[1]?.split(",")[0] ?? code;
+}
+
+/** Whether a server answers: a dot, green or grey. */
+export function Reach({ on }: { on: boolean }) {
+  return <span className={on ? "reach on" : "reach"} title={on ? "Reachable" : "Not reachable"} />;
 }
 
 /** How far a world on its way to its server is — empty once it is there. */
@@ -46,7 +56,7 @@ export function placeOf(world: WorldInfo, storage: StorageView | null, servers: 
   if (world.server || world.serverId) {
     if (!world.server) return { kind: "server", name: "Server unavailable", title: "Add this world's server again to open it." };
     const server = servers.find((s) => s.code === world.server);
-    return { kind: "server", name: server ? serverName(server) : serverName({ code: world.server, name: "" }), title: world.server };
+    return { kind: "server", name: server ? serverName(server) : serverName({ code: world.server, name: "" }), title: serverAddress(world.server) };
   }
   const root = parentOf(world.folder);
   const folder = storage?.locations.find((l) => !l.primary && same(l.path, root));
@@ -259,7 +269,7 @@ function MoveDialog({
   }));
   const hosts = servers
     .filter((s) => s.may_bring || s.code === world.server)
-    .map((s) => ({ value: `server:${s.code}`, label: `Server · ${serverName(s)}${s.code === world.server ? " · now" : ""}`, title: s.code, off: !s.reached || (!copy && s.code === world.server) }));
+    .map((s) => ({ value: `server:${s.code}`, label: `Server · ${serverName(s)}${s.code === world.server ? " · now" : ""}`, title: serverAddress(s.code), off: !s.reached || (!copy && s.code === world.server) }));
   const choices = [...folders, ...hosts];
   const chosen = choices.find((c) => c.value === to && !c.off) ?? choices.find((c) => !c.off);
   const toServer = chosen?.value.startsWith("server:") ? chosen.value.slice("server:".length) : "";

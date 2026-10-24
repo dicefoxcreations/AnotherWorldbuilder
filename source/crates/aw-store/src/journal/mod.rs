@@ -981,6 +981,21 @@ pub struct Journal {
     in_versions_seen: (u64, Option<BTreeSet<String>>),
     /// When each record came to this device — its file's time.
     arrived: BTreeMap<String, u64>,
+    /// Every record in the order it was taken in since the journal was
+    /// opened — so whoever asks gets only what is newer than what they had.
+    arrivals: Vec<String>,
+    /// Names this order: opened again, the order is another one.
+    epoch: String,
+    /// The inventory's digest, as of (records, versions, arrivals).
+    digest_cache: std::cell::RefCell<Option<((usize, usize, usize), String)>>,
+}
+
+/// A name for one opening of a journal, unlike any before it.
+fn epoch() -> String {
+    static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let n = OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    blake3::hash(format!("{nanos}-{n}-{}", std::process::id()).as_bytes()).to_hex()[..16].to_string()
 }
 
 /// Milliseconds since 1970 — the journal's clock.
@@ -1055,6 +1070,9 @@ impl Journal {
             image_refs: (0, None),
             in_versions_seen: (0, None),
             arrived: BTreeMap::new(),
+            arrivals: Vec::new(),
+            epoch: epoch(),
+            digest_cache: Default::default(),
         };
         journal.refresh()?;
         // Parts of deleted images leave the disk, too — unless an image here
@@ -1342,6 +1360,7 @@ impl Journal {
                     self.store(&id, &raw, &Record::Control(control.clone()))?;
                 }
                 self.raw.insert(id.clone(), raw);
+                self.arrivals.push(id.clone());
                 self.arrived.entry(id.clone()).or_insert_with(now);
                 let verdict = matches!(control.item, Item::Verdict { .. });
                 self.index_control(&id, control);
@@ -1357,6 +1376,7 @@ impl Journal {
                     self.store(&id, &raw, &Record::Image(entry.clone()))?;
                 }
                 self.raw.insert(id.clone(), raw);
+                self.arrivals.push(id.clone());
                 self.arrived.entry(id.clone()).or_insert_with(now);
                 self.images.insert(id.clone(), entry);
             }
@@ -1372,6 +1392,7 @@ impl Journal {
                     self.store(&id, &raw, &Record::Badge(badge.clone()))?;
                 }
                 self.raw.insert(id.clone(), raw);
+                self.arrivals.push(id.clone());
                 self.arrived.entry(id.clone()).or_insert_with(now);
                 let member = badge.author.id.to_string();
                 if self.badges.get(&member).is_none_or(|(_, b)| b.at <= badge.at) {
@@ -1390,6 +1411,7 @@ impl Journal {
                     self.store(&id, &raw, &Record::Proposal(proposal.clone()))?;
                 }
                 self.raw.insert(id.clone(), raw);
+                self.arrivals.push(id.clone());
                 self.arrived.entry(id.clone()).or_insert_with(now);
                 self.proposals.insert(id.clone(), proposal);
             }
@@ -1417,6 +1439,7 @@ impl Journal {
                     self.store(&id, &raw, &Record::Draft(draft.clone()))?;
                 }
                 self.raw.insert(id.clone(), raw);
+                self.arrivals.push(id.clone());
                 self.arrived.entry(id.clone()).or_insert_with(now);
                 let key = (draft.layer, draft.generation);
                 self.by_layer.entry(key).or_default().push(id.clone());
@@ -1512,6 +1535,7 @@ impl Journal {
             .map(|(id, _)| id.clone())
             .collect();
         self.versions.insert(id.clone(), head);
+        self.arrivals.push(id.clone());
         if gone.is_empty() {
             for key in keys {
                 self.apply_to_open(key, &id);
@@ -2599,6 +2623,41 @@ impl Journal {
     }
 
     /// One hash over a set of names — equal sets, equal digest.
+    /// `digest` of this inventory — worked out again only when it changed.
+    pub fn inventory_digest(&self) -> String {
+        let key = (self.raw.len(), self.versions.len(), self.arrivals.len());
+        if let Some((at, digest)) = &*self.digest_cache.borrow() {
+            if *at == key {
+                return digest.clone();
+            }
+        }
+        let digest = Journal::digest(&self.inventory());
+        *self.digest_cache.borrow_mut() = Some((key, digest.clone()));
+        digest
+    }
+
+    /// Where the order of arrivals stands: its name and length.
+    pub fn arrival_mark(&self) -> (String, u64) {
+        (self.epoch.clone(), self.arrivals.len() as u64)
+    }
+
+    /// What came after `at` in the order named `epoch` and is still here,
+    /// each with the place after it — `None`: another order, ask in full.
+    pub fn since(&self, epoch: &str, at: u64) -> Option<Vec<(u64, String)>> {
+        let at = usize::try_from(at).ok()?;
+        if epoch != self.epoch || at > self.arrivals.len() {
+            return None;
+        }
+        Some(
+            self.arrivals[at..]
+                .iter()
+                .enumerate()
+                .filter(|(_, id)| self.raw.contains_key(*id) || self.versions.contains_key(*id))
+                .map(|(i, id)| ((at + i + 1) as u64, id.clone()))
+                .collect(),
+        )
+    }
+
     pub fn digest(ids: &[String]) -> String {
         let mut sorted: Vec<&String> = ids.iter().collect();
         sorted.sort();

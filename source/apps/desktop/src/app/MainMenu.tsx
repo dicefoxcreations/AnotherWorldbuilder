@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { DeleteDialog, DeleteButton } from "../shared/ui/Delete";
 import { NetworkIcon, ServerIcon } from "../shared/ui/Icons";
 import { api, type NetWorld, type NetworkView, type ServerEntry, type StorageView, type WorldInfo } from "../api/client";
-import { nameOf, placeOf, PlaceIcon, serverName, uploadText } from "../features/worlds/WorldPlace";
+import { nameOf, placeOf, PlaceIcon, Reach, serverName, uploadText } from "../features/worlds/WorldPlace";
 import { HeaderTools } from "./HeaderTools";
 
 /** One library, regardless of how a world reaches this device. */
@@ -151,7 +151,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
     return <button className="world-card" onClick={() => opened(w.id)}>
     <span className="world-icon">{w.icon}</span><strong>{w.name}</strong>
     <span className="world-location" title={place.title}>
-      <PlaceIcon place={place} /> {place.name}{note && ` · ${note}`}
+      {onServer(w) && <Reach on={!!serverOf(w.server)?.reached} />}<PlaceIcon place={place} /> {place.name}{note && ` · ${note}`}
     </span>
     <span className={`role-badge ${w.role}`}>{w.isGm ? "GM" : "Player"}</span>
     <small>{w.articleCount} {w.articleCount === 1 ? "article" : "articles"}</small>
@@ -190,7 +190,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
       const mine = worlds.filter(w => w.server === s.code);
       const open = nearby.filter(w => w.server === s.code && !known.has(w.id));
       return <div key={s.code} className="server-section">
-        <h4><ServerIcon /> {serverName(s)} <small className="muted">{!s.reached ? "not reached" : s.admin ? "admin" : ""}</small>
+        <h4><Reach on={s.reached} /><ServerIcon /> {serverName(s)} <small className="muted">{!s.reached ? "not reached" : s.admin ? "admin" : ""}</small>
           <button className="ghost compact" title="Change its address, or remove it" onClick={() => editServer(s)}>Edit</button></h4>
         {s.waiting && <p className="small muted">A world of yours waits for the server's admin.</p>}
         {s.reached && !s.may_bring && <p className="small muted line">

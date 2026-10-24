@@ -495,6 +495,7 @@ impl Keeper {
                 handover: false,
                 requests: Vec::new(),
                 no_copy: false,
+                mark: None,
             },
             // What it has, asked for: all of it.
             Ask::Swap { have, give } if give.is_empty() => Reply::Records { records: Vec::new(), wanted: have, digest: aw_store::journal::Journal::digest(&[]) },
@@ -1099,6 +1100,34 @@ mod tests {
         let code = run_online(&gm.store, &world, &server, &wire, read).await.unwrap();
         assert!(!code.contains("Not sent."), "what was not acknowledged is gone here too");
         assert_eq!(wire.swaps.load(Ordering::SeqCst), swaps, "the acknowledged world stays on this device, not downloaded again");
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn what_another_member_wrote_comes_by_itself_without_naming_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
+        swap(&keeper, &gm, &world);
+        let server = on_server(&gm, &world);
+        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
+        let (marla_wire, bob_wire) = (online_wire(&keeper, &gm.me), online_wire(&keeper, &bob.me));
+        let read = |cache: Store| document::code_of(&cache, &bob.me, &world, &article).map(|d| d.code);
+        let first = run_online(&bob.store, &world, &server, &bob_wire, read).await.unwrap();
+        assert!(first.contains("Content of Rumours"));
+        let swaps = bob_wire.swaps.load(Ordering::SeqCst);
+
+        run_online(&gm.store, &world, &server, &marla_wire, |cache| {
+            let code = document::code_of(&cache, &gm.me, &world, &article)?;
+            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Written by Marla."), &code.base, "marla")
+        }).await.unwrap();
+        tokio::time::sleep(crate::online::FRESH).await;
+        let after = run_online(&bob.store, &world, &server, &bob_wire, read).await.unwrap();
+        assert!(after.contains("Written by Marla."), "{after}");
+        assert_eq!(bob_wire.swaps.load(Ordering::SeqCst), swaps, "only what is new, not everything by name");
+        crate::online::close_session(&bob.store, &world).await.unwrap();
         crate::online::close_session(&gm.store, &world).await.unwrap();
     }
 

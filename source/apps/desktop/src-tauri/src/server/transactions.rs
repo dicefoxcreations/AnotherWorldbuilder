@@ -2,7 +2,7 @@
 //! Only encrypted journal records and image parts pass through this module.
 
 use super::*;
-use aw_store::{durable, journal::Journal};
+use aw_store::durable;
 use base64::{engine::general_purpose::STANDARD, Engine};
 
 #[derive(Serialize, Deserialize)]
@@ -88,7 +88,7 @@ impl Keeper {
                     return Ok(Reply::Staged);
                 }
                 // The per-world Keeper claim excludes every other writer here.
-                let current = Journal::digest(&self.store.inventory(world)?);
+                let current = self.store.digest(world)?;
                 if current != meta.base && path.join("has-control").exists() {
                     std::fs::remove_dir_all(path)?;
                     return Ok(Reply::Conflict);
@@ -118,7 +118,7 @@ impl Keeper {
             let name = file.file_name().to_string_lossy().into_owned();
             self.store.take_parts(&meta.world, &[(name, std::fs::read(file.path())?)])?;
         }
-        let reply = Reply::Committed { digest: Journal::digest(&self.store.inventory(&meta.world)?) };
+        let reply = Reply::Committed { digest: self.store.digest(&meta.world)? };
         durable::write(&path.join("receipt.json"), &serde_json::to_vec(&reply)?)?;
         // Receipts make a retry safe if the connection went after the commit.
         std::fs::remove_dir_all(path.join("records"))?;

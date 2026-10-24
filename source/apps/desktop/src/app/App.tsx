@@ -25,7 +25,7 @@ import { NavBar } from "../features/navigation/NavBar";
 import { WorldDataContext } from "../features/worlds/WorldData";
 import { LinkPreview } from "../features/wiki/LinkPreview";
 import { DiceTray } from "../features/dice/DiceTray";
-import { announce, isMainWindow, onWorldChanged, suspendOnlineWorld } from "../api/changes";
+import { announce, isMainWindow, onWorldChanged, resumeOnlineWorld, suspendOnlineWorld } from "../api/changes";
 import { wantsApart } from "../shared/apart";
 import { listen } from "@tauri-apps/api/event";
 
@@ -164,13 +164,22 @@ export default function App() {
       suspendOnlineWorld(detail.world);
       if (detail.world === currentWorld.current || detail.world === openingWorld.current) setBlocked(detail);
     };
+    // Its server answers again: the world goes on where it was.
+    const available = (detail: { world: string }) => {
+      resumeOnlineWorld(detail.world);
+      setBlocked((b) => (b?.world === detail.world ? null : b));
+      if (detail.world === currentWorld.current) setFresh((n) => n + 1);
+    };
     const local = (event: Event) => unavailable((event as CustomEvent<{ world: string; error: string }>).detail);
     window.addEventListener("online-unavailable", local);
     let disposed = false;
     let stop: (() => void) | undefined;
+    let stopAvailable: (() => void) | undefined;
     listen<{ world: string; error: string }>("online-unavailable", (event) => unavailable(event.payload))
       .then((unlisten) => { if (disposed) unlisten(); else stop = unlisten; }).catch(() => {});
-    return () => { disposed = true; stop?.(); window.removeEventListener("online-unavailable", local); };
+    listen<{ world: string }>("online-available", (event) => available(event.payload))
+      .then((unlisten) => { if (disposed) unlisten(); else stopAvailable = unlisten; }).catch(() => {});
+    return () => { disposed = true; stop?.(); stopAvailable?.(); window.removeEventListener("online-unavailable", local); };
   }, []);
   const world = useMemo(
     () => worlds.find((w) => w.id === openWorld) ?? null,
@@ -219,8 +228,8 @@ export default function App() {
   const [fresh, setFresh] = useState(0);
   const keeping = !!me;
   useEffect(() => {
-    // Others can be here over the local network or over the internet.
-    pace.network = !!network?.enabled || !!network?.internet;
+    // Others can be here over the local network, the internet or a server.
+    pace.network = !!network?.running;
     // One window keeps the network going — the main one; the others hear from it.
     if (!keeping || !isMainWindow) return;
     let gone = false;

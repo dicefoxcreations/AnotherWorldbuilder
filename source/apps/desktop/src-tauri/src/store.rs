@@ -1092,6 +1092,31 @@ impl Store {
     }
 
     /// How far the world's journal is — counts up with every change.
+    /// The digest of `inventory`, kept until something changes.
+    pub fn digest(&self, world_id: &str) -> Result<String> {
+        self.require_online_access(world_id)?;
+        if !self.holds(world_id) {
+            return Ok(journal::Journal::digest(&[]));
+        }
+        self.with_journal(world_id, |journal| Ok(journal.inventory_digest()))
+    }
+
+    /// Where the order of arrivals stands — see `Journal::since`.
+    pub fn arrival_mark(&self, world_id: &str) -> Result<Option<(String, u64)>> {
+        if !self.holds(world_id) {
+            return Ok(None);
+        }
+        self.with_journal(world_id, |journal| Ok(Some(journal.arrival_mark())))
+    }
+
+    /// The records after a mark, each with the mark after it.
+    pub fn since(&self, world_id: &str, epoch: &str, at: u64) -> Result<Option<Vec<(u64, String)>>> {
+        if !self.holds(world_id) {
+            return Ok(None);
+        }
+        self.with_journal(world_id, |journal| Ok(journal.since(epoch, at)))
+    }
+
     pub fn journal_version(&self, world_id: &str) -> Result<u64> {
         self.with_journal(world_id, |journal| Ok(journal.version()))
     }

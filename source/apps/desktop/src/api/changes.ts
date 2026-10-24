@@ -99,6 +99,7 @@ export function setWorldOnline(world: string, required: boolean) {
 }
 
 export function suspendOnlineWorld(world: string) { unavailable.add(world); }
+export function resumeOnlineWorld(world: string) { unavailable.delete(world); }
 
 /** A command of the app; what changes a world is told to the other windows. */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

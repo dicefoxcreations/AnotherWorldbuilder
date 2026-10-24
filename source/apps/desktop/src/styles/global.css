@@ -147,6 +147,9 @@ fieldset input, fieldset textarea, fieldset select { width: 100%; margin-bottom:
 
 .level { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 .level.open { border-color: var(--ok-line); color: var(--ok-text); }
+/* Whether a server answers — beside its name and its worlds. */
+.reach { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; background: var(--muted, #888); opacity: .55; }
+.reach.on { background: var(--ok-text); opacity: 1; }
 .level.sealed { border-color: var(--accent-line); color: var(--accent); }
 .level.gm-only { border-color: var(--danger-line); color: var(--danger-text); }
 

@@ -35,7 +35,7 @@ import { USUAL_DICE } from "../dice/DiceTray";
 import { TransferArea } from "./Transfer";
 import { KeysDialog } from "../../shared/ui/KeysDialog";
 import { BackupArea } from "../worlds/Backups";
-import { PlaceArea, serverName } from "../worlds/WorldPlace";
+import { PlaceArea, Reach, serverName } from "../worlds/WorldPlace";
 
 /** The areas of the options. More will follow. */
 /** The areas, in three groups: the open world's, this device's, the app's. */
@@ -1341,8 +1341,8 @@ function Servers({ view, busy, onSave, onError }: { view: NetworkView; busy: boo
                 />
               ) : (
                 <span className="grow">
-                  <strong>{serverName(entry)}</strong>
-                  <small className="small muted" title={s}>
+                  <strong><Reach on={entry.reached} />{serverName(entry)}</strong>
+                  <small className="small muted">
                     {[
                       !entry.reached ? "not reached" : admin ? "you are its admin" : "connected",
                       ...view.worlds.filter((w) => w.server === s).map((w) => `${w.icon} ${w.name}`),

@@ -82,6 +82,14 @@ pub struct Offer {
     pub gm: String,
 }
 
+/// A place in the order a host took records in: the order's name (a new
+/// one each time the host opens the world) and how far along it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Mark {
+    pub epoch: String,
+    pub at: u64,
+}
+
 /// What the asking side wants.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -98,6 +106,9 @@ pub enum Ask {
     },
     /// Takes `give`, then answers with the records not in `have`.
     Swap { have: Vec<String>, give: Vec<String> },
+    /// The records that came to the host after `mark` — instead of naming
+    /// everything held, as `Swap` does. Answered with `Reply::Since`.
+    Since { mark: Mark },
     /// Takes records, and answers nothing back — a world brought over a
     /// little at a time, without naming everything held each time.
     Give { records: Vec<String> },
@@ -226,12 +237,19 @@ pub enum Reply {
         /// A member keeps no copy: the world is theirs while they are online.
         #[serde(default)]
         no_copy: bool,
+        /// Where the host's order of arrivals stands — for `Ask::Since`.
+        #[serde(default)]
+        mark: Option<Mark>,
     },
     /// The world handed over, sealed for the asking side alone.
     Handover { package: String },
     /// The records the asking side lacks, exactly as signed; the names of
     /// those the host lacks; and the digest after this swap.
     Records { records: Vec<String>, wanted: Vec<String>, digest: String },
+    /// What came after the mark asked for — as many as fit — and the mark
+    /// after the last of them. No mark: the host's order is another one
+    /// now; ask with `Swap`.
+    Since { records: Vec<String>, mark: Option<Mark>, digest: String },
     /// Parts of images asked for (name, base64) — as many as fit — and the
     /// parts the host still lacks.
     Parts { parts: Vec<(String, String)>, want: Vec<String> },

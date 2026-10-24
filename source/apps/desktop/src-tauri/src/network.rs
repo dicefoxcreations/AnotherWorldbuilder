@@ -15,7 +15,7 @@
 use super::*;
 use crate::store::{JoinRequest, NetworkSettings};
 use aw_store::journal::Journal;
-use aw_sync::world::{Ask, Host, Offer, Reach, Reply, Server, WorldNet};
+use aw_sync::world::{Ask, Host, Mark, Offer, Reach, Reply, Server, WorldNet};
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -68,6 +68,8 @@ pub(crate) fn wrote_here(world: &str, added: usize) {
 /// A whole journal may be big; a swap carries this much at most, the next
 /// one the rest.
 const SWAP_BUDGET: usize = 32 * 1024 * 1024;
+/// What one answer to `Ask::Since` carries at most.
+const SINCE_BUDGET: usize = 16 * 1024 * 1024;
 /// Image parts per exchange, in bytes before encoding — a few parts at a time.
 const PARTS_BUDGET: usize = 24 * 1024 * 1024;
 /// A world brought over is given a little at a time: so much per ask — a
@@ -754,13 +756,35 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
                 .collect();
             let rolls = recent_rolls(world, |r| r.member != id).iter().filter_map(|r| serde_json::to_string(r).ok()).collect();
             Reply::Digest {
-                digest: Journal::digest(&store.inventory(world)?),
+                digest: store.digest(world)?,
                 presence,
                 rolls,
                 handover: store.pending_handover(world)?.as_deref() == Some(id.as_str()),
                 requests: Vec::new(),
                 no_copy: false,
+                mark: store.arrival_mark(world)?.map(|(epoch, at)| Mark { epoch, at }),
             }
+        }
+        Ask::Since { mark } => {
+            // What came after the mark, in the order it came — as much as fits.
+            let Some(after) = store.since(world, &mark.epoch, mark.at)? else {
+                return Ok(Reply::Since { records: Vec::new(), mark: None, digest: store.digest(world)? });
+            };
+            let mut records = Vec::new();
+            let mut size = 0;
+            let mut at = mark.at;
+            'pieces: for piece in after.chunks(2000) {
+                let ids: Vec<String> = piece.iter().map(|(_, id)| id.clone()).collect();
+                for ((next, _), record) in piece.iter().zip(store.records(world, &ids)?) {
+                    size += record.len();
+                    if size > SINCE_BUDGET && !records.is_empty() {
+                        break 'pieces;
+                    }
+                    records.push(record);
+                    at = *next;
+                }
+            }
+            Reply::Since { records, mark: Some(Mark { epoch: mark.epoch, at }), digest: store.digest(world)? }
         }
         Ask::Parts { want, give } => {
             // Whatever is not needed or does not match its name is not kept.
@@ -784,7 +808,7 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
                 store.step_down(world)?;
                 republish();
             }
-            Reply::Taken { digest: Journal::digest(&store.inventory(world)?) }
+            Reply::Taken { digest: store.digest(world)? }
         }
         Ask::Swap { have, give } => {
             // Whatever does not check out is simply not taken.
@@ -1435,7 +1459,7 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
     let me_id = me.id().to_string();
     let rolls = recent_rolls(world, |r| r.member == me_id).iter().filter_map(|r| serde_json::to_string(r).ok()).collect();
     let theirs = match ask(net, via, world, me, Ask::Digest { presence, rolls }).await? {
-        Reply::Digest { digest, presence, rolls, handover, requests, no_copy } => {
+        Reply::Digest { digest, presence, rolls, handover, requests, no_copy, .. } => {
             // Held only while online, or kept — as the world says now.
             if !store.is_gm(world) {
                 store.hold_fleeting(world, no_copy)?;
