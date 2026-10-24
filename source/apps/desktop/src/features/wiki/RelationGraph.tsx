@@ -70,6 +70,9 @@ function coloursOfPairs(pairs: string[]): Map<string, string> {
 /** What a graph shows, where it says nothing: everything. */
 const shows = (g: GraphNode, what: string) => g.show.length === 0 || g.show.includes(what);
 
+/** Whether a line has someone at an end this reader cannot open — `buildGraph` names them `unknown:…`. */
+const isVeiled = (e: GraphEdge) => e.a.startsWith("unknown:") || e.b.startsWith("unknown:");
+
 /** The id of the relation between two people — as `buildGraph` names it. */
 const pairId = (x: string, y: string) => (x < y ? `${x}|${y}` : `${y}|${x}`);
 
@@ -270,7 +273,11 @@ function Drawn({
   if (query.of && !type) return <p className="dead-link">There is no type “{query.of}”.</p>;
   if (query.around && !around) return <p className="dead-link">“{query.around}” is not here.</p>;
 
+  // A line to someone this reader cannot open tells nothing more than that
+  // there is someone: grey, its roles ???, and no colour in the legend.
+  const veiled = (e: GraphEdge) => isVeiled(e);
   const pair = (e: GraphEdge) => {
+    if (veiled(e)) return "";
     const [x, y] = [e.atA.map(roleName).join(" / "), e.atB.map(roleName).join(" / ")];
     if (x && x === y) return x;
     return [x, y].filter(Boolean).sort().join(" – ");
@@ -279,7 +286,7 @@ function Drawn({
   const own = graph.edges.filter((e) => pair(e) && !absorbed.has(e.id));
   const pairColours = coloursOfPairs(own.map(pair));
   /** A line's colour: its own, or its pair's. */
-  const colour = (e: GraphEdge) => settings.get(e.id)?.line.color || pairColours.get(pair(e)) || "grey";
+  const colour = (e: GraphEdge) => (veiled(e) ? "grey" : settings.get(e.id)?.line.color || pairColours.get(pair(e)) || "grey");
   const legend = [...pairColours.entries()].sort();
 
   const known = (id: string) => articles.some((a) => a.id === id);
@@ -933,7 +940,7 @@ function Canvas({
 
   const box = (id: string) => at.get(id)!;
   const mid = (id: string) => ({ x: box(id).x + NODE_W / 2, y: box(id).y + NODE_H / 2 });
-  const roleAt = (e: GraphEdge, id: string) => (e.a === id ? e.atA : e.atB).map(roleName).join(" / ");
+  const roleAt = (e: GraphEdge, id: string) => (isVeiled(e) ? "???" : (e.a === id ? e.atA : e.atB).map(roleName).join(" / "));
   const known = (id: string) => graph.nodes.some((n) => n.id === id && n.article);
   /** The side of `id`'s end as set — or, while it is dragged, where the pointer is. */
   const sideOf = (e: GraphEdge, id: string): string => {
