@@ -2764,19 +2764,23 @@ impl Journal {
             .iter()
             .filter_map(|id| {
                 if let Some(c) = self.controls.get(id) {
-                    Some((0, c.seq, id.clone()))
+                    // The world's own record first, whatever its count: whoever
+                    // takes a world in recognises it by that, in the first piece
+                    // already — and a tidied world's oldest one may be long gone.
+                    let first = matches!(c.item, Item::World { .. });
+                    Some((if first { 0 } else { 1 }, c.seq, id.clone()))
                 } else if let Some(v) = self.versions.get(id) {
-                    Some((1, v.until, id.clone()))
+                    Some((2, v.until, id.clone()))
                 } else if let Some(d) = self.drafts.get(id) {
-                    Some((2, d.time, id.clone()))
+                    Some((3, d.time, id.clone()))
                 } else if let Some(i) = self.images.get(id) {
-                    Some((3, i.time, id.clone()))
+                    Some((4, i.time, id.clone()))
                 } else if let Some(p) = self.proposals.get(id) {
-                    Some((4, p.at, id.clone()))
+                    Some((5, p.at, id.clone()))
                 } else {
                     // A badge — the newest of its member, or one before it.
                     match serde_json::from_slice::<Record>(self.raw.get(id)?).ok()? {
-                        Record::Badge(b) => Some((5, b.at, id.clone())),
+                        Record::Badge(b) => Some((6, b.at, id.clone())),
                         _ => None,
                     }
                 }

@@ -90,6 +90,8 @@ fn pending() -> &'static Mutex<HashMap<String, Vec<String>>> {
 pub struct Upload {
     pub records: (usize, usize),
     pub images: (usize, usize),
+    /// Why the server did not take it — it is tried again, the others go on.
+    pub error: Option<String>,
 }
 
 static UPLOADS: OnceLock<Mutex<HashMap<String, Upload>>> = OnceLock::new();
@@ -1875,6 +1877,14 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
 pub(crate) async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, waiting: &HashSet<String>) -> Answer<Vec<String>> {
     let settings = store.load_network()?;
     let mut joined = Vec::new();
+    // A world on its way shows so from the start — never as online before it is there.
+    {
+        let mut all = uploads().lock().map_err(AppError::from)?;
+        for world in &settings.uploading {
+            all.entry(world.clone()).or_default();
+        }
+        all.retain(|world, _| settings.uploading.contains(world));
+    }
     for code in &settings.servers {
         let Ok(server) = Server::parse(code) else { continue };
         let failed = || FAILED.get_or_init(Default::default).lock().map_err(AppError::from);
@@ -1987,10 +1997,21 @@ pub(crate) async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, w
                 // No member any more: for good. Not offered: until it is again.
                 Ok(kind) if kind == "not-member" => store.let_go(&world, true)?,
                 Ok(kind) if kind == "not-offered" => store.let_go(&world, false)?,
-                Ok(_) => {}
-                Err(_) => {
+                Ok(_) => {
+                    if let Some(u) = uploads().lock().map_err(AppError::from)?.get_mut(&world) {
+                        u.error = None;
+                    }
+                }
+                // Not reached: neither is any other world on it, this round.
+                Err(e) if e.0.contains("does not answer") => {
                     failed()?.insert(server.endpoint.clone(), std::time::Instant::now());
                     break;
+                }
+                // This world not taken: said where it is shown — the others go on.
+                Err(e) => {
+                    if gm && settings.uploading.iter().any(|w| w == &world) {
+                        uploads().lock().map_err(AppError::from)?.entry(world.clone()).or_default().error = Some(e.0);
+                    }
                 }
             }
         }

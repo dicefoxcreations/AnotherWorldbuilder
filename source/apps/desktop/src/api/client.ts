@@ -127,7 +127,7 @@ export type NetworkView = {
 };
 
 /** How far a world has come over to its server: records and image parts, [there, all]. */
-export type Upload = { records: [number, number]; images: [number, number] };
+export type Upload = { records: [number, number]; images: [number, number]; error?: string | null };
 
 /** A server as it answered last: its name (empty until it answered), whether this device is its admin, whether a world waits for the admin. */
 export type ServerEntry = {

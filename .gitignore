@@ -30,3 +30,6 @@ __pycache__/
 /programs/**/*.exe
 /programs/**/*.tar
 /programs/server-linux-x86_64/aw-server
+
+# Analyses written for the publisher (German, local paths): never public
+/source/docs/analysis/

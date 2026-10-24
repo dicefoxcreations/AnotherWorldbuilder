@@ -898,3 +898,23 @@ fn generations_nothing_was_written_in_can_go_and_the_part_stays_as_it_was() {
     assert_eq!(order(&t.gm_journal), before, "the parts stand as they did");
     assert!(t.gm_journal.superseded().is_empty());
 }
+
+#[test]
+fn a_tidied_world_still_sends_its_own_record_first() {
+    let mut t = table();
+    // Many records before the world's record is written anew — then tidied:
+    // the first world record goes, the newest stands far down the count.
+    for n in 0..30 {
+        t.gm_says(Item::Versions { max: 10 + n });
+    }
+    let (public, calendar, icon, home, gm) = {
+        let (p, c, i, h, g) = t.gm_journal.world_item().unwrap();
+        (p.clone(), c.clone(), i.to_string(), h.to_string(), g.clone())
+    };
+    t.gm_says(Item::World { public, calendar, icon: format!("{icon}!"), home, gm });
+    let gone = t.gm_journal.superseded();
+    t.gm_says(Item::Deleted { records: gone });
+    let order = t.gm_journal.in_order(&t.gm_journal.inventory());
+    let first = vec![String::from_utf8(t.gm_journal.raw(&order[0]).unwrap()).unwrap()];
+    assert!(world_of(&first, t.token.public().world_id.as_str()).is_ok(), "the world's own record comes first");
+}

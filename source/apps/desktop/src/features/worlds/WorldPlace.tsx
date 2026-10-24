@@ -28,7 +28,9 @@ export function Reach({ on }: { on: boolean }) {
 /** How far a world on its way to its server is — empty once it is there. */
 export function uploadText(u: Upload | undefined): string {
   if (!u) return "";
+  if (u.error) return `upload failed: ${u.error}`;
   const [records, all] = u.records;
+  if (all === 0) return "upload pending";
   if (records < all) return `uploading ${Math.floor((records * 100) / all)} %`;
   const [images, every] = u.images;
   return images < every ? `uploading images ${images} of ${every}` : "";
