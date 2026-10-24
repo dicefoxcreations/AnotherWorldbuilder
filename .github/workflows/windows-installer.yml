@@ -1,0 +1,41 @@
+# The Windows installer, built on Windows — unsigned: the publisher signs
+# the update locally with a key that never leaves their machine
+# (source/docs/development/builds.md, "Updates").
+name: Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag or commit to build
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo-about, for the third-party notices
+        run: cargo install cargo-about --features cli --locked
+      - name: Frontend packages
+        working-directory: source/apps/desktop
+        run: npm ci
+      - name: Installer
+        working-directory: source
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+        run: node tools/build/desktop.mjs --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: source/build/cargo/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
