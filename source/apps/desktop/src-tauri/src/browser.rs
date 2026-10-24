@@ -292,14 +292,35 @@ fn pair(store: &Store, tell: Tell, mut settings: Settings, body: &[u8]) -> Route
 }
 
 fn worlds(store: &Store) -> Routed {
-    let led: Vec<serde_json::Value> = store
+    let mut led: Vec<serde_json::Value> = store
         .list_worlds()
         .map_err(fail)?
         .into_iter()
         .filter(|m| store.is_gm(m.public.world_id.as_str()))
         .map(|m| serde_json::json!({ "id": m.public.world_id.to_string(), "name": m.public.name, "icon": m.icon, "members": m.members.len() }))
         .collect();
+    for cached in network::online_worlds(store) {
+        if store.is_gm(&cached.world) && !led.iter().any(|w| w["id"] == cached.world) {
+            led.push(serde_json::json!({ "id": cached.world, "name": cached.info["name"], "icon": cached.info["icon"],
+                "members": cached.info["members"].as_array().map_or(0, Vec::len) }));
+        }
+    }
     Ok(serde_json::Value::Array(led))
+}
+
+/// Browser imports use the same acknowledged online command channel as
+/// the app. The HTTP listener runs on its own thread, outside Tokio.
+fn authorized<R>(store: &Store, world: &str, run: impl FnOnce(&Store) -> Answer<R>) -> Answer<R> {
+    if !online::requires_online(store, world) { return run(store) }
+    let server = online::server_for(store, world)?;
+    if store.holds(world) && !network::online_worlds(store).iter().any(|w| w.world == world) {
+        return Err(AppError("[online] This world is still being uploaded.".into()));
+    }
+    let net = network::running().ok_or_else(|| AppError(online::UNAVAILABLE.into()))?;
+    let me = store.load_identity()?;
+    let connection = online::Connection { net: &net, server: &server, me: &me };
+    tauri::async_runtime::block_on(online::execute(store, world, &server, &connection,
+        |cache| std::future::ready(run(&cache))))
 }
 
 /// A world's types — so that a package brings only those it lacks, and the
@@ -308,7 +329,7 @@ fn types(store: &Store, world: &str) -> Routed {
     if !store.is_gm(world) {
         return Err((403, "Only the GM's worlds.".into()));
     }
-    serde_json::to_value(store.load_templates(world).map_err(fail)?).map_err(fail)
+    serde_json::to_value(authorized(store, world, |cache| Ok(cache.load_templates(world)?)).map_err(|e| (500, e.0))?).map_err(fail)
 }
 
 /// A package from the browser: its `package.json` and its files, the files
@@ -345,7 +366,12 @@ fn take(store: &Store, tell: Tell, from: &str, body: &[u8]) -> Routed {
         let (dir, package) = transfer::read(&folder).map_err(|e| (400, e.0))?;
         let me = store.load_identity().map_err(fail)?;
         let progress = |done: usize, total: usize| tell("package-progress", serde_json::json!([done, total]));
-        let summary = transfer::import(store, &me, &sent.world, &dir, &package, &progress).map_err(|e| (400, e.0))?;
+        let summary = authorized(store, &sent.world, |cache| transfer::import(cache, &me, &sent.world, &dir, &package, &progress)).map_err(|e| {
+            if e.0.contains("[online]") {
+                tell("online-unavailable", serde_json::json!({ "world": sent.world, "error": e.0 }));
+            }
+            (400, e.0)
+        })?;
         tell("browser-imported", serde_json::json!({ "world": sent.world, "from": from, "name": summary.name, "documents": summary.documents_new }));
         serde_json::to_value(&summary).map_err(fail)
     })();

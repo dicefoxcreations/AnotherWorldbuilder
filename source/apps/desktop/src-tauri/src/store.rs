@@ -279,6 +279,10 @@ pub struct NetworkSettings {
     /// server alone; a member's came from it.
     #[serde(default)]
     pub homes: BTreeMap<String, String>,
+    /// Explicitly requested initial uploads. An older GM working copy is
+    /// never interpreted as a new upload merely because it has a home.
+    #[serde(default)]
+    pub uploading: Vec<String>,
 }
 
 impl NetworkSettings {
@@ -301,6 +305,7 @@ impl Default for NetworkSettings {
             stun: stun_servers(),
             servers: Vec::new(),
             homes: BTreeMap::new(),
+            uploading: Vec::new(),
         }
     }
 }
@@ -554,6 +559,10 @@ pub struct Store {
     profile: PathBuf,
     worlds: PathBuf,
     roots: Vec<PathBuf>,
+    /// A disposable online session must never create edits while receiving
+    /// or reading a server revision. Edits only happen in an explicit command.
+    online_cache: bool,
+    online_access: bool,
 }
 
 impl Store {
@@ -570,7 +579,29 @@ impl Store {
 
     pub fn with_roots(profile: PathBuf, roots: Vec<PathBuf>) -> Self {
         let worlds = roots[0].clone();
-        Store { profile, worlds, roots }
+        Store { profile, worlds, roots, online_cache: false, online_access: false }
+    }
+
+    pub(crate) fn online_cache(profile: PathBuf, worlds: PathBuf) -> Self {
+        let mut store = Self::with_roots(profile, vec![worlds]);
+        store.online_cache = true;
+        store.online_access = true;
+        store
+    }
+
+    /// Internal transport/catalog access. Interactive world commands never
+    /// receive this store; they use a server-confirmed disposable session.
+    pub(crate) fn for_sync(&self) -> Self {
+        let mut store = self.clone();
+        store.online_access = true;
+        store
+    }
+
+    fn require_online_access(&self, world: &str) -> Result<()> {
+        if !self.online_access && crate::online::requires_online(self, world) {
+            return Err(StoreError::Journal(crate::online::UNAVAILABLE.into()));
+        }
+        Ok(())
     }
 
     pub fn local_roots(&self) -> &[PathBuf] { &self.roots }
@@ -741,6 +772,7 @@ impl Store {
     /// The world's journal — opened once, then kept; picks up records that
     /// came meanwhile, and opens with this device's keys.
     fn journal(&self, world_id: &str) -> Result<Arc<Mutex<Open>>> {
+        self.require_online_access(world_id)?;
         let local = self.load_local(world_id)?;
         let dir = self.world_dir(world_id);
         let (open, fresh) = {
@@ -768,10 +800,12 @@ impl Store {
             if self.has_identity() {
                 let me = self.load_identity()?;
                 guard.journal.set_me(&me);
-                self.close_idle(world_id, &mut guard.journal, &me)?;
+                if !self.online_cache {
+                    self.close_idle(world_id, &mut guard.journal, &me)?;
+                }
             }
         }
-        if fresh {
+        if fresh && !self.online_cache {
             // Not finished now, then the next time the world opens.
             let _ = self.resume_switch(world_id);
         }
@@ -837,7 +871,7 @@ impl Store {
     }
 
     /// Forgets an open journal — the world is gone.
-    fn close(&self, world_id: &str) {
+    pub(crate) fn close(&self, world_id: &str) {
         if let Ok(mut all) = open_journals().lock() {
             all.remove(&(self.profile.clone(), self.world_dir(world_id)));
         }
@@ -934,10 +968,46 @@ impl Store {
         })
     }
 
+    /// Rebuild an online GM's private roster from the server's signed grants.
+    /// Private metadata from an older device must not re-admit a removed player.
+    pub(crate) fn refresh_online_members(&self, world_id: &str) -> Result<()> {
+        let me = self.load_identity()?;
+        let mut local = self.load_local(world_id)?;
+        let (gm, members) = self.with_journal(world_id, |journal| {
+            let gm = journal.world_item().map(|(.., gm)| gm.clone());
+            let members = journal.granted_members().into_iter().filter_map(|identity| {
+                let grant = journal.grant_content(identity.id.as_str(), me.seal_secret())?;
+                Some(Member { identity, role: Role::Player, attributes: grant.attributes })
+            }).collect::<Vec<_>>();
+            Ok((gm, members))
+        })?;
+        if let Some(gm) = gm {
+            if gm.id == *me.id() {
+                if !self.holds_token(world_id) {
+                    return Err(StoreError::Journal("The GM keys of this online world are missing. Restore the profile's keys from its backup.".into()));
+                }
+                let attributes = local.members.iter().find(|m| m.identity.id == gm.id).map(|m| m.attributes.clone())
+                    .unwrap_or_else(|| vec!["gm".into(), "players".into(), "all".into()]);
+                local.members = vec![Member { identity: gm, role: Role::Gm, attributes }];
+                local.members.extend(members);
+                self.save_local(&local)?;
+            } else if self.online_cache && self.holds_token(world_id) {
+                // Never destroy the real profile's keys on a role change.
+                // This session acts as a player and opens only its own grant.
+                std::fs::remove_file(self.private_world_dir(world_id).join("owner.key"))?;
+                local.members.clear();
+                self.save_local(&local)?;
+                self.close(world_id);
+            }
+        }
+        Ok(())
+    }
+
     /// Saves the world. This device's part goes to the profile's `state.json`; as game
     /// master, what changed of the shared part becomes a record.
     pub fn save_world_meta(&self, meta: &WorldMeta) -> Result<()> {
         let id = meta.public.world_id.to_string();
+        self.require_online_access(&id)?;
         self.save_local(&Local {
             version: STORE_VERSION,
             public: meta.public.clone(),
@@ -1005,6 +1075,7 @@ impl Store {
 
     /// Saves the keyring — and hands every member the keys that changed.
     pub fn save_keyring(&self, world_id: &str, ring: &Keyring) -> Result<()> {
+        self.require_online_access(world_id)?;
         let dir = self.private_world_dir(world_id);
         std::fs::create_dir_all(&dir)?;
         aw_store::durable::write(&dir.join("keyring.json"), ring.to_json()?.as_bytes())?;
@@ -1369,6 +1440,7 @@ impl Store {
         let mut settings = self.load_network()?;
         settings.shared.retain(|w| w != world_id);
         settings.homes.remove(world_id);
+        settings.uploading.retain(|w| w != world_id);
         self.save_network(&settings)?;
         Ok(())
     }
@@ -1456,6 +1528,7 @@ impl Store {
     /// As game master the full keyring, as player what was granted to them.
     /// In both cases the only thing that decides is what they decrypt.
     pub fn view_keys(&self, world_id: &str, identity: &Identity) -> Result<HeldKeys> {
+        self.require_online_access(world_id)?;
         if let Some(acting) = crate::host::acting() {
             return Ok(acting.held);
         }
@@ -1813,6 +1886,7 @@ impl Store {
     /// The names of everything here — drafts too, for writing together over
     /// the network.
     pub fn inventory(&self, world_id: &str) -> Result<Vec<String>> {
+        self.require_online_access(world_id)?;
         if !self.holds(world_id) {
             return Ok(Vec::new());
         }
@@ -1823,6 +1897,7 @@ impl Store {
     /// being — as long as its records carry the world's own signature.
     /// Returns how many were new.
     pub fn receive(&self, world_id: &str, records: &[String]) -> Result<usize> {
+        self.require_online_access(world_id)?;
         if !self.holds(world_id) {
             // Checked against the world's key before anything is kept: a
             // forged world leaves nothing behind.
@@ -1852,8 +1927,10 @@ impl Store {
                 guard.journal.set_keys(keys);
             }
             // A new generation may have left lines of one's own behind.
-            self.carry_own(world_id)?;
-            self.prune(world_id, false)?;
+            if !self.online_cache {
+                self.carry_own(world_id)?;
+                self.prune(world_id, false)?;
+            }
         }
         Ok(new)
     }

@@ -248,7 +248,7 @@ pub(crate) fn restore(store: &Store, file: &Path) -> Answer<String> {
     if me.id().as_str() != about.gm {
         return Err(AppError("Only the GM who made the backup opens it — restore their keys first.".into()));
     }
-    if store.holds(&about.world) {
+    if store.holds(&about.world) || crate::online::is_server_world(store, &about.world) {
         return Err(AppError(format!("“{}” is here already. Delete it first to bring the backup back.", about.name)));
     }
     let sealed: SealedKeys = serde_json::from_slice(&std::fs::read(backup.join(KEYS))?)?;

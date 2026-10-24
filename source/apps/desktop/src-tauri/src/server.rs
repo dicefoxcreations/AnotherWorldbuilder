@@ -31,6 +31,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+mod transactions;
+
 const USAGE: &str = "aw-server — keeps the worlds of AnotherWorldbuilder for groups
 
   --admin <id>        the GM who manages it: their id, id:…  (AW_ADMIN)
@@ -242,6 +244,7 @@ fn writes(ask: &Ask) -> bool {
         Ask::Swap { give, .. } => !give.is_empty(),
         Ask::Give { records } => !records.is_empty(),
         Ask::Parts { give, .. } => !give.is_empty(),
+        Ask::Commit { .. } | Ask::Abort { .. } | Ask::Release { .. } => true,
         _ => false,
     }
 }
@@ -254,7 +257,9 @@ impl Keeper {
             Err(_) => Book::default(),
         };
         let me = store.load_identity()?.public();
-        Ok(Keeper { store, admin, backups: data.join("backups"), me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default() })
+        let keeper = Keeper { store, admin, backups: data.join("backups"), me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default() };
+        keeper.recover_online_commands()?;
+        Ok(keeper)
     }
 
     fn book(&self) -> Answer<std::sync::MutexGuard<'_, Book>> {
@@ -351,11 +356,16 @@ impl Keeper {
             // Its GM takes their own world away — to another server, say; the admin too,
             // without closing it first.
             Ask::Manage { order: Some(Order::Delete { world }) } if self.store.holds(&world) && self.store.gm_of(&world)?.as_deref() == Some(id.as_str()) => {
+                let Some(_writing) = self.claim(&world, true)? else { return Ok(Reply::Busy) };
                 self.store.delete_world(&world)?;
                 println!("{world}: taken away by {}", who.name);
                 return Ok(Reply::Managed { state: ServerState::default() });
             }
             Ask::Manage { order } if id == self.admin => {
+                let _writing = if let Some(Order::Delete { world }) = &order {
+                    let Some(writing) = self.claim(world, true)? else { return Ok(Reply::Busy) };
+                    writing
+                } else { None };
                 if let Some(order) = order {
                     self.carry_out(order)?;
                 }
@@ -401,11 +411,18 @@ impl Keeper {
             return self.bring(world, who, ask);
         }
         let store = &self.store;
+        if matches!(ask, Ask::Commit { .. } | Ask::Abort { .. } | Ask::Release { .. }) {
+            if store.gm_of(world)?.as_deref() != Some(id.as_str()) && !store.has_grant(world, &id)? {
+                return Ok(Reply::NotMember);
+            }
+            return self.online_command(world, who, ask);
+        }
         // Its GM: the whole of it, and who asked to join.
         if store.gm_of(world)?.as_deref() == Some(id.as_str()) {
             let mut reply = network::answer_member(store, world, &id, ask)?;
-            if let Reply::Digest { requests, .. } = &mut reply {
+            if let Reply::Digest { requests, no_copy, .. } = &mut reply {
                 *requests = self.requests(world)?;
+                *no_copy = !store.copies(world)?;
             }
             return Ok(reply);
         }
@@ -680,6 +697,392 @@ mod tests {
     use aw_model::Level;
     use aw_store::journal::{Access, Plain};
     use store::NewPart;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct OnlineWire<'a> {
+        keeper: &'a Keeper,
+        who: &'a Identity,
+        alive: AtomicBool,
+        lose_ack: AtomicBool,
+        stop_before_commit: AtomicBool,
+        record_limit: usize,
+    }
+
+    impl crate::online::Transport for OnlineWire<'_> {
+        fn ask<'a>(&'a self, world: &'a str, ask: Ask) -> std::pin::Pin<Box<dyn std::future::Future<Output = Answer<Reply>> + Send + 'a>> {
+            Box::pin(async move {
+                if !self.alive.load(Ordering::SeqCst) {
+                    return Err(AppError(crate::online::UNAVAILABLE.into()));
+                }
+                let final_commit = matches!(ask, Ask::Commit { finish: true, .. });
+                if final_commit && self.stop_before_commit.swap(false, Ordering::SeqCst) {
+                    self.alive.store(false, Ordering::SeqCst);
+                    return Err(AppError(crate::online::UNAVAILABLE.into()));
+                }
+                let mut reply = self.keeper.answer(world, &self.who.public(), ask);
+                if let Reply::Records { records, .. } = &mut reply {
+                    records.truncate(self.record_limit);
+                }
+                if final_commit && self.lose_ack.swap(false, Ordering::SeqCst) {
+                    self.alive.store(false, Ordering::SeqCst);
+                    return Err(AppError(crate::online::UNAVAILABLE.into()));
+                }
+                Ok(reply)
+            })
+        }
+    }
+
+    fn online_wire<'a>(keeper: &'a Keeper, who: &'a Identity) -> OnlineWire<'a> {
+        OnlineWire { keeper, who, alive: AtomicBool::new(true), lose_ack: AtomicBool::new(false), stop_before_commit: AtomicBool::new(false), record_limit: usize::MAX }
+    }
+
+    fn on_server(gm: &Someone, world: &str) -> Server {
+        let server = Server { endpoint: "1".repeat(64), addrs: vec!["127.0.0.1:7447".into()] };
+        let mut settings = gm.store.load_network().unwrap();
+        settings.servers = vec![server.code()];
+        settings.homes.insert(world.into(), server.endpoint.clone());
+        gm.store.save_network(&settings).unwrap();
+        server
+    }
+
+    async fn run_online<T, F, R>(base: &Store, world: &str, server: &Server, wire: &T, run: F) -> Answer<R>
+    where T: crate::online::Transport, F: FnOnce(Store) -> Answer<R> {
+        crate::online::execute(base, world, server, wire, |cache| std::future::ready(run(cache))).await
+    }
+
+    fn staged_control(keeper: &Keeper, gm: &Someone, world: &str, transaction: &str) -> Ask {
+        let before = gm.store.inventory(world).unwrap();
+        gm.store.control(world, aw_store::journal::Item::Copies { players: false }, "staged").unwrap();
+        let added: Vec<_> = gm.store.inventory(world).unwrap().into_iter().filter(|id| !before.contains(id)).collect();
+        Ask::Commit { transaction: transaction.into(), base: aw_store::journal::Journal::digest(&keeper.store.inventory(world).unwrap()),
+            records: gm.store.records(world, &added).unwrap(), parts: Vec::new(), finish: false }
+    }
+
+    #[test]
+    fn a_staged_control_conflicts_instead_of_overwriting_a_newer_server_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, _) = world(&gm, "Eldermere");
+        swap(&keeper, &gm, &world);
+        let original = keeper.store.inventory(&world).unwrap();
+        let staged = staged_control(&keeper, &gm, &world, &"a".repeat(64));
+        let Ask::Commit { transaction, base, .. } = &staged else { unreachable!() };
+        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true };
+        assert_eq!(keeper.answer(&world, &gm.me.public(), staged), Reply::Staged);
+        assert_eq!(keeper.store.inventory(&world).unwrap(), original);
+        assert!(keeper.store.copies(&world).unwrap());
+        // A second, independently acknowledged command changes the revision.
+        let before = gm.store.inventory(&world).unwrap();
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: true }, "another-command").unwrap();
+        let added: Vec<_> = gm.store.inventory(&world).unwrap().into_iter().filter(|id| !before.contains(id)).collect();
+        keeper.store.receive(&world, &gm.store.records(&world, &added).unwrap()).unwrap();
+        assert_eq!(keeper.answer(&world, &gm.me.public(), finish), Reply::Conflict);
+        assert!(keeper.store.copies(&world).unwrap());
+    }
+
+    #[test]
+    fn a_durable_commit_intent_recovers_after_restart_and_its_receipt_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let server = keeper(dir.path(), &gm);
+        let (world, _) = world(&gm, "Eldermere");
+        swap(&server, &gm, &world);
+        let staged = staged_control(&server, &gm, &world, &"b".repeat(64));
+        let Ask::Commit { transaction, base, .. } = &staged else { unreachable!() };
+        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true };
+        let scope = blake3::hash(format!("{world}\n{}", gm.me.id()).as_bytes()).to_hex().to_string();
+        let stage = dir.path().join("online-transactions").join(scope).join(transaction);
+        assert_eq!(server.answer(&world, &gm.me.public(), staged), Reply::Staged);
+        aw_store::durable::write(&stage.join("commit"), b"recover").unwrap();
+        drop(server);
+        let server = keeper(dir.path(), &gm);
+        assert!(!server.store.copies(&world).unwrap());
+        let reply = server.answer(&world, &gm.me.public(), finish.clone());
+        assert!(matches!(reply, Reply::Committed { .. }));
+        assert_eq!(server.answer(&world, &gm.me.public(), finish), reply);
+        assert!(!stage.join("records").exists());
+    }
+
+    #[test]
+    fn unsigned_online_records_never_reach_the_canonical_journal() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, _) = world(&gm, "Eldermere");
+        swap(&keeper, &gm, &world);
+        let before = keeper.store.inventory(&world).unwrap();
+        let mut staged = staged_control(&keeper, &gm, &world, &"c".repeat(64));
+        if let Ask::Commit { records, finish, .. } = &mut staged {
+            let mut raw: serde_json::Value = serde_json::from_str(&records[0]).unwrap();
+            raw["signature"] = "invalid".into();
+            records[0] = serde_json::to_string(&raw).unwrap();
+            *finish = true;
+        }
+        assert!(keeper.reply(&world, &gm.me.public(), staged).is_err());
+        assert_eq!(keeper.store.inventory(&world).unwrap(), before);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires loopback UDP sockets"]
+    async fn encrypted_online_commands_use_a_real_server_and_fail_closed_after_disconnect() {
+        struct Nobody;
+        impl Host for Nobody {
+            fn offers(&self) -> Vec<Offer> { Vec::new() }
+            fn answer(&self, _: &str, _: &IdentityPublic, _: Ask) -> Reply { Reply::NotOffered }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
+        let keeper = Arc::new(keeper(dir.path(), &gm));
+        let (world, article) = world(&gm, "Online separation test");
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
+        swap(&keeper, &gm, &world);
+        let reach = Reach { only: Some(std::net::Ipv4Addr::LOCALHOST), ..Default::default() };
+        let mut endpoint = Some(WorldNet::start(keeper.clone(), reach.clone()).await.unwrap());
+        let server = Server { endpoint: endpoint.as_ref().unwrap().id(), addrs: endpoint.as_ref().unwrap().loopback_addr().ip_addrs().map(ToString::to_string).collect() };
+        let client = WorldNet::start(Arc::new(Nobody), reach).await.unwrap();
+        let authoritative = keeper.store.inventory(&world).unwrap();
+        // A pre-0.1.56 GM folder may contain stale, unsent edits. Upgrading
+        // must read the server, rather than silently publishing this folder.
+        let old = document::code_of(&gm.store, &gm.me, &world, &article).unwrap();
+        document::save(&gm.store, &gm.me, &world, &article, &old.code.replace("Content of Rumours", "Stale local copy must not upload."), &old.base, "old-client").unwrap();
+        for who in [&gm, &bob] {
+            let mut settings = who.store.load_network().unwrap();
+            settings.servers = vec![server.code()];
+            settings.homes.insert(world.clone(), server.endpoint.clone());
+            who.store.save_network(&settings).unwrap();
+        }
+        network::with_servers(&gm.store.for_sync(), &client, &gm.me, &HashSet::new()).await.unwrap();
+        assert_eq!(keeper.store.inventory(&world).unwrap(), authoritative, "migration cannot upload an old working copy");
+        let wire = crate::online::Connection { net: &client, server: &server, me: &gm.me };
+        run_online(&gm.store, &world, &server, &wire, |cache| {
+            let code = document::code_of(&cache, &gm.me, &world, &article)?;
+            assert!(!code.code.contains("Stale local copy must not upload."));
+            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Saved through real encrypted transport."), &code.base, "real-wire")
+        }).await.unwrap();
+        let player = crate::online::Connection { net: &client, server: &server, me: &bob.me };
+        let code = run_online(&bob.store, &world, &server, &player, |cache| {
+            document::code_of(&cache, &bob.me, &world, &article).map(|d| d.code)
+        }).await.unwrap();
+        assert!(code.contains("Saved through real encrypted transport.") && !code.contains("Content of Truth"));
+        assert!(!gm.store.holds(&world) && !bob.store.holds(&world));
+        assert!(!keeper.store.holds_token(&world));
+        assert!(keeper.store.load_keyring(&world).unwrap().attributes().next().is_none());
+        // An explicit move/create on a server still provisions a new world.
+        let fresh = new_world(&gm.store, &gm.me, "Explicit new upload".into()).unwrap().public.world_id.to_string();
+        gm.store.control(&fresh, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        network::live_on(&gm.store, &fresh, Some(server.code())).unwrap();
+        assert!(gm.store.load_network().unwrap().uploading.contains(&fresh));
+        for _ in 0..20 {
+            network::with_servers(&gm.store.for_sync(), &client, &gm.me, &HashSet::new()).await.unwrap();
+            if network::online_worlds(&gm.store).iter().any(|w| w.world == fresh) { break }
+        }
+        assert!(keeper.store.holds(&fresh));
+        assert!(!gm.store.holds(&fresh));
+        assert!(!gm.store.load_network().unwrap().uploading.contains(&fresh));
+        crate::online::close_session(&gm.store, &fresh).await.unwrap();
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+        crate::online::close_session(&bob.store, &world).await.unwrap();
+        // Optional disposable profiles for the native UI smoke test. No real
+        // profile, world, or server is used by this fixture.
+        let fixture = std::env::var_os("AW_ONLINE_FIXTURE").map(PathBuf::from);
+        if let Some(path) = &fixture {
+            for who in [&gm, &bob] {
+                let config = dir.path().join(format!("{}-config", who.me.public().name));
+                std::fs::create_dir_all(&config).unwrap();
+                std::fs::write(config.join("locations.json"), serde_json::to_vec(&serde_json::json!({ "profile": who.store.profile_dir(), "worlds": who.store.worlds_dir(), "additional": [] })).unwrap()).unwrap();
+            }
+            std::fs::write(path, serde_json::to_vec(&serde_json::json!({ "root": dir.path(), "gm_config": dir.path().join("Marla-config"), "bob_config": dir.path().join("Bob-config"), "world": world, "article": article, "server": server.code() })).unwrap()).unwrap();
+            while !path.with_extension("offline").exists() { tokio::time::sleep(std::time::Duration::from_millis(200)).await; }
+        }
+        drop(endpoint.take());
+        let failed = run_online(&gm.store, &world, &server, &wire, |_| {
+            panic!("the real server is gone; no local operation may run");
+            #[allow(unreachable_code)] Ok(())
+        }).await;
+        assert!(failed.is_err());
+        assert!(!gm.store.holds(&world));
+        if let Some(path) = &fixture {
+            while !path.with_extension("finish").exists() { tokio::time::sleep(std::time::Duration::from_millis(200)).await; }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_online_gm_has_no_retained_world_and_never_opens_a_copy_when_the_server_is_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        swap(&keeper, &gm, &world);
+        let server = on_server(&gm, &world);
+        let token = std::fs::read(gm.store.private_world_dir(&world).join("owner.key")).unwrap();
+        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
+        assert!(!gm.store.holds(&world), "copies off applies to the GM too");
+        let wire = online_wire(&keeper, &gm.me);
+        let opened = run_online(&gm.store, &world, &server, &wire, |cache| {
+            document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)
+        }).await.unwrap();
+        assert!(opened.contains("Content of Truth"));
+        assert!(!keeper.store.holds_token(&world));
+        assert!(keeper.store.load_keyring(&world).unwrap().attributes().next().is_none());
+        assert!(keeper.store.view_keys(&world, &keeper.store.load_identity().unwrap()).is_err(), "the server cannot decrypt the world");
+        wire.alive.store(false, Ordering::SeqCst);
+        let refused = run_online(&gm.store, &world, &server, &wire, |_| {
+            panic!("a disconnected server world must not execute a local command");
+            #[allow(unreachable_code)] Ok(())
+        }).await;
+        assert!(refused.is_err());
+        assert!(!gm.store.holds(&world));
+        assert_eq!(std::fs::read(gm.store.private_world_dir(&world).join("owner.key")).unwrap(), token);
+        assert!(gm.store.private_world_dir(&world).join("keyring.json").exists());
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_explicitly_retained_gm_copy_is_still_not_a_server_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, _) = world(&gm, "Eldermere");
+        swap(&keeper, &gm, &world);
+        let server = on_server(&gm, &world);
+        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
+        assert!(gm.store.holds(&world));
+        let wire = online_wire(&keeper, &gm.me);
+        wire.alive.store(false, Ordering::SeqCst);
+        let refused = run_online(&gm.store, &world, &server, &wire, |_| {
+            panic!("having a copy grants no offline server access");
+            #[allow(unreachable_code)] Ok(())
+        }).await;
+        assert!(refused.is_err());
+        assert!(gm.store.holds(&world));
+    }
+
+    #[tokio::test]
+    async fn a_player_downloads_every_piece_before_opening_and_copies_off_is_respected() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
+        swap(&keeper, &gm, &world);
+        let server = on_server(&bob, &world);
+        let mut wire = online_wire(&keeper, &bob.me);
+        wire.record_limit = 2;
+        let code = run_online(&bob.store, &world, &server, &wire, |cache| {
+            document::code_of(&cache, &bob.me, &world, &article).map(|d| d.code)
+        }).await.unwrap();
+        assert!(code.contains("Content of Rumours") && !code.contains("Content of Truth"));
+        assert!(!bob.store.holds(&world));
+        assert!(!bob.store.worlds_dir().join(store::dir_name(&world)).exists());
+        crate::online::close_session(&bob.store, &world).await.unwrap();
+        let cache = bob.store.profile_dir().join("online-sessions");
+        assert!(std::fs::read_dir(cache).unwrap().next().is_none(), "closing releases the disposable data");
+    }
+
+    #[tokio::test]
+    async fn an_edit_is_on_the_server_before_the_command_reports_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        swap(&keeper, &gm, &world);
+        let server = on_server(&gm, &world);
+        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
+        let wire = online_wire(&keeper, &gm.me);
+        let before = keeper.store.inventory(&world).unwrap();
+        run_online(&gm.store, &world, &server, &wire, |cache| {
+            let code = document::code_of(&cache, &gm.me, &world, &article)?;
+            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Saved on the server."), &code.base, "online-edit")
+        }).await.unwrap();
+        assert_ne!(keeper.store.inventory(&world).unwrap(), before);
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+        let code = run_online(&gm.store, &world, &server, &wire, |cache| {
+            document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)
+        }).await.unwrap();
+        assert!(code.contains("Saved on the server."), "a new session reads the confirmed edit");
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_connection_lost_before_commit_never_becomes_a_later_offline_upload() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        swap(&keeper, &gm, &world);
+        let server = on_server(&gm, &world);
+        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
+        let wire = online_wire(&keeper, &gm.me);
+        let before = keeper.store.inventory(&world).unwrap();
+        wire.stop_before_commit.store(true, Ordering::SeqCst);
+        let failed = run_online(&gm.store, &world, &server, &wire, |cache| {
+            let code = document::code_of(&cache, &gm.me, &world, &article)?;
+            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Must not appear later."), &code.base, "lost-connection")
+        }).await;
+        assert!(failed.is_err());
+        assert_eq!(keeper.store.inventory(&world).unwrap(), before, "staging changes no canonical records");
+        wire.alive.store(true, Ordering::SeqCst);
+        let code = run_online(&gm.store, &world, &server, &wire, |cache| {
+            document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)
+        }).await.unwrap();
+        assert!(!code.contains("Must not appear later."));
+        assert_eq!(keeper.store.inventory(&world).unwrap(), before);
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn new_gm_keys_survive_a_lost_commit_acknowledgement() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let keeper = keeper(dir.path(), &gm);
+        let (world, _) = world(&gm, "Eldermere");
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        swap(&keeper, &gm, &world);
+        let server = on_server(&gm, &world);
+        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
+        let wire = online_wire(&keeper, &gm.me);
+        wire.lose_ack.store(true, Ordering::SeqCst);
+        let created = std::sync::Mutex::new(String::new());
+        let failed = run_online(&gm.store, &world, &server, &wire, |cache| {
+            let id = cache.create_article(&world, "place".into(), "new-knowledge".into(),
+                vec![part("knowledge:new", "gm", "New knowledge", true)], "new-key")?;
+            *created.lock().unwrap() = id.to_string();
+            Ok(())
+        }).await;
+        assert!(failed.is_err(), "no success is reported without acknowledgement");
+        assert!(gm.store.load_keyring(&world).unwrap().current_epoch(&"knowledge:new".parse().unwrap()).is_some());
+        wire.alive.store(true, Ordering::SeqCst);
+        let article = created.lock().unwrap().clone();
+        let code = run_online(&gm.store, &world, &server, &wire, |cache| {
+            document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)
+        }).await.unwrap();
+        assert!(code.contains("New knowledge"), "the published ciphertext still opens after reconnecting");
+        assert!(!keeper.store.holds_token(&world));
+        assert!(keeper.store.load_keyring(&world).unwrap().attributes().next().is_none());
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+    }
+
+    #[test]
+    fn removing_a_server_address_does_not_turn_its_world_into_a_local_world() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = someone(dir.path(), "Marla");
+        let (world, _) = world(&gm, "Eldermere");
+        on_server(&gm, &world);
+        let mut settings = gm.store.load_network().unwrap();
+        settings.servers.clear();
+        gm.store.save_network(&settings).unwrap();
+        assert!(crate::online::requires_online(&gm.store, &world));
+        assert!(crate::online::server_for(&gm.store, &world).is_err());
+        assert!(!crate::online::direct_world_command_allowed("document_save"));
+        assert!(!crate::online::direct_world_command_allowed("view"));
+        assert!(!crate::online::direct_world_command_allowed("world_delete"));
+    }
 
     struct Someone {
         store: Store,

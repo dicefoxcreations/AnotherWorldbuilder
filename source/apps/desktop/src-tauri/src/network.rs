@@ -39,6 +39,17 @@ static SYNCING: AtomicBool = AtomicBool::new(false);
 fn swapped() -> &'static Mutex<HashMap<String, (String, String)>> {
     SWAPPED.get_or_init(Default::default)
 }
+
+fn remember_swap(key: String, remote: String, local: String) -> Answer<()> {
+    let mut all = swapped().lock().map_err(AppError::from)?;
+    if remote == local {
+        all.insert(key, (remote, local));
+    } else {
+        // A size-limited first download is not a complete synchronization.
+        all.remove(&key);
+    }
+    Ok(())
+}
 fn seen() -> &'static Mutex<HashMap<String, usize>> {
     SEEN.get_or_init(Default::default)
 }
@@ -177,6 +188,25 @@ fn mine() -> &'static Mutex<HashMap<String, (std::time::Instant, Presence)>> {
 fn note_presence(world: &str, presence: Presence) {
     if let Ok(mut all) = live().lock() {
         all.entry(world.to_string()).or_default().insert(presence.member.clone(), (std::time::Instant::now(), presence));
+    }
+}
+
+/// Presence and rolls travel with online session checks for either role;
+/// the GM of a server world is a client too.
+pub(crate) fn live_digest(world: &str, member: &str) -> Answer<Ask> {
+    let own = mine().lock().map_err(AppError::from)?.get(world)
+        .filter(|(at, p)| at.elapsed() < PRESENT && p.member == member).map(|(_, p)| p.clone())
+        .or_else(|| live().lock().ok()?.get(world)?.get(member)
+            .filter(|(at, _)| at.elapsed() < PRESENT).map(|(_, p)| p.clone()));
+    let presence = own.as_ref().map(serde_json::to_string).transpose()?;
+    let rolls = recent_rolls(world, |r| r.member == member).iter().filter_map(|r| serde_json::to_string(r).ok()).collect();
+    Ok(Ask::Digest { presence, rolls })
+}
+
+pub(crate) fn receive_live(world: &str, reply: &Reply) {
+    if let Reply::Digest { presence, rolls, .. } = reply {
+        for p in presence.iter().filter_map(|p| serde_json::from_str::<Presence>(p).ok()) { note_presence(world, p); }
+        for r in rolls.iter().filter_map(|r| serde_json::from_str::<Roll>(r).ok()) { note_roll(world, r); }
     }
 }
 
@@ -447,6 +477,7 @@ fn on_the_internet(store: &Store, world: &str) -> bool {
 /// cloud drive the system mounts or a folder a sync app keeps, which the
 /// group shares. Its members leave their notes there.
 fn in_shared_folder(store: &Store, world: &str) -> bool {
+    if crate::online::requires_online(store, world) { return false }
     let dir = store.world_dir(world);
     store.holds(world) && store.local_roots().iter().skip(1).any(|root| dir.parent() == Some(root.as_path()))
 }
@@ -641,6 +672,7 @@ fn offers(store: &Store) -> Answer<Vec<Offer>> {
 
 /// Answers someone whose identity is proven.
 pub(crate) fn answer(store: &Store, world: &str, who: &IdentityPublic, ask: Ask) -> Answer<Reply> {
+    if crate::online::requires_online(store, world) { return Ok(Reply::NotOffered) }
     let id = who.id.to_string();
     if !store.holds(world) {
         return Ok(Reply::NotOffered);
@@ -745,7 +777,7 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
             _ => Reply::NotOffered,
         },
         // A device lists no worlds and has no admin; a server does.
-        Ask::Worlds | Ask::Manage { .. } | Ask::HostWorlds | Ask::Backups { .. } => Reply::NotOffered,
+        Ask::Worlds | Ask::Manage { .. } | Ask::HostWorlds | Ask::Backups { .. } | Ask::Commit { .. } | Ask::Abort { .. } | Ask::Release { .. } => Reply::NotOffered,
         Ask::Give { records } => {
             store.receive(world, &records)?;
             if store.handed_over(world)? {
@@ -768,12 +800,15 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
             let missing: Vec<String> = mine.iter().filter(|r| !known.contains(r)).cloned().collect();
             let mut records = Vec::new();
             let mut size = 0;
-            for record in store.records(world, &missing)? {
-                size += record.len();
-                if size > SWAP_BUDGET && !records.is_empty() {
-                    break;
+            let ordered = store.in_order(world, &missing)?;
+            'pieces: for ids in ordered.chunks(2000) {
+                for record in store.records(world, ids)? {
+                    size += record.len();
+                    if size > SWAP_BUDGET && !records.is_empty() {
+                        break 'pieces;
+                    }
+                    records.push(record);
                 }
-                records.push(record);
             }
             let here: std::collections::HashSet<String> = store.inventory(world)?.into_iter().collect();
             let wanted = have.into_iter().filter(|r| !here.contains(r)).collect();
@@ -942,6 +977,7 @@ pub struct SharedWorld {
 }
 
 pub(crate) fn view(store: &Store) -> Answer<NetworkView> {
+    let store = &store.for_sync();
     let settings = store.load_network()?;
     let worlds = store
         .list_worlds()?
@@ -1263,7 +1299,7 @@ fn within(records: Vec<String>, budget: usize) -> Vec<String> {
 }
 
 /// Who asked a server to join: kept as if they had asked here.
-fn take_requests(store: &Store, world: &str, asking: Vec<IdentityPublic>) -> Answer<()> {
+pub(crate) fn take_requests(store: &Store, world: &str, asking: Vec<IdentityPublic>) -> Answer<()> {
     let meta = store.load_world_meta(world)?;
     let mut requests = store.load_requests(world)?;
     let before = requests.len();
@@ -1298,7 +1334,14 @@ pub(crate) fn online_worlds(store: &Store) -> Vec<OnlineWorld> {
     std::fs::read(store.profile_dir().join("online.json")).ok().and_then(|raw| serde_json::from_slice(&raw).ok()).unwrap_or_default()
 }
 
-fn save_online(store: &Store, worlds: &[OnlineWorld]) -> Answer<()> {
+pub(crate) fn uses_host_rpc(entry: &OnlineWorld) -> bool {
+    entry.info["host_rpc"] == true || entry.server.is_none()
+        // Existing catalogues predate host_rpc. Plain player worlds must
+        // keep the host's visibility enforcement when upgrading.
+        || (entry.info["encrypted"] == false && entry.info["is_gm"] != true)
+}
+
+pub(crate) fn save_online(store: &Store, worlds: &[OnlineWorld]) -> Answer<()> {
     aw_store::durable::write(&store.profile_dir().join("online.json"), &serde_json::to_vec_pretty(worlds)?)?;
     Ok(())
 }
@@ -1342,8 +1385,12 @@ async fn refresh_online(store: &Store, net: &WorldNet, me: &Identity, world: &st
     }
     let mut info = call_via(net, me, world, via, "world_info", &serde_json::json!({})).await?;
     info["online"] = true.into();
+    info["host_rpc"] = true.into();
     let server = match via {
-        Via::Server(s) => Some(s.code()),
+        Via::Server(s) => {
+            info["server_id"] = s.endpoint.clone().into();
+            Some(s.code())
+        }
         Via::Host => None,
     };
     all.retain(|w| w.world != world);
@@ -1425,7 +1472,7 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
     if let Some(rest) = rest {
         if let Some(digest) = give(store, net, via, me, world, &rest).await? {
             let now = Journal::digest(&store.inventory(world)?);
-            swapped().lock().map_err(AppError::from)?.insert(key, (digest, now));
+            remember_swap(key, digest, now)?;
             swap_parts(store, net, via, me, world, true).await?;
         }
         return Ok("updated".into());
@@ -1454,7 +1501,7 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
         republish();
     }
     let now = Journal::digest(&store.inventory(world)?);
-    swapped().lock().map_err(AppError::from)?.insert(key, (digest, now));
+    remember_swap(key, digest, now)?;
     // New gallery entries on either side: the parts follow.
     let parts = swap_parts(store, net, via, me, world, true).await?;
     Ok(if !held { "joined" } else if new > 0 || parts > 0 { "updated" } else { "current" }.into())
@@ -1543,6 +1590,30 @@ pub async fn network_join(app: tauri::AppHandle, world: String, join: bool) -> A
         Some((server, _)) if net.host_of(&world).is_none() => Via::Server(server.clone()),
         _ => Via::Host,
     };
+    if let Via::Server(server) = &via {
+        let question = if join { Ask::Join } else { Ask::Digest { presence: None, rolls: Vec::new() } };
+        match ask(&net, &via, &world, &me, question).await? {
+            Reply::Requested => {
+                asked().lock().map_err(AppError::from)?.insert(world);
+                return Ok(outcome("requested", None));
+            }
+            Reply::NotMember => return Ok(outcome("not-member", None)),
+            Reply::NotOffered => return Ok(outcome("not-offered", None)),
+            Reply::OnlineOnly => {
+                live_on_here(&store, &world, &server.endpoint)?;
+                refresh_online(&store, &net, &me, &world, &via).await?;
+            }
+            Reply::Digest { no_copy, .. } => {
+                let offer = server_worlds().lock().map_err(AppError::from)?.get(&world).map(|(_, o)| o.clone())
+                    .unwrap_or(Offer { world: world.clone(), name: world.clone(), icon: "🌍".into(), gm: String::new() });
+                live_on_here(&store, &world, &server.endpoint)?;
+                crate::online::remember_offer(&store, &world, server, &offer, no_copy)?;
+            }
+            _ => return Ok(outcome("not-offered", None)),
+        }
+        let info = crate::online::world_connect(app, world).await?;
+        return Ok(outcome("joined", Some(serde_json::from_value(info)?)));
+    }
     if join {
         return Ok(match ask(&net, &via, &world, &me, Ask::Join).await? {
             Reply::Requested => {
@@ -1710,13 +1781,15 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
     }
     let _done = Done;
 
-    let store = store(&app)?;
+    let store = store(&app)?.for_sync();
     let me = store.load_identity()?;
     if let Some(net) = running() {
+        out.updated.extend(crate::online::poll(&app, &store, &net, &me).await?);
         let _ = meet_through_folder(&store, &net, &me);
         let waiting = asked().lock().map_err(AppError::from)?.clone();
         for offer in net.found() {
             let world = offer.world;
+            if crate::online::requires_online(&store, &world) { continue }
             let host = net.host_of(&world).unwrap_or_default();
             if FAILED.get_or_init(Default::default).lock().map_err(AppError::from)?.get(&host).is_some_and(|t| t.elapsed() < RETRY) {
                 continue;
@@ -1742,7 +1815,7 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
             out.joined.push(joined_info(&store, &world, &me)?);
         }
         // Worlds worked on online: has the host's moved on?
-        for entry in online_worlds(&store) {
+        for entry in online_worlds(&store).into_iter().filter(uses_host_rpc) {
             if let Ok(true) = refresh_online(&store, &net, &me, &entry.world, &via_of(&entry)).await {
                 out.updated.push(entry.world);
             }
@@ -1751,6 +1824,9 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
     // What changed here, whoever brought it.
     for meta in store.list_worlds()? {
         let id = meta.public.world_id.to_string();
+        if crate::online::is_server_world(&store, &id) {
+            continue;
+        }
         // What players asked to be made, the GM's device makes.
         let _ = crate::answer_proposals(&store, &id);
         // Unencrypted: the readable copy follows, both ways.
@@ -1767,7 +1843,7 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
 /// Keeps worlds current with the servers too. A server holds what the GM
 /// brings it — only the worlds they offer — and passes it on to members.
 /// Returns the worlds that arrived because the GM said yes.
-async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, waiting: &HashSet<String>) -> Answer<Vec<String>> {
+pub(crate) async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, waiting: &HashSet<String>) -> Answer<Vec<String>> {
     let settings = store.load_network()?;
     let mut joined = Vec::new();
     for code in &settings.servers {
@@ -1801,7 +1877,8 @@ async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, waiting: &Ha
         let there: HashSet<&str> = held.iter().map(|o| o.world.as_str()).collect();
         let mut worlds: Vec<String> = store.list_worlds()?.into_iter().map(|m| m.public.world_id.to_string()).collect();
         // Asked for, and held only while online — let go when the app last ended.
-        for world in waiting.iter().cloned().chain(store.fleeting_worlds()) {
+        let remembered = online_worlds(store).into_iter().filter(|w| w.server.as_deref().is_some_and(|c| c.split('@').next() == Some(server.endpoint.as_str()))).map(|w| w.world);
+        for world in waiting.iter().cloned().chain(store.fleeting_worlds()).chain(remembered) {
             if there.contains(world.as_str()) && !worlds.contains(&world) {
                 worlds.push(world);
             }
@@ -1825,6 +1902,33 @@ async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, waiting: &Ha
                 }
                 continue;
             }
+            let established = online_worlds(store).iter().any(|w| w.world == world && w.server.as_deref().is_some_and(|c| c.split('@').next() == Some(server.endpoint.as_str())));
+            if established {
+                // Open sessions poll their authoritative server separately.
+                // A retained copy is never an autonomous source of edits.
+                continue;
+            }
+            if !gm || !settings.uploading.iter().any(|w| w == &world) {
+                match net.ask_server(&server, &world, me, Ask::Digest { presence: None, rolls: Vec::new() }).await {
+                    Ok(Reply::Digest { no_copy, .. }) => {
+                        if let Some(offer) = held.iter().find(|o| o.world == world) {
+                            live_on_here(store, &world, &server.endpoint)?;
+                            crate::online::remember_offer(store, &world, &server, offer, no_copy)?;
+                            joined.push(world.clone());
+                        }
+                    }
+                    Ok(Reply::OnlineOnly) => {
+                        live_on_here(store, &world, &server.endpoint)?;
+                        refresh_online(store, net, me, &world, &Via::Server(server.clone())).await?;
+                        joined.push(world);
+                    }
+                    _ => {}
+                }
+                // Existing server worlds, including pre-0.1.56 GM copies,
+                // are read from their server. Only an explicit new upload
+                // may make the durable local folder a source of records.
+                continue;
+            }
             // Unencrypted, the server writes in its players' names: the GM vouches for it.
             if let (true, Some(host)) = (gm, &host) {
                 if !store.is_encrypted(&world)? {
@@ -1832,6 +1936,16 @@ async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, waiting: &Ha
                 }
             }
             let kind = swap(store, net, &Via::Server(server.clone()), me, &world).await;
+            if gm && kind.is_ok() {
+                let key = Via::Server(server.clone()).key(&world);
+                let complete = swapped().lock().map_err(AppError::from)?.get(&key).is_some_and(|(remote, local)| remote == local)
+                    && !pending().lock().map_err(AppError::from)?.contains_key(&key)
+                    && !wants().lock().map_err(AppError::from)?.contains_key(&key)
+                    && store.missing_parts(&world)?.is_empty();
+                if complete {
+                    crate::online::adopt_uploaded(store, &world, &server).await?;
+                }
+            }
             // A member's world comes from this server: it lives there.
             if let (false, None, Ok(k)) = (gm, home, &kind) {
                 if !matches!(k.as_str(), "not-member" | "not-offered" | "requested") {
@@ -1898,12 +2012,14 @@ pub(crate) fn live_on(store: &Store, world: &str, server: Option<String>) -> Ans
                 return Err(AppError("Add the server first.".into()));
             }
             settings.homes.insert(world.to_string(), server.endpoint);
+            if !settings.uploading.iter().any(|w| w == world) { settings.uploading.push(world.into()) }
             if !settings.shared.iter().any(|w| w == world) {
                 settings.shared.push(world.to_string());
             }
         }
         None => {
             settings.homes.remove(world);
+            settings.uploading.retain(|w| w != world);
         }
     }
     store.save_network(&settings)?;
@@ -1915,26 +2031,38 @@ pub(crate) fn live_on(store: &Store, world: &str, server: Option<String>) -> Ans
 /// leaves is asked once more for what players wrote there — not reached, the
 /// world stays — and then lets it go.
 pub(crate) async fn rehome(store: &Store, world: &str, server: Option<String>) -> Answer<()> {
-    let before = store.load_network()?.home_of(world).cloned();
+    let settings = store.load_network()?;
+    let before = settings.home_of(world).cloned();
+    if settings.homes.contains_key(world) && before.is_none() {
+        return Err(AppError("Configure this world's server again before moving it. No local copy was used.".into()));
+    }
+    if let Some(code) = &server {
+        if !settings.servers.contains(code) { return Err(AppError("Add the destination server first.".into())) }
+    }
     if before == server {
         return Ok(());
     }
     let old = before.as_deref().map(Server::parse).transpose().map_err(|e| AppError(e.to_string()))?;
     let me = store.load_identity()?;
     let net = running();
+    let mut delete_old = false;
     if let Some(old) = &old {
         let accepted = !status(&old.code()).waiting.iter().any(|w| w == world);
         if accepted {
+            delete_old = true;
             let net = net.as_ref().ok_or_else(|| AppError("The network is switched off.".into()))?;
-            swap(store, net, &Via::Server(old.clone()), &me, world)
-                .await
-                .map_err(|_| AppError("Its server is not reached — what players wrote there would stay behind.".into()))?;
+            let connection = crate::online::Connection { net, server: old, me: &me };
+            crate::online::materialize_for_move(store, world, old, &connection).await
+                .map_err(|_| AppError("Its server is not reached — the world has not been moved.".into()))?;
         }
     }
-    live_on(store, world, server)?;
-    if let (Some(old), Some(net)) = (old, net) {
-        let _ = net.ask_server(&old, "", &me, Ask::Manage { order: Some(aw_sync::world::Order::Delete { world: world.to_string() }) }).await;
+    if let (true, Some(old), Some(net)) = (delete_old, &old, &net) {
+        if !matches!(net.ask_server(old, "", &me, Ask::Manage { order: Some(aw_sync::world::Order::Delete { world: world.to_string() }) }).await, Ok(Reply::Managed { .. })) {
+            return Err(AppError("The server did not confirm the move. The world remains assigned to it.".into()));
+        }
     }
+    forget_online(store, world)?;
+    live_on(store, world, server)?;
     Ok(())
 }
 

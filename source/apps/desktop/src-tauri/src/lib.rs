@@ -20,6 +20,7 @@ mod transfer;
 mod host;
 mod keys;
 mod backup;
+mod online;
 #[cfg(feature = "gui")]
 mod browser;
 mod readable;
@@ -72,7 +73,7 @@ pub struct IdentityInfo {
     pub avatar: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct MemberInfo {
     pub id: String,
     pub name: String,
@@ -83,7 +84,7 @@ pub struct MemberInfo {
     pub trusted: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct WorldInfo {
     pub id: String,
     pub name: String,
@@ -129,6 +130,8 @@ pub struct WorldInfo {
     pub fleeting: bool,
     /// The server it lives on, by code — empty: this device.
     pub server: String,
+    /// Hosting identity survives address changes and a removed server entry.
+    pub server_id: String,
     /// The GM's: offered to players over the network.
     pub offered: bool,
     /// The dice the world rolls with, by sides — empty for the usual set.
@@ -226,6 +229,9 @@ fn effective_policies(inputs: &[NewLayer]) -> Result<Vec<Policy>, AppError> {
 
 #[cfg(feature = "gui")]
 fn store(app: &tauri::AppHandle) -> Result<Store, AppError> {
+    if let Some(store) = online::command_store() {
+        return Ok(store);
+    }
     profile::store(app)
 }
 
@@ -291,6 +297,12 @@ fn open_layer(layer: &StoredLayer, held: &HeldKeys) -> Option<LayerView> {
 /// thousand of them, one edit should not cost them all.
 type ViewCache = std::collections::HashMap<(String, String), std::collections::HashMap<ArticleId, (u64, Option<ArticleView>)>>;
 static VIEWS: std::sync::OnceLock<std::sync::Mutex<ViewCache>> = std::sync::OnceLock::new();
+
+pub(crate) fn forget_world_views(world: &str) {
+    if let Some(all) = VIEWS.get() {
+        if let Ok(mut all) = all.lock() { all.retain(|(id, _), _| id != world); }
+    }
+}
 
 fn fingerprint(a: &StoredArticle) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -434,6 +446,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         copies: store.copies(&id)?,
         fleeting: store.is_fleeting(&id),
         server: store.load_network()?.home_of(&id).cloned().unwrap_or_default(),
+        server_id: store.load_network()?.homes.get(&id).cloned().unwrap_or_default(),
         offered: is_gm && store.load_network()?.shared.contains(&id),
         dice: store.dice(&id)?,
         waiting: store.waiting(&id)?.len(),
@@ -544,14 +557,18 @@ fn avatar_remove(app: tauri::AppHandle) -> Answer<()> {
 // Off the main thread: while the store works, the window keeps drawing and taking keys.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<serde_json::Value>> {
-    let store = store(&app)?;
+    let store = store(&app)?.for_sync();
     let me = store.load_identity()?.id().to_string();
     let mut out = Vec::new();
     for meta in store.list_worlds()? {
         if unfinished_copy(&store, meta.public.world_id.as_str()) {
             continue;
         }
-        out.push(serde_json::to_value(world_info(&store, &meta, &me)?)?);
+        let mut info = serde_json::to_value(world_info(&store, &meta, &me)?)?;
+        if online::is_server_world(&store, meta.public.world_id.as_str()) {
+            info["online"] = true.into();
+        }
+        out.push(info);
     }
     // Worked on online: as their host last showed them — and where it is.
     let settings = store.load_network()?;
@@ -560,6 +577,7 @@ fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<serde_json::Value>> {
         let endpoint = w.server.as_deref().and_then(|c| c.split('@').next()).unwrap_or_default();
         let code = settings.servers.iter().find(|c| !endpoint.is_empty() && c.split('@').next() == Some(endpoint));
         w.info["server"] = code.cloned().unwrap_or_default().into();
+        w.info["server_id"] = endpoint.to_string().into();
         w.info
     }));
     Ok(out)
@@ -577,7 +595,7 @@ enum Destination {
 /// Creates a world at the chosen location — a folder here, or one a cloud drive mounts.
 #[cfg_attr(feature = "gui", tauri::command)]
 async fn world_create(app: tauri::AppHandle, name: String, destination: Destination) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    let store = store(&app)?.for_sync();
     tauri::async_runtime::spawn_blocking(move || match destination {
         Destination::Local { path } => {
             let store = store.destination(Path::new(&path))?;
@@ -603,15 +621,16 @@ async fn world_create(app: tauri::AppHandle, name: String, destination: Destinat
 async fn world_copy(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
     use tauri::Emitter;
     let store = store(&app)?;
+    let home = profile::store(&app)?.for_sync();
     tauri::async_runtime::spawn_blocking(move || {
         if !store.is_gm(&world) {
             return Err(AppError("Only the GM copies a world.".into()));
         }
         let identity = store.load_identity()?;
         let (target, server) = match destination {
-            Destination::Local { path } if path.is_empty() => (store.clone(), None),
-            Destination::Local { path } => (store.destination(Path::new(&path))?, None),
-            Destination::Server { server } => (store.clone(), Some(server)),
+            Destination::Local { path } if path.is_empty() => (home.clone(), None),
+            Destination::Local { path } => (home.destination(Path::new(&path))?, None),
+            Destination::Server { server } => (home.clone(), Some(server)),
         };
         let meta = new_world(&target, &identity, copy_name(&store, &store.load_world_meta(&world)?.public.name)?)?;
         let id = meta.public.world_id.to_string();
@@ -656,7 +675,7 @@ async fn world_copy(app: tauri::AppHandle, world: String, destination: Destinati
 #[cfg_attr(feature = "gui", tauri::command)]
 async fn world_move(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
     use tauri::Emitter;
-    let store = store(&app)?;
+    let store = store(&app)?.for_sync();
     if !store.is_gm(&world) {
         return Err(AppError("Only the GM moves a world.".into()));
     }
@@ -823,6 +842,9 @@ fn world_open(app: tauri::AppHandle, path: String, location: String) -> Answer<W
     let raw = std::fs::read(&path).map_err(AppError::from)?;
     // A world handed over: from now on this device is its game master.
     if let Ok(package) = serde_json::from_slice::<store::HandoverPackage>(&raw) {
+        if online::requires_online(&store, &package.world) {
+            return Err(AppError("This is an online world. A handover file cannot replace its server session.".into()));
+        }
         let world = store.handover_take(&package, &identity)?;
         network::offer_taken_over(&store, &world)?;
         return world_info(&store, &store.load_world_meta(&world)?, identity.id().as_str());
@@ -830,6 +852,9 @@ fn world_open(app: tauri::AppHandle, path: String, location: String) -> Answer<W
     let file: WorldFile = serde_json::from_slice(&raw).map_err(AppError::from)?;
     if file.member != identity.id().as_str() {
         return Err(AppError("This world file was made out to someone else.".into()));
+    }
+    if online::requires_online(&store, &file.world) {
+        return Err(AppError("This is already an online world. Make an explicit local copy to open it separately.".into()));
     }
     store.receive(&file.world, &file.records)?;
     let meta = store.load_world_meta(&file.world)?;
@@ -2093,6 +2118,12 @@ pub(crate) fn view_in(store: &Store, world: String, preview_as: Option<Vec<Strin
     };
     // Acting for a member: their view, cached apart.
     let who = preview_key.or_else(|| host::acting().map(|a| format!("member:{}", a.member.id))).unwrap_or_default();
+    let mut scope = blake3::Hasher::new();
+    for (at, key) in held.iter() {
+        scope.update(at.to_string().as_bytes());
+        scope.update(key);
+    }
+    let who = format!("{}:{}:{}:{who}", store.profile_dir().display(), identity.id(), scope.finalize().to_hex());
     let mut views = cached_view(&world, &who, &articles, &held);
     // What this player asked for and waits on — theirs alone, until made.
     if !previewing {
@@ -2166,7 +2197,11 @@ pub fn run() {
             tauri::WindowEvent::Resized(_) if w.label() == "main" => window_state::remember(w.app_handle(), w, false),
             _ => {}
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler({
+            let commands: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
+            online::world_call,
+            online::world_connect,
+            online::world_disconnect,
             document::article_versions,
             document::version_compare,
             document::version_revert,
@@ -2290,7 +2325,11 @@ pub fn run() {
             navigation_set,
             article_propose,
             document::relations_set,
-        ])
+            ];
+            move |invoke| {
+                if online::gate_invoke(&invoke) { true } else { commands(invoke) }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("the Tauri application could not start")
         .run(|_, event| {
@@ -2298,6 +2337,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(store) = profile::store_now() {
                     store.forget_fleeting();
+                    online::clear_sessions(&store);
                 }
             }
         });

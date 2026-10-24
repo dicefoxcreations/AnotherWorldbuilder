@@ -101,6 +101,20 @@ pub enum Ask {
     /// Takes records, and answers nothing back — a world brought over a
     /// little at a time, without naming everything held each time.
     Give { records: Vec<String> },
+    /// An online command, staged in encrypted pieces. Only `finish` publishes
+    /// the complete command, provided the world still has `base` as its digest.
+    /// A lost connection before finish leaves the world unchanged.
+    Commit {
+        transaction: String,
+        base: String,
+        records: Vec<String>,
+        parts: Vec<(String, String)>,
+        finish: bool,
+    },
+    /// Discards an unfinished online command belonging to the asking member.
+    Abort { transaction: String },
+    /// Retires a receipt after the client has observed a successful commit.
+    Release { transaction: String },
     /// The world itself, game master's part included — when the host hands
     /// it over to the asking side.
     Handover,
@@ -260,6 +274,12 @@ pub enum Reply {
     Taken { digest: String },
     /// The world is being written right now — ask again in a while.
     Busy,
+    /// Encrypted pieces are staged, but have not changed the world yet.
+    Staged,
+    /// The complete online command is durable on the server.
+    Committed { digest: String },
+    /// Another command changed the world before this one was committed.
+    Conflict,
 }
 
 /// The side that holds worlds — implemented by the application.

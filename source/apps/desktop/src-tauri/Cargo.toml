@@ -45,6 +45,7 @@ tauri = { version = "2", features = [], optional = true }
 tauri-plugin-dialog = { version = "2.7.3", optional = true }
 tauri-plugin-window-state = { version = "2.4.1", optional = true }
 thiserror.workspace = true
+tempfile = "3"
 # The server's AW_LOG: what the network does, for finding why nobody gets through.
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter"] }
 

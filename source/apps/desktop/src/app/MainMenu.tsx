@@ -50,7 +50,8 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
     return () => { live = false; clearInterval(timer); };
   }, [looking, servers.length]);
 
-  const onServer = (w: { server: string }) => !!w.server && servers.some(s => s.code === w.server);
+  const onServer = (w: WorldInfo) => !!w.server || !!w.serverId;
+  const orphaned = worlds.filter(w => onServer(w) && !servers.some(s => s.code === w.server));
   const chosen = location || storage?.worlds || "";
   const toServer = chosen.startsWith("server:") ? chosen.slice("server:".length) : "";
   const localPath = toServer ? storage?.worlds ?? "" : chosen;
@@ -203,6 +204,11 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
         </div>
       </div>;
     })}
+    {orphaned.length > 0 && <div className="server-section">
+      <h4><ServerIcon /> Server unavailable</h4>
+      <p className="small muted">Add these worlds' server again to open them. They remain online worlds.</p>
+      <div className="world-grid">{orphaned.map(tile)}</div>
+    </div>}
     {servers.length === 0 && <p className="small muted">None yet.</p>}
 
     {dialog === "server" && <div className="dialog-backdrop" onClick={() => !busy && setDialog(null)}>
@@ -227,7 +233,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
           </select>
         </label>
         {toServer && dialog === "new"
-          ? <p className="small">It lives on the server; players find it there. Your copy as GM stays on this device.</p>
+          ? <p className="small">It lives on the server. Opening and saving require a server connection, for the GM too.</p>
           : <>
             <button disabled={!!busy} onClick={addLocations}>Add a folder …</button>
             <p className="small">A folder your cloud app keeps in step is shared: the group meets there.</p>

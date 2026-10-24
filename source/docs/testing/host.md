@@ -7,9 +7,10 @@ A world stays with the host – the GM's device or a [server](server.md) – and
 ## When
 
 - **Unencrypted and offered on the network:** always. Without encryption a copy would give everyone everything; this way the host enforces views and rights.
-- **Encrypted:** by choice. *Options → World → Copies for players*: on (as before, everyone has the world encrypted and opens their part, offline too) or off (online only). The GM's device then decrypts for the player; a server has no keys and passes the world on encrypted, and the player's app holds it only while it runs (see [server](server.md)).
+- **Encrypted, hosted by a GM device:** by choice. *Copies for players* chooses whether players keep a copy or use host RPC. The GM device can decrypt for the player.
+- **Encrypted, on a server (0.1.56):** GM and players always work through an authenticated online session. *Local copies* controls retained copies for both roles; even an allowed copy is never an offline fallback for that server world. Decryption remains on each member's device; the server holds no world keys (see [server](server.md)).
 
-So: offline copies for players exist only encrypted.
+Explicit local worlds and copies remain separate from server worlds.
 
 ## Settings
 

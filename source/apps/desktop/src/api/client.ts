@@ -5,7 +5,7 @@
 // of the rule in TypeScript would be exactly the gap through which players
 // would otherwise see what they should not.
 
-import { invoke, setOnline } from "./changes";
+import { invoke, setOnline, setWorldOnline } from "./changes";
 import { DEFAULT_CALENDAR, type WorldCalendar } from "../shared/Calendar";
 
 export type IdentityInfo = {
@@ -74,6 +74,8 @@ export type WorldInfo = {
   fleeting: boolean;
   /** The server it lives on, by code — empty: this device. */
   server: string;
+  /** Hosting identity even when its address has been removed. */
+  serverId?: string;
   /** The GM's: offered to players over the network. */
   offered: boolean;
   /** The dice the world rolls with, by sides — empty for the usual set. */
@@ -526,8 +528,9 @@ const toWorld = (r: Raw): WorldInfo => ({
   copies: !!r.copies,
   fleeting: !!r.fleeting,
   server: (r.server as string | undefined) ?? "",
+  serverId: (r.server_id as string | undefined) ?? "",
   offered: !!r.offered,
-  online: !!r.online,
+  online: !!r.online || !!r.server_id || !!r.server,
   dice: (r.dice as number[] | undefined) ?? [],
   calendar: (r.calendar as WorldCalendar | undefined) ?? DEFAULT_CALENDAR,
 });
@@ -1069,6 +1072,13 @@ export const api = {
     setOnline(worlds.filter((w) => w.online).map((w) => w.id));
     return worlds;
   },
+  /** Confirms server access before exposing any world's content. */
+  worldConnect: async (world: string) => {
+    const connected = toWorld(await invoke<Raw>("world_connect", { world }));
+    setWorldOnline(world, connected.online);
+    return connected;
+  },
+  worldDisconnect: (world: string) => invoke<void>("world_disconnect", { world }),
   worldCreate: async (name: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_create", { name, destination })),
   worldCopy: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_copy", { world, destination })),
   /** Whether all of a GM's world is on its server: entries by name, image parts by their bytes. */

@@ -354,6 +354,7 @@ button.icon.more-button, .phone-only { display: none; }
    left edge. The higher stacking value is needed because a dialog can also
    open from inside the options window. */
 .dialog-backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(5,10,12,.72); display: grid; place-items: center; padding: 16px; }
+.online-status { z-index: 100; background: var(--bg, #101b20); }
 .options { display: grid; grid-template-columns: 210px 1fr; width: 100%; height: 100%; background: var(--base); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 /* One size for every area: as wide as a page of the world (--page-width),
    centred — the gallery and the forms in the same window, which does not

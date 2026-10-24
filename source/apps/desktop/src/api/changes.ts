@@ -47,6 +47,8 @@ const READS = new Set([
   "waiting_versions",
   "window_open",
   "world_open",
+  "world_connect",
+  "world_disconnect",
   "world_token_check",
   "worlds_list",
 ]);
@@ -83,20 +85,41 @@ export function announce(world: string) {
  * this member's name. Only what concerns this device stays here.
  */
 const online = new Set<string>();
-const HERE = new Set(["dice_log", "dice_log_add", "dice_log_clear", "dice_favorites_set", "window_open", "world_delete", "network_join"]);
+const unavailable = new Set<string>();
+const HERE = new Set(["dice_log", "dice_log_add", "dice_log_clear", "dice_favorites_set", "window_open", "world_delete", "world_move", "network_join", "server_backups", "world_connect", "world_disconnect"]);
 
 export function setOnline(worlds: string[]) {
   online.clear();
   for (const w of worlds) online.add(w);
 }
 
+export function setWorldOnline(world: string, required: boolean) {
+  if (required) online.add(world);
+  else { online.delete(world); unavailable.delete(world); }
+}
+
+export function suspendOnlineWorld(world: string) { unavailable.add(world); }
+
 /** A command of the app; what changes a world is told to the other windows. */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const world = args?.world;
-  const result =
-    typeof world === "string" && online.has(world) && !HERE.has(cmd)
-      ? await call<T>("remote_call", { world, command: cmd, args: args ?? {} })
+  let result: T;
+  try {
+    if (typeof world === "string" && online.has(world) && unavailable.has(world) && !HERE.has(cmd)) {
+      throw "[online] Editing is paused. Reconnect to this server world first.";
+    }
+    result = typeof world === "string" && online.has(world) && !HERE.has(cmd)
+      ? await call<T>("world_call", { world, command: cmd, args: args ?? {} })
       : await call<T>(cmd, args);
+  } catch (error) {
+    // There is deliberately no retry against the local command handler.
+    if (typeof world === "string" && String(error).includes("[online]")) {
+      suspendOnlineWorld(world);
+      window.dispatchEvent(new CustomEvent("online-unavailable", { detail: { world, error: String(error) } }));
+    }
+    throw error;
+  }
+  if (cmd === "world_connect" && typeof world === "string") unavailable.delete(world);
   if (!READS.has(cmd) && typeof args?.world === "string") announce(args.world);
   return result;
 }

@@ -689,6 +689,30 @@ pub fn record_id(raw: &[u8]) -> String {
     blake3::hash(raw).to_hex().to_string()
 }
 
+/// Validates the signed outer record before an online transaction is
+/// published. Layer write keys and causal dependencies are checked when
+/// the complete transaction is taken into the journal.
+pub fn verify_record_envelope(raw: &str, world: &WorldPublic, gm: Option<&IdentityPublic>) -> Result<Record> {
+    if raw.len() > MAX_RECORD { return Err("an online record is too large".into()) }
+    let record: Record = serde_json::from_str(raw)?;
+    let expected = world.world_id.as_str();
+    match &record {
+        Record::Control(c) => c.verify(world)?,
+        Record::Draft(d) => {
+            if d.world != expected || !d.author.is_genuine() { return Err("a draft of another world or identity".into()) }
+            d.author.verify(&d.signed_bytes()?, &signature(&d.signature)?)?;
+        }
+        Record::Version(v) => {
+            if v.world != expected || !v.author.is_genuine() { return Err("a version of another world or identity".into()) }
+            v.author.verify(&v.signed_bytes()?, &signature(&v.signature)?)?;
+        }
+        Record::Image(i) => i.verify(expected, gm)?,
+        Record::Proposal(p) => p.verify(expected)?,
+        Record::Badge(b) => b.verify(expected)?,
+    }
+    Ok(record)
+}
+
 /// A filesystem-safe name from an id: `art:01M…` → `art-01M…`.
 pub fn dir_name(id: &str) -> String {
     id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect()
@@ -1792,6 +1816,12 @@ impl Journal {
     /// wrote it.
     pub fn grant_content(&self, member: &str, secret: &x25519_dalek::StaticSecret) -> Option<GrantContent> {
         serde_json::from_slice(&self.grant(member)?.1.open(secret)?).ok()
+    }
+
+    /// The current signed admissions, excluding revoked members.
+    pub fn granted_members(&self) -> Vec<IdentityPublic> {
+        self.latest.keys().filter_map(|key| key.strip_prefix("grant "))
+            .filter_map(|id| self.grant(id).map(|(member, _)| member.clone())).collect()
     }
 
     /// How many versions of each document stay.

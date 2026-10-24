@@ -25,8 +25,9 @@ import { NavBar } from "../features/navigation/NavBar";
 import { WorldDataContext } from "../features/worlds/WorldData";
 import { LinkPreview } from "../features/wiki/LinkPreview";
 import { DiceTray } from "../features/dice/DiceTray";
-import { announce, isMainWindow, onWorldChanged } from "../api/changes";
+import { announce, isMainWindow, onWorldChanged, suspendOnlineWorld } from "../api/changes";
 import { wantsApart } from "../shared/apart";
+import { listen } from "@tauri-apps/api/event";
 
 /** How many places the trail in the header bar keeps. */
 const TRAIL = 10;
@@ -119,10 +120,58 @@ export default function App() {
   // A document this player waits on, changed in the form it was asked with.
   const [editing, setEditing] = useState<ArticleView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState<{ world: string; error: string } | null>(null);
+  const openingRequest = useRef(0);
+  const currentWorld = useRef(openWorld);
+  currentWorld.current = openWorld;
+  const openingWorld = useRef<string | null>(null);
   const [tools, setTools] = useState<HTMLElement | null>(null);
   const nav = useNavShown();
 
   const report = useCallback((e: unknown) => setError(String(e)), []);
+  const enter = useCallback(async (id: string) => {
+    const request = ++openingRequest.current;
+    openingWorld.current = id;
+    setOpening(id);
+    try {
+      const connected = await api.worldConnect(id);
+      if (request !== openingRequest.current) {
+        void api.worldDisconnect(id).catch(() => {});
+        return;
+      }
+      setWorlds((old) => [...old.filter((w) => w.id !== id), connected]);
+      setBlocked(null);
+      setError(null);
+      if (currentWorld.current !== id) {
+        setArticles([]);
+        setTemplates([]);
+      }
+      setOpenWorld(id);
+      setFresh((n) => n + 1);
+    } catch (error) {
+      if (request === openingRequest.current) report(error);
+    } finally {
+      if (request === openingRequest.current) {
+        openingWorld.current = null;
+        setOpening(null);
+      }
+    }
+  }, [report]);
+
+  useEffect(() => {
+    const unavailable = (detail: { world: string; error: string }) => {
+      suspendOnlineWorld(detail.world);
+      if (detail.world === currentWorld.current || detail.world === openingWorld.current) setBlocked(detail);
+    };
+    const local = (event: Event) => unavailable((event as CustomEvent<{ world: string; error: string }>).detail);
+    window.addEventListener("online-unavailable", local);
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    listen<{ world: string; error: string }>("online-unavailable", (event) => unavailable(event.payload))
+      .then((unlisten) => { if (disposed) unlisten(); else stop = unlisten; }).catch(() => {});
+    return () => { disposed = true; stop?.(); window.removeEventListener("online-unavailable", local); };
+  }, []);
   const world = useMemo(
     () => worlds.find((w) => w.id === openWorld) ?? null,
     [worlds, openWorld],
@@ -234,16 +283,16 @@ export default function App() {
   useEffect(() => {
     if (!startAt || started || !worlds.some((w) => w.id === startAt.world)) return;
     setStarted(true);
-    setOpenWorld(startAt.world);
+    void enter(startAt.world);
     if (startAt.place) setPlace(startAt.place);
-  }, [startAt, started, worlds]);
+  }, [startAt, started, worlds, enter]);
   // The app opens where it was left: in the world open last, on this device.
   useEffect(() => {
     if (startAt || started || worlds.length === 0) return;
     setStarted(true);
     const last = lastWorld();
-    if (last && worlds.some((w) => w.id === last)) setOpenWorld(last);
-  }, [startAt, started, worlds]);
+    if (last && worlds.some((w) => w.id === last)) void enter(last);
+  }, [startAt, started, worlds, enter]);
   useEffect(() => {
     if (!startAt && started) keepLastWorld(openWorld);
   }, [startAt, started, openWorld]);
@@ -350,6 +399,12 @@ export default function App() {
   const go = useCallback((p: Place) => (wantsApart() ? openApart(p) : setPlace(p)), [openApart]);
 
   const leave = () => {
+    const disconnect = openingWorld.current ?? openWorld;
+    ++openingRequest.current;
+    openingWorld.current = null;
+    setOpening(null);
+    setBlocked(null);
+    if (disconnect) void api.worldDisconnect(disconnect).catch(() => {});
     asked.current++;
     setOpenWorld(null);
     setPreview(null);
@@ -424,7 +479,7 @@ export default function App() {
     <HeaderSlot.Provider value={tools}>
     {/* The dice belong to the open world — its 🎲 stands in the header bar. */}
     <WorldDice world={world}>
-    <div className={world && nav.shown ? (nav.beside ? "frame with-nav" : "frame nav-over") : "frame"}>
+    <div inert={!!blocked || !!opening} className={world && nav.shown ? (nav.beside ? "frame with-nav" : "frame nav-over") : "frame"}>
       {/* The header bar stands on every page — the avatar on the far right
           is reachable from everywhere, the back button only where there is
           a way back. */}
@@ -454,7 +509,7 @@ export default function App() {
         }
       />
 
-      {error && (
+      {error && !blocked && (
         <div className="error" role="alert">
           {error}
           <button className="compact" onClick={() => setError(null)}>close</button>
@@ -465,7 +520,7 @@ export default function App() {
         <MainMenu
           worlds={worlds}
           network={network}
-          onOpen={setOpenWorld}
+          onOpen={(id) => void enter(id)}
           onChanged={loadWorlds}
           onNetwork={setNetwork}
           onSettings={() => setOptions(true)}
@@ -575,6 +630,17 @@ export default function App() {
         </WorldDataContext.Provider>
       )}
     </div>
+    {(opening || blocked) && <div className="dialog-backdrop online-status" role="alertdialog" aria-modal="true" aria-labelledby="online-status-title">
+      <section className="card narrow">
+        <h2 id="online-status-title">{opening ? "Opening world …" : "Server world unavailable"}</h2>
+        <p>{opening ? "Confirming access and loading the current world." : blocked?.error.replace(/^\[online\]\s*/, "")}</p>
+        {!opening && <p>Editing is paused. Changes without a server acknowledgement are not confirmed saved. Reconnect to continue using this server world.</p>}
+        <div className="line">
+          {!opening && blocked && <button className="primary" onClick={() => void enter(blocked.world)}>Reconnect</button>}
+          <button onClick={leave}>Back to worlds</button>
+        </div>
+      </section>
+    </div>}
     </WorldDice>
     </HeaderSlot.Provider>
   );

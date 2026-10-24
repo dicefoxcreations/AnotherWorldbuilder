@@ -167,6 +167,7 @@ fn claim(at: &Locations, lock_root: &Path) -> Result<(), Refused> {
     drop(slot);
     if fresh {
         at.store().forget_fleeting();
+        crate::online::purge_sessions(&at.store());
     }
     Ok(())
 }
