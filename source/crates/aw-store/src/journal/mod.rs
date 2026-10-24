@@ -936,7 +936,7 @@ pub struct Journal {
     /// What each folder held when last looked through, with its modification
     /// time: a folder whose time did not change is not read again. A world of
     /// ten thousand documents has as many folders.
-    listings: HashMap<PathBuf, (std::time::SystemTime, Vec<String>)>,
+    listings: HashMap<PathBuf, (std::time::SystemTime, HashSet<String>)>,
     /// When every folder was last read regardless — now and then, in case a
     /// file system keeps coarse times.
     full_scan: Option<std::time::Instant>,
@@ -1138,12 +1138,12 @@ impl Journal {
                 }
             }
             let Ok(entries) = std::fs::read_dir(&folder) else { continue };
-            let mut listed = Vec::new();
+            let mut listed = HashSet::new();
             for entry in entries {
                 let path = entry?.path();
                 let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
                 let Some(id) = id_in_name(name).map(str::to_string) else { continue };
-                listed.push(id.clone());
+                listed.insert(id.clone());
                 present.insert(id.clone());
                 if self.read.contains(&path) || self.versions.contains_key(&id) || self.waiting.contains_key(&id) {
                     continue;
@@ -1717,22 +1717,20 @@ impl Journal {
         let Some(folder) = path.parent() else { return };
         let Some((stamp, ids)) = self.listings.get_mut(folder) else { return };
         if there {
-            if !ids.iter().any(|i| i == id) {
-                ids.push(id.to_string());
-            }
+            ids.insert(id.to_string());
         } else {
-            ids.retain(|i| i != id);
+            ids.remove(id);
         }
         if let Ok(now) = std::fs::metadata(folder).and_then(|m| m.modified()) {
             *stamp = now;
         }
     }
 
-    /// `listed` for a record known to be new — no search through the folder's ids.
+    /// `listed` for a record known to be new.
     fn listed_new(&mut self, path: &Path, id: &str) {
         let Some(folder) = path.parent() else { return };
         let Some((stamp, ids)) = self.listings.get_mut(folder) else { return };
-        ids.push(id.to_string());
+        ids.insert(id.to_string());
         if let Ok(now) = std::fs::metadata(folder).and_then(|m| m.modified()) {
             *stamp = now;
         }

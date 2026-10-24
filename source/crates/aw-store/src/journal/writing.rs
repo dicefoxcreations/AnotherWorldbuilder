@@ -501,11 +501,27 @@ impl Journal {
     }
 
     /// Control records something newer replaced and nothing needs any more:
-    /// earlier world records, types, grants, settings — and verdicts on
-    /// versions that are gone, whose keys no block left needs.
+    /// earlier world records, types, grants, settings, verdicts on versions
+    /// that are gone, whose keys no block left needs — and the generations
+    /// of a part between its first and its current one that nothing was
+    /// written in. The first stays: the parts of a document stand in the
+    /// order they came, by it.
     pub fn superseded(&self) -> Vec<String> {
         let current: HashSet<&String> = self.latest.values().map(|(_, id)| id).collect();
         let blocks: HashSet<&String> = self.versions.values().flat_map(|v| v.blocks.iter().map(|(.., id, _)| id)).collect();
+        let mut first: HashMap<LayerId, u32> = HashMap::new();
+        for (layer, generation) in self.generations.keys() {
+            let at = first.entry(*layer).or_insert(*generation);
+            *at = (*at).min(*generation);
+        }
+        // Written in: that generation stays, and the one after it, which
+        // tells whether what was written there was taken along.
+        let written: HashSet<(LayerId, u32)> = self
+            .by_layer
+            .iter()
+            .filter(|(_, ids)| !ids.is_empty())
+            .flat_map(|((layer, generation), _)| [(*layer, *generation), (*layer, generation + 1)])
+            .collect();
         self.controls
             .iter()
             .filter(|(id, c)| match &c.item {
@@ -523,6 +539,11 @@ impl Journal {
                 | Item::Hosts { .. } => !current.contains(id),
                 Item::Verdict { versions, keys, .. } => {
                     versions.iter().all(|v| !self.versions.contains_key(v)) && keys.keys().all(|b| !blocks.contains(b))
+                }
+                Item::Layer(head) => {
+                    !current.contains(id)
+                        && first.get(&head.layer) != Some(&head.generation)
+                        && !written.contains(&(head.layer, head.generation))
                 }
                 _ => false,
             })

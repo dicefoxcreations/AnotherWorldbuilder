@@ -1047,6 +1047,17 @@ fn world_versions_set(app: tauri::AppHandle, world: String, max: u32) -> Answer<
 }
 
 #[cfg(feature = "gui")]
+/// Lets go of what newer records replaced — the GM's. How many went.
+#[cfg_attr(feature = "gui", tauri::command)]
+fn world_tidy(app: tauri::AppHandle, world: String) -> Answer<usize> {
+    let store = store(&app)?;
+    if !store.is_gm(&world) {
+        return Err(AppError("Only the GM tidies the world.".into()));
+    }
+    Ok(store.tidy(&world)?)
+}
+
+#[cfg(feature = "gui")]
 /// How far switching the world's encryption is — asked while it runs.
 #[cfg_attr(feature = "gui", tauri::command)]
 fn world_switch_progress(app: tauri::AppHandle, world: String) -> Answer<Option<store::SwitchProgress>> {
@@ -2308,6 +2319,7 @@ pub fn run() {
             media::image_data,
             document::version_delete,
             world_versions_set,
+            world_tidy,
             world_dice_set,
             world_encryption_set,
             world_readable_set,

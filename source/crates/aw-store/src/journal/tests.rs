@@ -862,3 +862,39 @@ fn what_another_device_writes_into_a_known_folder_is_picked_up() {
     other.refresh().unwrap();
     assert!(!other.versions.contains_key(&version));
 }
+
+#[test]
+fn generations_nothing_was_written_in_can_go_and_the_part_stays_as_it_was() {
+    let mut t = table();
+    let (article, _, story) = t.article(("players", "players", "The inn is old.", Level::Open));
+    let order = |j: &Journal| j.parts_of(article).into_iter().map(|(l, _)| l).collect::<Vec<_>>();
+    let before = order(&t.gm_journal);
+    // Who may edit changes three times: three new generations, the second
+    // one written in.
+    let mut heads = Vec::new();
+    for (generation, text) in [(2, None), (3, Some("Written in the third.")), (4, None)] {
+        let head = t.gm_journal.head(story).unwrap().clone();
+        let now = t.gm_journal.plain(story).unwrap();
+        let next = new_head(
+            &mut t.ring, head.article, story, false, Level::Open, generation, &"players".parse().unwrap(),
+            &Access { section: "story".into(), own: "players".into(), edit: if generation % 2 == 0 { "gm" } else { "players" }.into() },
+            &now, None, true,
+        )
+        .unwrap();
+        t.gm_journal.control(&t.token, Item::Layer(next), "s-gm", 10 + generation as u64).unwrap();
+        t.gm_journal.set_keys(t.ring.everything());
+        heads.push(t.gm_journal.latest.get(&format!("layer {story}")).unwrap().1.clone());
+        if let Some(text) = text {
+            t.gm_journal.edit(story, generation, &[], &plain("", text), &t.gm, &format!("s-{generation}"), 20 + generation as u64).unwrap();
+        }
+    }
+    let gone = t.gm_journal.superseded();
+    // The second generation: nothing written, between the first and the current one.
+    assert!(gone.contains(&heads[0]), "the second generation goes");
+    assert!(!gone.contains(&heads[1]), "the third was written in");
+    assert!(!gone.contains(&heads[2]), "the current one stays");
+    t.gm_says(Item::Deleted { records: gone });
+    assert_eq!(text_of(&mut t.gm_journal, story), "Written in the third.");
+    assert_eq!(order(&t.gm_journal), before, "the parts stand as they did");
+    assert!(t.gm_journal.superseded().is_empty());
+}

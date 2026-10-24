@@ -1400,6 +1400,8 @@ export const api = {
   /** Sets how many versions of each document stay — the GM's. */
   calendarSet: async (world: string, calendar: WorldCalendar) => toWorld(await invoke<Raw>("calendar_set", { world, calendar })),
   worldVersionsSet: async (world: string, max: number) => toWorld(await invoke<Raw>("world_versions_set", { world, max })),
+  /** Lets go of what newer records replaced — how many went. */
+  worldTidy: (world: string) => invoke<number>("world_tidy", { world }),
   /** Encrypts the world or opens it — the GM's. */
   worldReadableSet: async (world: string, on: boolean) => toWorld(await invoke<Raw>("world_readable_set", { world, on })),
   worldEncryptionSet: async (world: string, on: boolean) => toWorld(await invoke<Raw>("world_encryption_set", { world, on })),

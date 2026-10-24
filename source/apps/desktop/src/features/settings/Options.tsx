@@ -252,6 +252,33 @@ function WorldDice({ world, onChanged, onError }: { world: WorldInfo; onChanged:
   );
 }
 
+/** Lets go of what newer records replaced: old key generations of parts nothing was written in. */
+function Tidy({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<number | null>(null);
+  const tidy = async () => {
+    setBusy(true);
+    try {
+      setDone(await api.worldTidy(world.id));
+      onChanged();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="line backup-plan">
+      <button disabled={busy} onClick={() => void tidy()}>
+        {busy ? "Tidying …" : "Tidy up"}
+      </button>
+      <small className="small muted grow">
+        {done === null ? "Removes what newer entries replaced." : done === 0 ? "Nothing to remove." : `${done.toLocaleString()} old entries removed.`}
+      </small>
+    </div>
+  );
+}
+
 /** What holds for the whole world — the GM's. */
 function BasicsArea({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
   const run = (step: Promise<unknown>) => step.then(onChanged).catch(onError);
@@ -277,6 +304,7 @@ function BasicsArea({ world, onChanged, onError }: { world: WorldInfo; onChanged
           <small className="small">The oldest go once there are more.</small>
         </span>
       </label>
+      <Tidy world={world} onChanged={onChanged} onError={onError} />
       <Encryption world={world} onChanged={onChanged} onError={onError} />
     </div>
   );

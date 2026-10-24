@@ -2133,6 +2133,20 @@ impl Store {
         self.restart(world_id, article)
     }
 
+    /// Lets go of what something newer replaced and nothing needs any more —
+    /// the game master's, for everyone. Returns how many records went.
+    pub fn tidy(&self, world_id: &str) -> Result<usize> {
+        if !self.is_gm(world_id) {
+            return Ok(0);
+        }
+        let gone = self.with_journal(world_id, |journal| Ok(journal.superseded()))?;
+        // Each deletion reads the world anew: as few as fit in a record.
+        for piece in gone.chunks(200_000) {
+            self.control(world_id, Item::Deleted { records: piece.to_vec() }, "")?;
+        }
+        Ok(gone.len())
+    }
+
     /// Keeps each document to the limit — on the game master's device. The
     /// oldest versions go once a document has half as many again; `now`
     /// keeps to it at once. Records something newer replaced go along.
