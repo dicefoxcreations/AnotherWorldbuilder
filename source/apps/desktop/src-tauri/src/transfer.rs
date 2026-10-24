@@ -396,68 +396,78 @@ pub fn import(store: &Store, me: &Identity, world: &str, folder: &Path, package:
     // The images.
     let here: BTreeSet<String> = store.gallery(world, me)?.into_iter().map(|g| g.id).collect();
     let mut skipped = Vec::new();
-    for image in &package.images {
-        let id = &ids[&image.id];
-        if !here.contains(id) {
-            let raw = std::fs::read(folder.join(&image.file))?;
-            // One picture the app cannot read does not stop the rest.
-            if store.upload_image_as(world, id, &raw, &image.name, "", me).is_err() {
-                skipped.push(image.name.clone());
+    for some in package.images.chunks(200) {
+        store.batched(world, || -> Answer<()> {
+            for image in some {
+                let id = &ids[&image.id];
+                if !here.contains(id) {
+                    let raw = std::fs::read(folder.join(&image.file))?;
+                    // One picture the app cannot read does not stop the rest.
+                    if store.upload_image_as(world, id, &raw, &image.name, "", me).is_err() {
+                        skipped.push(image.name.clone());
+                        done += 1;
+                        continue;
+                    }
+                    if image.defaults != ImageDefaults::default() {
+                        store.set_image_defaults(world, id, image.defaults.clone(), me)?;
+                    }
+                }
                 done += 1;
-                continue;
+                progress(done, total);
             }
-            if image.defaults != ImageDefaults::default() {
-                store.set_image_defaults(world, id, image.defaults.clone(), me)?;
-            }
-        }
-        done += 1;
-        progress(done, total);
+            Ok(())
+        })?;
     }
 
-    // The documents not here yet.
+    // The documents not here yet — written a few hundred at a time.
     let known: BTreeSet<String> = store.load_articles(world)?.iter().map(|a| a.id.to_string()).collect();
-    for doc in &package.documents {
-        done += 1;
-        if known.contains(&doc.id) {
-            continue;
-        }
-        let article: ArticleId = doc.id.parse().map_err(AppError::from)?;
-        let base_view: Policy = doc.view.parse().map_err(AppError::from)?;
-        store.ensure_attributes(world, &base_view)?;
-        let mut parts = vec![NewPart {
-            is_base: true,
-            level: if base_view.to_string() == "gm" { Level::GmOnly } else { Level::Open },
-            view: base_view,
-            access: LayerAccess { section: String::new(), own: doc.view.clone(), edit: doc.edit.clone() },
-            plain: Plain { title: doc.name.clone(), fields: doc.fields.clone(), ..Plain::default() },
-        }];
-        for part in &doc.parts {
-            let view: Policy = part.view.parse().map_err(AppError::from)?;
-            store.ensure_attributes(world, &view)?;
-            let text = renamed(&part.text, &ids);
-            let plain = Plain {
-                title: part.title.clone(),
-                text: match &catalog {
-                    Some(catalog) => names::stored(&text, catalog, &doc.article_type),
-                    None => text,
-                },
-                fields: part.fields.iter().map(|(k, v)| (k.clone(), renamed_value(v, &ids))).collect(),
-                ..Plain::default()
-            };
-            // A skipped picture leaves its tag without an image to open.
-            let plain = store.with_images(world, &Plain::default(), &plain).unwrap_or(plain);
-            parts.push(NewPart {
-                is_base: false,
-                level: level_from(&part.level),
-                view,
-                access: LayerAccess { section: part.section.clone(), own: part.view.clone(), edit: part.edit.clone() },
-                plain,
-            });
-        }
-        store.create_article_as(world, article, doc.article_type.clone(), doc.slug.clone(), parts, "")?;
-        if done % 50 == 0 {
-            progress(done, total);
-        }
+    for some in package.documents.chunks(500) {
+        store.batched(world, || -> Answer<()> {
+            for doc in some {
+                done += 1;
+                if known.contains(&doc.id) {
+                    continue;
+                }
+                let article: ArticleId = doc.id.parse().map_err(AppError::from)?;
+                let base_view: Policy = doc.view.parse().map_err(AppError::from)?;
+                store.ensure_attributes(world, &base_view)?;
+                let mut parts = vec![NewPart {
+                    is_base: true,
+                    level: if base_view.to_string() == "gm" { Level::GmOnly } else { Level::Open },
+                    view: base_view,
+                    access: LayerAccess { section: String::new(), own: doc.view.clone(), edit: doc.edit.clone() },
+                    plain: Plain { title: doc.name.clone(), fields: doc.fields.clone(), ..Plain::default() },
+                }];
+                for part in &doc.parts {
+                    let view: Policy = part.view.parse().map_err(AppError::from)?;
+                    store.ensure_attributes(world, &view)?;
+                    let text = renamed(&part.text, &ids);
+                    let plain = Plain {
+                        title: part.title.clone(),
+                        text: match &catalog {
+                            Some(catalog) => names::stored(&text, catalog, &doc.article_type),
+                            None => text,
+                        },
+                        fields: part.fields.iter().map(|(k, v)| (k.clone(), renamed_value(v, &ids))).collect(),
+                        ..Plain::default()
+                    };
+                    // A skipped picture leaves its tag without an image to open.
+                    let plain = store.with_images(world, &Plain::default(), &plain).unwrap_or(plain);
+                    parts.push(NewPart {
+                        is_base: false,
+                        level: level_from(&part.level),
+                        view,
+                        access: LayerAccess { section: part.section.clone(), own: part.view.clone(), edit: part.edit.clone() },
+                        plain,
+                    });
+                }
+                store.create_article_as(world, article, doc.article_type.clone(), doc.slug.clone(), parts, "")?;
+                if done % 50 == 0 {
+                    progress(done, total);
+                }
+            }
+            Ok(())
+        })?;
     }
     // Every type has its page, as one made in the app: what lacks one gets
     // the plain list.

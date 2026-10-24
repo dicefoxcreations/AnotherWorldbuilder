@@ -9,6 +9,28 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use std::{collections::{BTreeSet, HashMap, HashSet}, future::Future, pin::Pin,
           sync::{Arc, Mutex, OnceLock}};
 
+/// Where progress is told: the app's windows (`online-progress`). Without
+/// a window — the server, tests — nobody is told.
+#[cfg(feature = "gui")]
+static WINDOWS: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+#[cfg(feature = "gui")]
+pub(crate) fn tell_progress_to(app: tauri::AppHandle) {
+    let _ = WINDOWS.set(app);
+}
+
+/// How far loading from or sending to the server is — `done` of `total`;
+/// `total` 0: done.
+fn progress(world: &str, what: &str, done: usize, total: usize) {
+    #[cfg(feature = "gui")]
+    if let Some(app) = WINDOWS.get() {
+        use tauri::Emitter;
+        let _ = app.emit("online-progress", serde_json::json!({ "world": world, "what": what, "done": done, "total": total }));
+    }
+    #[cfg(not(feature = "gui"))]
+    let _ = (world, what, done, total);
+}
+
 pub(crate) const UNAVAILABLE: &str = "[online] The server world is unavailable. No local copy was opened or saved.";
 const BUDGET: usize = 4 * 1024 * 1024;
 const CACHE_FOLDER: &str = "online-sessions";
@@ -243,7 +265,11 @@ impl Session {
                         return Err(AppError(format!("{UNAVAILABLE} The server revision is incomplete.")));
                     }
                     came = true;
+                    // The server's order tells how many there are, about.
+                    let total = mark.as_ref().map_or(0, |m| m.at as usize);
+                    progress(world, "loading", self.store.inventory(world)?.len(), total.max(1));
                 }
+                progress(world, "loading", 0, 0);
                 // Asked before the swap: nothing that came after it is missed.
                 self.mark = mark;
             }
@@ -603,6 +629,12 @@ pub(crate) async fn world_call(app: tauri::AppHandle, world: String, command: St
 #[tauri::command]
 pub(crate) async fn world_connect(app: tauri::AppHandle, world: String) -> Answer<serde_json::Value> {
     let base = profile::store(&app)?;
+    // Back in the one left last: it is not left any more.
+    if let Ok(mut left) = left().lock() {
+        if left.as_deref() == Some(world.as_str()) {
+            *left = None;
+        }
+    }
     if is_server_world(&base, &world) {
         world_call(app, world.clone(), "world_connect".into(), serde_json::json!({})).await?;
         return network::online_worlds(&base).into_iter().find(|w| w.world == world).map(|w| w.info).ok_or_else(|| AppError(UNAVAILABLE.into()));
@@ -618,7 +650,20 @@ pub(crate) async fn world_connect(app: tauri::AppHandle, world: String) -> Answe
 #[tauri::command]
 pub(crate) async fn world_disconnect(app: tauri::AppHandle, world: String) -> Answer<()> {
     let base = profile::store(&app)?;
-    close_session(&base, &world).await
+    // Left, it stays read while the app runs — opened again at once. One
+    // left behind at most: another one left before goes now.
+    let before = left().lock().map_err(AppError::from)?.replace(world.clone());
+    if let Some(before) = before.filter(|b| *b != world) {
+        close_session(&base, &before).await?;
+    }
+    Ok(())
+}
+
+/// The server world last left, still read — see `world_disconnect`.
+#[cfg(feature = "gui")]
+fn left() -> &'static Mutex<Option<String>> {
+    static LEFT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    LEFT.get_or_init(Default::default)
 }
 
 /// Sends what a command wrote; the records sent come back.
@@ -633,6 +678,7 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
     let revision = before.digest.clone();
     let result = async {
         let records = session.store.in_order(world, &added)?;
+        let total = records.len() + parts.len();
         let mut at = 0;
         while at < records.len() {
             let mut some = Vec::new();
@@ -650,16 +696,20 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
             }
             let reply = transport.ask(world, Ask::Commit { transaction: transaction.clone(), base: revision.clone(), records: some, parts: Vec::new(), finish: false }).await?;
             if reply != Reply::Staged { return Err(AppError(format!("{UNAVAILABLE} The server needs an update for online commands."))) }
+            progress(world, "sending", at, total);
         }
-        for names in parts.chunks(4) {
+        // Pictures some megabytes at a time.
+        for (n, names) in parts.chunks(PARTS_AT_ONCE).enumerate() {
             let give: Vec<_> = session.store.parts(world, names).into_iter().map(|(name, bytes)| (name, STANDARD.encode(bytes))).collect();
             if give.len() != names.len() { return Err(AppError("An online image could not be read.".into())) }
             if transport.ask(world, Ask::Commit { transaction: transaction.clone(), base: revision.clone(), records: Vec::new(), parts: give, finish: false }).await? != Reply::Staged {
                 return Err(AppError(UNAVAILABLE.into()));
             }
+            progress(world, "sending", records.len() + (n + 1) * PARTS_AT_ONCE, total);
         }
         finish(transport, world, &transaction, &revision, Vec::new()).await
     }.await;
+    progress(world, "sending", 0, 0);
     if result.is_err() {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(1), transport.ask(world, Ask::Abort { transaction })).await;
     }

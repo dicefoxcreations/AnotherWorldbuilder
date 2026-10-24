@@ -1367,6 +1367,24 @@ impl Journal {
         Ok(new)
     }
 
+    /// Records of one's own, many at once — an import: kept back and written
+    /// together at `end_batch`, one wait on the disk for all of them.
+    pub fn begin_batch(&mut self) {
+        if self.batch.is_none() {
+            self.batch = Some(Vec::new());
+        }
+    }
+
+    pub fn end_batch(&mut self) -> Result<()> {
+        let written = self.write_batch();
+        // What did not reach the disk is not kept.
+        if written.is_err() {
+            let _ = self.reload();
+        }
+        written?;
+        self.flush()
+    }
+
     /// Writes what was taken in together.
     fn write_batch(&mut self) -> Result<()> {
         let Some(batch) = self.batch.take() else { return Ok(()) };

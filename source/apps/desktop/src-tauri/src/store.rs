@@ -857,6 +857,18 @@ impl Store {
     }
 
     /// Works on the world's journal.
+    /// Many records of one's own at once, written together at the end — see
+    /// `Journal::begin_batch`. What `work` made before it failed is written too.
+    pub fn batched<T, E: From<StoreError>>(&self, world_id: &str, work: impl FnOnce() -> std::result::Result<T, E>) -> std::result::Result<T, E> {
+        self.with_journal(world_id, |journal| {
+            journal.begin_batch();
+            Ok(())
+        })?;
+        let done = work();
+        self.with_journal(world_id, |journal| journal.end_batch().map_err(|e| StoreError::Journal(e.to_string())))?;
+        done
+    }
+
     pub(crate) fn with_journal<T>(&self, world_id: &str, f: impl FnOnce(&mut Journal) -> Result<T>) -> Result<T> {
         let open = self.journal(world_id)?;
         let mut guard = open.lock().map_err(poisoned)?;
@@ -1768,6 +1780,7 @@ impl Store {
         let plain = self.with_images(world_id, &Plain::default(), &part.plain)?;
         let encrypted = self.is_encrypted(world_id)?;
         let mut ring = self.load_keyring(world_id)?;
+        let before = ring.to_json()?;
         let head = journal::new_head(
             &mut ring,
             article,
@@ -1781,7 +1794,11 @@ impl Store {
             about,
             encrypted,
         )?;
-        self.save_keyring(world_id, &ring)?;
+        // A new part mostly needs no new key: the ring, and every member's
+        // grant made from it, stay as they are.
+        if ring.to_json()? != before {
+            self.save_keyring(world_id, &ring)?;
+        }
         self.control(world_id, Item::Layer(head), session)?;
         Ok(layer)
     }

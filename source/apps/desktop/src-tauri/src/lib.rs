@@ -2270,6 +2270,7 @@ pub fn run() {
         // Runs after the plugin has restored things: first the remembered size
         // stands, then it is clamped into the usable area.
         .setup(|app| {
+            online::tell_progress_to(app.handle().clone());
             network::start(app.handle()).map_err(|e| std::io::Error::other(e.0))?;
             browser::start(app.handle());
             if let Some(w) = app.get_webview_window("main") {

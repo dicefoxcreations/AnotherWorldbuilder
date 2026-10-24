@@ -122,6 +122,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<{ world: string; error: string } | null>(null);
+  // Loading from or sending to a server, as far as it is — told by the native side.
+  const [transfer, setTransfer] = useState<Transfer | null>(null);
+  useEffect(() => {
+    const stop = listen<Transfer>("online-progress", (e) => setTransfer(e.payload.total > 0 ? e.payload : null));
+    return () => void stop.then((un) => un());
+  }, []);
   const openingRequest = useRef(0);
   const currentWorld = useRef(openWorld);
   currentWorld.current = openWorld;
@@ -639,10 +645,11 @@ export default function App() {
         </WorldDataContext.Provider>
       )}
     </div>
+    {transfer && !opening && transfer.world === openWorld && <div className="transfer-note" role="status">{transferText(transfer)}</div>}
     {(opening || blocked) && <div className="dialog-backdrop online-status" role="alertdialog" aria-modal="true" aria-labelledby="online-status-title">
       <section className="card narrow">
         <h2 id="online-status-title">{opening ? "Opening world …" : "Server world unavailable"}</h2>
-        <p>{opening ? "Confirming access and loading the current world." : blocked?.error.replace(/^\[online\]\s*/, "")}</p>
+        <p>{opening ? (transfer?.world === opening ? transferText(transfer) : "Confirming access and loading the current world.") : blocked?.error.replace(/^\[online\]\s*/, "")}</p>
         {!opening && <p>Editing is paused. Changes without a server acknowledgement are not confirmed saved. Reconnect to continue using this server world.</p>}
         <div className="line">
           {!opening && blocked && <button className="primary" onClick={() => void enter(blocked.world)}>Reconnect</button>}
@@ -706,4 +713,12 @@ function WorldDice({ world, children }: { world: WorldInfo | null; children: Rea
   ) : (
     <>{children}</>
   );
+}
+
+/** Loading from or sending to a server: `done` of `total`. */
+type Transfer = { world: string; what: "loading" | "sending"; done: number; total: number };
+
+function transferText(t: Transfer): string {
+  const share = Math.min(100, Math.floor((t.done * 100) / t.total));
+  return `${t.what === "sending" ? "Sending to the server" : "Loading from the server"} · ${share} %`;
 }
