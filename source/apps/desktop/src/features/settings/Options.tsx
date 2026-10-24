@@ -54,8 +54,8 @@ const AREAS = [
   { id: "network", icon: "🌐", name: "Network", group: "device" },
   { id: "browser", icon: "🧩", name: "Browser", group: "device" },
   { id: "storage", icon: "💾", name: "Storage", group: "device" },
-  { id: "updates", icon: "⬆", name: "Updates", group: "app" },
-  { id: "about", icon: "ℹ", name: "About", group: "app" },
+  { id: "updates", icon: "🔄", name: "Updates", group: "app" },
+  { id: "about", icon: "ℹ️", name: "About", group: "app" },
 ] as const;
 
 const GROUPS = { world: "This world", device: "This device", app: "App" } as const;
@@ -135,7 +135,7 @@ export function Options({
                 <span className="nav-icon">{b.icon}</span>
                 {b.name}
                 {b.id === "players" && due > 0 && <span className="badge">{due}</span>}
-                {b.id === "updates" && update.kind === "ready" && <span className="badge">↑</span>}
+                {b.id === "updates" && update.kind === "ready" && <span className="badge">1</span>}
               </button>
             </Fragment>
           ))}

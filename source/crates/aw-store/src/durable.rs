@@ -24,6 +24,34 @@ pub fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Waits until the files' bytes are on the disk. On Linux one wait for the
+/// whole file system (`syncfs`) instead of one per file: on a hard disk
+/// each of those costs a turn of the platter.
+fn sync_files<'a>(files: impl Iterator<Item = &'a std::fs::File>) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let mut files = files.peekable();
+        if let Some(first) = files.peek() {
+            // SAFETY: a valid open file descriptor, borrowed for the call.
+            if unsafe { libc::syncfs(first.as_raw_fd()) } == 0 {
+                return Ok(());
+            }
+        }
+        for file in files {
+            file.sync_all()?;
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        for file in files {
+            file.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
 pub fn sync_parent(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     std::fs::File::open(
@@ -54,9 +82,7 @@ pub fn write_all(files: &[(std::path::PathBuf, Vec<u8>)]) -> std::io::Result<()>
             file.write_all(bytes)?;
             written.push((file, path));
         }
-        for (file, _) in &written {
-            file.as_file().sync_all()?;
-        }
+        sync_files(written.iter().map(|(file, _)| file.as_file()))?;
         for (file, path) in written {
             file.persist(path).map_err(|e| e.error)?;
         }

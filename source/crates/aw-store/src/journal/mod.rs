@@ -988,6 +988,48 @@ pub struct Journal {
     epoch: String,
     /// The inventory's digest, as of (records, versions, arrivals).
     digest_cache: std::cell::RefCell<Option<((usize, usize, usize), String)>>,
+    /// Control records whose signature checked out on this device, by id —
+    /// an id is the hash of the bytes, so the same id is the same record and
+    /// need not be checked at every opening. Kept in the private folder.
+    checked: HashSet<[u8; 32]>,
+    /// Checked since the list was last written.
+    newly_checked: usize,
+}
+
+/// Reads and parses record files on every core — a big world has hundreds
+/// of thousands of them. What does not parse, or is too big, is left out.
+fn read_records(paths: &[PathBuf]) -> Result<Vec<(Vec<u8>, Record, u64)>> {
+    let read = |path: &PathBuf| -> std::io::Result<Option<(Vec<u8>, Record, u64)>> {
+        let meta = std::fs::metadata(path)?;
+        if meta.len() > MAX_RECORD as u64 {
+            return Ok(None);
+        }
+        let at = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let raw = std::fs::read(path)?;
+        Ok(serde_json::from_slice(&raw).ok().map(|record| (raw, record, at)))
+    };
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    if paths.len() < 256 || threads < 2 {
+        return Ok(paths.iter().map(read).collect::<std::io::Result<Vec<_>>>()?.into_iter().flatten().collect());
+    }
+    let chunk = paths.len().div_ceil(threads);
+    let pieces: Vec<std::io::Result<Vec<_>>> = std::thread::scope(|scope| {
+        let workers: Vec<_> = paths.chunks(chunk).map(|some| scope.spawn(move || some.iter().map(read).collect::<std::io::Result<Vec<_>>>())).collect();
+        workers.into_iter().map(|w| w.join().unwrap_or_else(|_| Err(std::io::Error::other("a reader failed")))).collect()
+    });
+    let mut out = Vec::with_capacity(paths.len());
+    for piece in pieces {
+        out.extend(piece?.into_iter().flatten());
+    }
+    Ok(out)
+}
+
+/// The list of checked control records, in the device's folder for the world.
+const CHECKED: &str = "checked.bin";
+
+/// A record id as its 32 bytes.
+fn id_key(id: &str) -> Option<[u8; 32]> {
+    hex::decode(id).ok()?.try_into().ok()
 }
 
 /// A name for one opening of a journal, unlike any before it.
@@ -1073,6 +1115,8 @@ impl Journal {
             arrivals: Vec::new(),
             epoch: epoch(),
             digest_cache: Default::default(),
+            checked: std::fs::read(private.join(CHECKED)).map(|raw| raw.chunks_exact(32).filter_map(|c| c.try_into().ok()).collect()).unwrap_or_default(),
+            newly_checked: 0,
         };
         journal.refresh()?;
         // Parts of deleted images leave the disk, too — unless an image here
@@ -1111,7 +1155,7 @@ impl Journal {
     /// of versions whose files are gone. Whatever does not check out is left
     /// lying and ignored.
     pub fn refresh(&mut self) -> Result<bool> {
-        let mut found = Vec::new();
+        let mut to_read: Vec<PathBuf> = Vec::new();
         let mut heads: Vec<(String, VersionHead)> = Vec::new();
         let mut present: HashSet<String> = HashSet::new();
         let full = self.full_scan.is_none_or(|at| at.elapsed() >= FULL_SCAN);
@@ -1157,18 +1201,7 @@ impl Journal {
                     }
                 }
                 self.read.insert(path.clone());
-                let meta = std::fs::metadata(&path)?;
-                if meta.len() > MAX_RECORD as u64 {
-                    continue;
-                }
-                let at = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
-                let raw = std::fs::read(&path)?;
-                found.push((raw, at));
+                to_read.push(path);
             }
             if let Some(stamp) = stamp {
                 self.listings.insert(folder, (stamp, listed));
@@ -1186,10 +1219,7 @@ impl Journal {
             self.reload()?;
             return Ok(true);
         }
-        let mut parsed: Vec<(Vec<u8>, Record, u64)> = found
-            .into_iter()
-            .filter_map(|(raw, at)| Some((raw.clone(), serde_json::from_slice(&raw).ok()?, at)))
-            .collect();
+        let mut parsed = read_records(&to_read)?;
         parsed.sort_by_key(|(_, r, _)| order(r));
         // What the game master deleted goes first — it is not taken in.
         for (raw, record, _) in &parsed {
@@ -1226,6 +1256,7 @@ impl Journal {
         self.indexed.retain(|id, _| present.contains(id));
         self.dirty |= self.indexed.len() != before;
         self.flush()?;
+        self.keep_checked();
         Ok(changed)
     }
 
@@ -1237,6 +1268,24 @@ impl Journal {
         }
         self.arrived.entry(id).or_insert(at);
         matches!(self.take(raw, record, false), Ok(Added::New(_)))
+    }
+
+    /// Writes down which control records checked out — once many did: a few
+    /// are checked again at the next opening, which costs little. Only those
+    /// still here.
+    fn keep_checked(&mut self) {
+        if self.newly_checked < 1000 {
+            return;
+        }
+        let mut bytes = Vec::with_capacity(self.controls.len() * 32);
+        for id in self.controls.keys() {
+            if let Some(k) = id_key(id).filter(|k| self.checked.contains(k)) {
+                bytes.extend_from_slice(&k);
+            }
+        }
+        if crate::durable::replace(&self.private.join(CHECKED), &bytes).is_ok() {
+            self.newly_checked = 0;
+        }
     }
 
     /// Writes the index down, if it changed.
@@ -1355,7 +1404,14 @@ impl Journal {
         };
         match record {
             Record::Control(control) => {
-                control.verify(&self.world)?;
+                let key = id_key(&id);
+                if !key.is_some_and(|k| self.checked.contains(&k)) {
+                    control.verify(&self.world)?;
+                    if let Some(k) = key {
+                        self.checked.insert(k);
+                        self.newly_checked += 1;
+                    }
+                }
                 self.waiting.remove(&id);
                 if write {
                     self.store(&id, &raw, &Record::Control(control.clone()))?;

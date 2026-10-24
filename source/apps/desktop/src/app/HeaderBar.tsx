@@ -202,7 +202,7 @@ export function HeaderBar({
           onClick={onOptions}
           title={waiting > 0 ? `${waiting} waiting for you — requests to join or changes to review` : update.kind === "ready" ? `Update ${update.version} — under Updates` : world ? "Options of this world" : "Settings"}
         >
-          ⚙{waiting > 0 ? <span className="badge">{waiting}</span> : update.kind === "ready" && <span className="badge">↑</span>}
+          ⚙{waiting > 0 ? <span className="badge">{waiting}</span> : update.kind === "ready" && <span className="badge">1</span>}
         </button>
 
         <div className="dropdown" ref={profileRef}>

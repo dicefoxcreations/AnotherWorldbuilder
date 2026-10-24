@@ -292,6 +292,7 @@ dependencies = [
  "fs2",
  "hex",
  "image",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
