@@ -314,7 +314,7 @@ impl Session {
         let me = self.store.load_identity()?;
         let mut info = serde_json::to_value(world_info(&self.store, &self.store.load_world_meta(world)?, me.id().as_str())?)?;
         info["online"] = true.into();
-        info["fleeting"] = (!self.copies).into();
+        info["fleeting"] = true.into();
         info["server"] = server.code().into();
         info["server_id"] = server.endpoint.clone().into();
         info["folder"] = "".into();
@@ -323,22 +323,10 @@ impl Session {
         Ok(info)
     }
 
+    /// A world on a server lies there and nowhere else — no copy on this
+    /// device, the GM's neither, whatever the world says about copies.
     fn keep_allowed_copy(&self, base: &Store, world: &str) -> Answer<()> {
-        let base = &base.for_sync();
-        if self.copies {
-            let have: HashSet<_> = base.inventory(world)?.into_iter().collect();
-            let missing: Vec<_> = self.store.inventory(world)?.into_iter().filter(|id| !have.contains(id)).collect();
-            for batch in missing.chunks(2000) {
-                base.receive(world, &self.store.records(world, batch)?)?;
-            }
-            let missing = base.missing_parts(world)?;
-            for batch in missing.chunks(16) {
-                base.take_parts(world, &self.store.parts(world, batch))?;
-            }
-        } else {
-            discard_working_copy(base, world)?;
-        }
-        Ok(())
+        discard_working_copy(&base.for_sync(), world)
     }
 }
 
@@ -507,7 +495,8 @@ pub(crate) async fn adopt_uploaded(base: &Store, world: &str, server: &Server) -
     let source = base.world_dir(world);
     let copies = base.copies(world)?;
     base.close(world);
-    if copies || std::fs::rename(&source, &target).is_err() {
+    // Moved, not copied: what was uploaded lies on the server now, not here.
+    if std::fs::rename(&source, &target).is_err() {
         copy_cache(&source, &target)?;
     }
     session.store.refresh_online_members(world)?;

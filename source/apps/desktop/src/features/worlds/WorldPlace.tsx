@@ -111,7 +111,7 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
       ? waiting
         ? "waits for the server's admin"
         : uploading ||
-          (checking ? `checking images ${checking[0].toLocaleString()} of ${checking[1].toLocaleString()}` : checked ? checkText(checked) : "") || (world.copies ? "online · local copy retained" : "online · no local copy, including for the GM")
+          (checking ? `checking images ${checking[0].toLocaleString()} of ${checking[1].toLocaleString()}` : checked ? checkText(checked) : "") || "online"
       : place.kind === "host"
         ? world.online || world.fleeting
           ? "worked on online"
@@ -177,7 +177,8 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
           </span>
         </label>
       )}
-      {world.isGm && <Copies world={world} onChanged={onChanged} onError={onError} />}
+      {/* A world on a server is there and nowhere else: no copies of it, the GM's neither. */}
+      {world.isGm && place.kind !== "server" && <Copies world={world} onChanged={onChanged} onError={onError} />}
       {moving && storage && (
         <MoveDialog world={world} place={place} storage={storage} servers={servers} onStorage={setStorage} onDone={onChanged} onClose={() => setMoving(false)} onError={onError} />
       )}
@@ -207,11 +208,9 @@ function Copies({ world, onChanged, onError }: { world: WorldInfo; onChanged: ()
     <label className={world.encrypted ? "switch-row" : "switch-row off"}>
       <input type="checkbox" checked={world.encrypted && world.copies} disabled={busy || !world.encrypted} onChange={(e) => void turn(e.target.checked)} />
       <span>
-        <strong>{world.server || world.serverId ? "Local copies" : "Copies for players"}</strong>
+        <strong>Copies for players</strong>
         <small className="small">
-          {world.server || world.serverId
-            ? world.copies ? "on · retain a copy on GM and player devices; this world still requires its server" : "off · no retained world data on GM or player devices"
-            : !world.encrypted ? "only for encrypted worlds · players work online" : world.copies ? "on · players keep a copy, offline too" : "off · players work online"}
+          {!world.encrypted ? "only for encrypted worlds · players work online" : world.copies ? "on · players keep a copy, offline too" : "off · players work online"}
         </small>
       </span>
     </label>

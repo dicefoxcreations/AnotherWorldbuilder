@@ -974,23 +974,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_explicitly_retained_gm_copy_is_still_not_a_server_fallback() {
+    async fn a_world_on_a_server_leaves_no_copy_even_where_copies_are_allowed() {
         let dir = tempfile::tempdir().unwrap();
         let gm = someone(dir.path(), "Marla");
         let keeper = keeper(dir.path(), &gm);
-        let (world, _) = world(&gm, "Eldermere");
+        let (world, article) = world(&gm, "Eldermere");
+        assert!(gm.store.copies(&world).unwrap(), "the world allows copies");
         swap(&keeper, &gm, &world);
         let server = on_server(&gm, &world);
         crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        assert!(gm.store.holds(&world));
+        assert!(!gm.store.holds(&world), "uploaded, it lies on the server only");
         let wire = online_wire(&keeper, &gm.me);
+        run_online(&gm.store, &world, &server, &wire, |cache| document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)).await.unwrap();
+        assert!(!gm.store.holds(&world), "working on it leaves nothing here");
         wire.alive.store(false, Ordering::SeqCst);
+        tokio::time::sleep(crate::online::FRESH).await;
         let refused = run_online(&gm.store, &world, &server, &wire, |_| {
-            panic!("having a copy grants no offline server access");
+            panic!("no server, no world");
             #[allow(unreachable_code)] Ok(())
         }).await;
         assert!(refused.is_err());
-        assert!(gm.store.holds(&world));
+        crate::online::close_session(&gm.store, &world).await.unwrap();
     }
 
     #[tokio::test]

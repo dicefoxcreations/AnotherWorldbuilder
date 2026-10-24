@@ -68,12 +68,12 @@ or with a port, `worlds.example.org:4001` – or the full code. The admin then s
 **Manage** at the server: which GMs may bring worlds, which worlds are closed, who is
 turned away. A GM brings a world with *Options → World → Where it lives → Move or copy …*.
 
-With 0.1.56, both the GM and players need the server to open or edit a server world.
-There is no automatic fallback to a local copy. For encrypted worlds, **Local copies**
-controls retained copies for both roles. When disabled, the app removes the retained
-world after the initial upload is complete and uses disposable session data. Identity
-and keys remain on the devices; the server cannot decrypt the world. Keep an explicit
-backup of the GM's world and keys. Update all apps and the server to 0.1.56 together.
+With 0.1.56, a world on a server lies there and nowhere else: GM and players open and
+edit it through the server, and no device keeps a copy of it — the upload moves the
+GM's world there. Without the server it stays closed. Identity and keys remain on the
+devices; the server cannot decrypt an encrypted world. Backups are the copies there
+are: the server's own, and one taken by hand. Update all apps and the server to 0.1.56
+together.
 
 **Backups.** The server backs up each world it holds by itself — daily, the last
 seven kept, until the world's GM changes it under *Options → World → Backups*. They lie
