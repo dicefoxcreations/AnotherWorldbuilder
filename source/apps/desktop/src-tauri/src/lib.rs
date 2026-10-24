@@ -2189,6 +2189,9 @@ pub fn run() {
         )
     } else { builder };
     builder.plugin(tauri_plugin_dialog::init())
+        // Updates from the releases, signed with the publisher's key.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // Runs after the plugin has restored things: first the remembered size
         // stands, then it is clamped into the usable area.
         .setup(|app| {

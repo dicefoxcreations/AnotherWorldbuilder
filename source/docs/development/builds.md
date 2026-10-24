@@ -86,6 +86,27 @@ lie under `build/packaging/`.
 
 Without an explicit target folder, add `--host-output` to the collector. For an already compiled portable Windows EXE the call is `node tools/build/collect-release.mjs x86_64-pc-windows-msvc --portable`.
 
+## Updates
+
+The app looks for a newer version once at the start (main window, released builds only; *Options → About → Look for updates at the start* switches it off) and on *Look now*. It asks `latest.json` of the newest GitHub release (`plugins.updater.endpoints`). A ⬆ in the header bar installs it and restarts. Only packages signed with the publisher's key install; its public half is `plugins.updater.pubkey` in `tauri.conf.json`.
+
+What updates itself: the AppImage on Linux and the installed Windows app (NSIS installer, `-setup.exe`, for the current user). The DEB and a loose EXE do not; their users download the new version.
+
+The private key lies outside the project, in `~/.tauri/anotherworldbuilder.key`, its password in `~/.tauri/anotherworldbuilder.password`; both belong in the publisher's password manager too — without the key no update can be published any more. `tools/build/desktop.mjs` signs with it when it is there (`TAURI_SIGNING_PRIVATE_KEY`), otherwise it builds without update files. The collector takes the `.sig` files along, and
+
+```sh
+node tools/build/update-manifest.mjs "What is new"
+```
+
+writes `programs/latest.json` from both platforms' signed packages. It goes into the release with the packages, which must keep their names.
+
+The Windows installer is built on Linux too, with NSIS (`makensis`, from the AUR on Arch):
+
+```sh
+node tools/build/desktop.mjs --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+node tools/build/collect-release.mjs x86_64-pc-windows-msvc
+```
+
 AppImage packaging extracts its build tools without a FUSE mount. Stripping the system libraries afterwards is switched off, because the bundled older binutils do not understand current RELR relocations. These settings are part of the shared build script; they change no campaign data.
 
 The C runtime of the portable Windows build made here is linked statically. For private builds that are not signed yet, Windows may show a publisher/SmartScreen prompt. Code signing and public release are separate release steps; this pipeline uploads nothing.

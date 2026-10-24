@@ -36,6 +36,26 @@
           "/usr/share/doc/anotherworldbuilder/THIRD-PARTY-NOTICES.txt": "../../../build/public/licenses.txt"
         }
       }
+    },
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

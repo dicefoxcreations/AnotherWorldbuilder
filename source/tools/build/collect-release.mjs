@@ -22,7 +22,11 @@ const input = path.join(release, "bundle");
 // Only the newest: older versions live in the history of the repository.
 const output = path.join(programs, platform);
 // Only this version's packages — older builds stay behind in the bundle folder.
-const isPackage = (name) => name.includes(`_${version}_`) && expected.some(ext => name.endsWith(ext)) && (target !== "x86_64-pc-windows-msvc" || name.endsWith("-setup.exe"));
+// With their update signatures (.sig), where the build made them.
+const isPackage = (name) => {
+  const bare = name.replace(/\.sig$/, "");
+  return bare.includes(`_${version}_`) && expected.some(ext => bare.endsWith(ext)) && (target !== "x86_64-pc-windows-msvc" || bare.endsWith("-setup.exe"));
+};
 async function files(folder, wanted = isPackage) {
   const found = [];
   for (const entry of await readdir(folder, { withFileTypes: true })) {
@@ -36,6 +40,7 @@ const bundles = portable ? [path.join(release, "aw-desktop.exe")] : await files(
 for (const extension of expected) {
   if (!bundles.some(file => file.endsWith(extension))) throw new Error(`Missing package: ${extension}`);
 }
+const signed = bundles.filter(file => file.endsWith(".sig"));
 const manifest = [];
 // Probe tools before creating output; staging prevents incomplete final folders.
 const rust = execFileSync("rustc", ["--version"], { encoding: "utf8" }).trim();
@@ -43,7 +48,7 @@ await mkdir(path.dirname(output), { recursive: true });
 const stagingRoot = path.join(root, "build", "packaging");
 await mkdir(stagingRoot, { recursive: true });
 const staging = await mkdtemp(path.join(stagingRoot, platform + ".building-"));
-for (const file of bundles.sort()) {
+for (const file of bundles.filter(f => !f.endsWith(".sig")).sort()) {
   const bytes = await readFile(file);
   const name = portable ? "AnotherWorldbuilder.exe" : path.basename(file);
   await copyFile(file, path.join(staging, name));
@@ -54,6 +59,7 @@ for (const file of bundles.sort()) {
 const notices = path.join(root, "build", "public", "licenses.txt");
 try { await access(notices); } catch { throw new Error("Missing build/public/licenses.txt — build with tools/build/desktop.mjs"); }
 await copyFile(notices, path.join(staging, "THIRD-PARTY-NOTICES.txt"));
+for (const file of signed) await copyFile(file, path.join(staging, path.basename(file)));
 // The templates are published beside the programs (../templates), never
 // with content: what a library holds stays in its owner's worlds.
 for (const file of await files(templates, (name) => name === "package.json")) {
