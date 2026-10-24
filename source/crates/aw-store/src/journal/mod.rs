@@ -280,6 +280,14 @@ pub enum Item {
     /// what a server does for the players of an unencrypted world it holds.
     /// By the ids of the servers' identities.
     Hosts { ids: Vec<String> },
+    /// Whether a server names the world to whoever asks — without the record
+    /// it does not: only its GM, its members and those the GM let in ahead of
+    /// time by their id (`expected`) learn of it there and may ask to join.
+    Listing {
+        listed: bool,
+        #[serde(default)]
+        expected: Vec<String>,
+    },
 }
 
 impl Item {
@@ -305,6 +313,7 @@ impl Item {
             Item::Encryption { .. } => "encryption".into(),
             Item::Copies { .. } => "copies".into(),
             Item::Hosts { .. } => "hosts".into(),
+            Item::Listing { .. } => "listing".into(),
         }
     }
 }
@@ -1901,6 +1910,19 @@ impl Journal {
     pub fn granted_members(&self) -> Vec<IdentityPublic> {
         self.latest.keys().filter_map(|key| key.strip_prefix("grant "))
             .filter_map(|id| self.grant(id).map(|(member, _)| member.clone())).collect()
+    }
+
+    /// Whether a server names the world to whoever asks — not unless the GM said so.
+    pub fn on_the_list(&self) -> bool {
+        matches!(self.item("listing").map(|c| &c.item), Some(Item::Listing { listed: true, .. }))
+    }
+
+    /// The ids the GM let in ahead of time, as a server may know them.
+    pub fn expected(&self) -> Vec<String> {
+        match self.item("listing").map(|c| &c.item) {
+            Some(Item::Listing { expected, .. }) => expected.clone(),
+            _ => Vec::new(),
+        }
     }
 
     /// How many versions of each document stay.

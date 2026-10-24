@@ -78,6 +78,8 @@ export type WorldInfo = {
   serverId?: string;
   /** The GM's: offered to players over the network. */
   offered: boolean;
+  /** Named on its server to everyone who asks — else only to its GM and members. */
+  listed: boolean;
   /** The dice the world rolls with, by sides — empty for the usual set. */
   dice: number[];
   /** How the world counts its days. */
@@ -530,6 +532,7 @@ const toWorld = (r: Raw): WorldInfo => ({
   server: (r.server as string | undefined) ?? "",
   serverId: (r.server_id as string | undefined) ?? "",
   offered: !!r.offered,
+  listed: !!r.listed,
   online: !!r.online || !!r.server_id || !!r.server,
   dice: (r.dice as number[] | undefined) ?? [],
   calendar: (r.calendar as WorldCalendar | undefined) ?? DEFAULT_CALENDAR,
@@ -1400,6 +1403,7 @@ export const api = {
   /** Sets how many versions of each document stay — the GM's. */
   calendarSet: async (world: string, calendar: WorldCalendar) => toWorld(await invoke<Raw>("calendar_set", { world, calendar })),
   worldVersionsSet: async (world: string, max: number) => toWorld(await invoke<Raw>("world_versions_set", { world, max })),
+  worldListedSet: async (world: string, listed: boolean) => toWorld(await invoke<Raw>("world_listed_set", { world, listed })),
   /** Lets go of what newer records replaced — how many went. */
   worldTidy: (world: string) => invoke<number>("world_tidy", { world }),
   /** Encrypts the world or opens it — the GM's. */

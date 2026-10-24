@@ -1328,6 +1328,11 @@ pub(crate) fn take_requests(store: &Store, world: &str, asking: Vec<IdentityPubl
     let mut requests = store.load_requests(world)?;
     let before = requests.len();
     for who in asking {
+        // Let in ahead of time by their id: in at once, as on the network.
+        if who.is_genuine() && meta.member(who.id.as_str()).is_none() && meta.invited.iter().any(|i| i == who.id.as_str()) {
+            crate::admit(store, world, who, Vec::new())?;
+            continue;
+        }
         if who.is_genuine() && meta.member(who.id.as_str()).is_none() && !requests.iter().any(|r| r.identity.id == who.id) {
             requests.push(JoinRequest { identity: who, at: now() });
         }

@@ -136,6 +136,8 @@ pub struct WorldInfo {
     pub offered: bool,
     /// The dice the world rolls with, by sides — empty for the usual set.
     pub dice: Vec<u32>,
+    /// A server names it to everyone who asks — else only to its GM and members.
+    pub listed: bool,
     /// How the world counts its days.
     pub calendar: WorldCalendar,
 }
@@ -483,6 +485,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         server_id: store.load_network()?.homes.get(&id).cloned().unwrap_or_default(),
         offered: is_gm && store.load_network()?.shared.contains(&id),
         dice: store.dice(&id)?,
+        listed: store.on_the_list(&id)?,
         waiting: store.waiting(&id)?.len(),
         calendar: meta.calendar.clone(),
         id,
@@ -1105,6 +1108,18 @@ fn app_restart(app: tauri::AppHandle) {
         }
     }
     app.restart();
+}
+
+#[cfg(feature = "gui")]
+/// Whether the world's server names it to everyone who asks — the GM's.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+fn world_listed_set(app: tauri::AppHandle, world: String, listed: bool) -> Answer<WorldInfo> {
+    let store = store(&app)?;
+    if !store.is_gm(&world) {
+        return Err(AppError("Only the GM decides who sees the world on its server.".into()));
+    }
+    store.set_listed(&world, listed)?;
+    world_info(&store, &store.load_world_meta(&world)?, store.load_identity()?.id().as_str())
 }
 
 #[cfg(feature = "gui")]
@@ -2383,6 +2398,7 @@ pub fn run() {
             document::version_delete,
             world_versions_set,
             world_tidy,
+            world_listed_set,
             app_restart,
             world_dice_set,
             world_encryption_set,

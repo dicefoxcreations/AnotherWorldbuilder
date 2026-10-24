@@ -1067,6 +1067,12 @@ impl Store {
                 "",
             )?;
         }
+        // Those let in ahead of time, where a server can see them: it names
+        // the world to them and lets them ask.
+        let (listed, expected) = self.with_journal(&id, |journal| Ok((journal.on_the_list(), journal.expected())))?;
+        if expected != meta.invited {
+            self.control(&id, Item::Listing { listed, expected: meta.invited.clone() }, "")?;
+        }
         self.regrant(&id)
     }
 
@@ -1140,6 +1146,22 @@ impl Store {
             return Ok(None);
         }
         self.with_journal(world_id, |journal| Ok(journal.since(epoch, at)))
+    }
+
+    /// Whether a server names the world to everyone — see `Item::Listing`.
+    pub fn on_the_list(&self, world_id: &str) -> Result<bool> {
+        self.with_journal(world_id, |journal| Ok(journal.on_the_list()))
+    }
+
+    /// Named to everyone on its server, or not — the GM's.
+    pub fn set_listed(&self, world_id: &str, listed: bool) -> Result<()> {
+        let expected = self.load_local(world_id)?.invited;
+        self.control(world_id, Item::Listing { listed, expected }, "")
+    }
+
+    /// Whether a server lets `id` ask: someone the GM let in ahead of time.
+    pub fn expects(&self, world_id: &str, id: &str) -> Result<bool> {
+        self.with_journal(world_id, |journal| Ok(journal.expected().iter().any(|e| e == id)))
     }
 
     /// Whether the world's journal is read and kept in memory already.

@@ -83,6 +83,9 @@ struct Session {
     prepared: bool,
     /// Records a command brought that the open world has not been told of.
     untold: bool,
+    /// Who asked to join, as the server told the GM — taken in with the next
+    /// command or poll (`answer_asking`).
+    requests: Vec<aw_crypto::IdentityPublic>,
     /// Pictures fetched since the open world last redrew for them, and when it did.
     pictures: usize,
     pictures_shown: std::time::Instant,
@@ -138,7 +141,7 @@ impl Session {
         std::fs::create_dir_all(store.worlds_dir())?;
         copy_private(base, &store, world)?;
         Ok(Self { world: world.into(), store, _temporary: temporary, endpoint: endpoint.into(), copies: false,
-                  synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false, untold: false,
+                  synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false, untold: false, requests: Vec::new(),
                   pictures: 0, pictures_shown: std::time::Instant::now() })
     }
 
@@ -253,8 +256,9 @@ impl Session {
             self.store.view_keys(world, &me).map_err(|e| AppError(format!("[online] {e}")))?;
             self.prepared = true;
         }
+        // Taken with what follows, so what they bring is sent with it.
         if !requests.is_empty() && self.store.is_gm(world) {
-            network::take_requests(&self.store, world, requests)?;
+            self.requests = requests;
         }
         Ok(came)
     }
@@ -424,7 +428,7 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
             if std::mem::take(&mut session.untold) && !brought {
                 return Ok(true);
             }
-            if !brought {
+            if !brought && session.requests.is_empty() {
                 // Pictures that came show now and then, and once all are here.
                 let all = session.store.missing_parts(&world)?.is_empty();
                 let due = session.pictures_shown.elapsed() >= PICTURES_SHOWN || all;
@@ -437,6 +441,7 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
             }
             let before = Before::take(&session.store, &world)?;
             crate::answer_proposals(&session.store, &world)?;
+            answer_asking(session, &world)?;
             if before.wrote(&session.store, &world)? {
                 let added = publish(session, base, &world, &transport, &before).await?;
                 session.confirmed.extend(added);
@@ -661,6 +666,17 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
     result.map(|_| added)
 }
 
+/// Who asked to join: kept for the GM to decide — or, let in ahead of time
+/// by their id, taken in at once; their grant goes to the server with what
+/// follows.
+fn answer_asking(session: &mut Session, world: &str) -> Answer<()> {
+    let asking = std::mem::take(&mut session.requests);
+    if asking.is_empty() {
+        return Ok(());
+    }
+    network::take_requests(&session.store, world, asking)
+}
+
 /// What a session held before a command — to tell what the command wrote.
 struct Before {
     digest: String,
@@ -722,8 +738,9 @@ where T: Transport, F: FnOnce(Store) -> Fut, Fut: Future<Output = Answer<R>> {
         }
     }
     let before = Before::take(&session.store, world)?;
-    // What players asked to be made goes with this command.
+    // What players asked to be made, and who asked to join, go with this command.
     if changed { crate::answer_proposals(&session.store, world)?; }
+    answer_asking(session, world)?;
     let result = operation(session.store.clone()).await;
     let wrote = before.wrote(&session.store, world)?;
     let sent = match (&result, wrote) {

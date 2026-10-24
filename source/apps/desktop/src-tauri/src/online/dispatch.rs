@@ -32,6 +32,7 @@ pub(super) async fn run(app: tauri::AppHandle, store: Store, world: &str, comman
                     "world_moderation_set" => serde_json::to_value(crate::world_moderation_set(app.clone(), world.to_string(), argument(args, "on")?)?)?,
                     "world_versions_set" => serde_json::to_value(crate::world_versions_set(app.clone(), world.to_string(), argument(args, "max")?)?)?,
                     "world_tidy" => serde_json::to_value(crate::world_tidy(app.clone(), world.to_string())?)?,
+                    "world_listed_set" => serde_json::to_value(crate::world_listed_set(app.clone(), world.to_string(), argument(args, "listed")?)?)?,
                     "world_switch_progress" => serde_json::to_value(crate::world_switch_progress(app.clone(), world.to_string())?)?,
                     "world_readable_set" => serde_json::to_value(crate::world_readable_set(app.clone(), world.to_string(), argument(args, "on")?)?)?,
                     "world_encryption_set" => serde_json::to_value(crate::world_encryption_set(app.clone(), world.to_string(), argument(args, "on")?)?)?,

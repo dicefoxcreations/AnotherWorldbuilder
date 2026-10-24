@@ -536,7 +536,8 @@ impl Journal {
                 | Item::Navigation { .. }
                 | Item::Encryption { .. }
                 | Item::Copies { .. }
-                | Item::Hosts { .. } => !current.contains(id),
+                | Item::Hosts { .. }
+                | Item::Listing { .. } => !current.contains(id),
                 Item::Verdict { versions, keys, .. } => {
                     versions.iter().all(|v| !self.versions.contains_key(v)) && keys.keys().all(|b| !blocks.contains(b))
                 }

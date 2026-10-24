@@ -239,6 +239,9 @@ impl Drop for Writing<'_> {
 }
 
 /// Whether an ask brings records or image parts along.
+/// Requests to join one world may wait at once: more are not taken.
+const MAX_REQUESTS: usize = 50;
+
 /// How long a write waits for the one before it.
 const WRITE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -340,12 +343,23 @@ impl Keeper {
     }
 
     /// The worlds held and open: name, icon, GM.
-    fn offers(&self) -> Answer<Vec<Offer>> {
+    /// The worlds named to whoever asks — `id`: also those they are GM or a
+    /// member of, all of them for the admin; none: only those on the list.
+    fn offers(&self, id: Option<&str>) -> Answer<Vec<Offer>> {
         let closed: Vec<String> = self.book()?.closed.keys().cloned().collect();
         let mut out = Vec::new();
         for meta in self.store.list_worlds()? {
             let world = meta.public.world_id.to_string();
             if closed.contains(&world) {
+                continue;
+            }
+            let theirs = id.is_some_and(|id| {
+                id == self.admin
+                    || self.store.gm_of(&world).ok().flatten().as_deref() == Some(id)
+                    || self.store.has_grant(&world, id).unwrap_or(false)
+                    || self.store.expects(&world, id).unwrap_or(false)
+            });
+            if !theirs && !self.store.on_the_list(&world).unwrap_or(false) {
                 continue;
             }
             let gm = self.known(&world)?.gm;
@@ -364,7 +378,7 @@ impl Keeper {
             Ask::Worlds => {
                 let asked = self.book()?.asking.contains(&id);
                 return Ok(Reply::Worlds {
-                    worlds: self.offers()?,
+                    worlds: self.offers(Some(&id))?,
                     host: Some(self.me.clone()),
                     admin: id == self.admin,
                     may_bring: self.may_bring(&id)?,
@@ -448,18 +462,24 @@ impl Keeper {
             }
             return Ok(reply);
         }
-        // A member by the grant the GM wrote; anyone else may ask.
+        // A member by the grant the GM wrote. Anyone else may ask to join a
+        // world on the list; one that is not is as if it were not here — its
+        // GM adds a new player by their id.
         if !store.has_grant(world, &id)? {
-            return Ok(match ask {
-                Ask::Join => {
-                    let mut requests = store.load_requests(world)?;
-                    if who.is_genuine() && !requests.iter().any(|r| r.identity.id == who.id) {
-                        requests.push(JoinRequest { identity: who.clone(), at: network::now() });
-                        store.save_requests(world, &requests)?;
-                    }
-                    Reply::Requested
+            let listed = store.on_the_list(world)?;
+            let may_ask = listed || store.expects(world, &id)?;
+            return Ok(if may_ask && matches!(ask, Ask::Join) {
+                let mut requests = store.load_requests(world)?;
+                if who.is_genuine() && !requests.iter().any(|r| r.identity.id == who.id) && requests.len() < MAX_REQUESTS {
+                    requests.push(JoinRequest { identity: who.clone(), at: network::now() });
+                    store.save_requests(world, &requests)?;
                 }
-                _ => Reply::NotMember,
+                Reply::Requested
+            } else if may_ask || store.load_requests(world)?.iter().any(|r| r.identity.id == who.id) {
+                // Whoever asked already knows of it, and waits for the GM.
+                Reply::NotMember
+            } else {
+                Reply::NotOffered
             });
         }
         // Unencrypted: online, each member with their view and rights.
@@ -659,7 +679,7 @@ impl Keeper {
 
 impl Host for Keeper {
     fn offers(&self) -> Vec<Offer> {
-        Keeper::offers(self).unwrap_or_default()
+        Keeper::offers(self, None).unwrap_or_default()
     }
     /// Every world: one not here yet may be brought.
     fn serves(&self, _world: &str) -> bool {
@@ -1135,6 +1155,36 @@ mod tests {
         crate::online::close_session(&gm.store, &world).await.unwrap();
     }
 
+    #[test]
+    fn a_world_not_listed_shows_itself_to_the_id_its_gm_let_in_and_nobody_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let (marla, bob, eve) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"), someone(dir.path(), "Eve"));
+        let keeper = keeper(dir.path(), &marla);
+        let (world, _) = world(&marla, "Eldermere");
+        // The GM lets Bob in ahead of time, by his id alone.
+        let mut meta = marla.store.load_world_meta(&world).unwrap();
+        meta.invited.push(bob.me.id().to_string());
+        marla.store.save_world_meta(&meta).unwrap();
+        swap(&keeper, &marla, &world);
+
+        let named = |who: &Someone| {
+            let Reply::Worlds { worlds, .. } = keeper.answer("", &who.me.public(), Ask::Worlds) else { panic!() };
+            worlds.into_iter().map(|w| w.name).collect::<Vec<_>>()
+        };
+        assert_eq!(named(&bob), vec!["Eldermere"]);
+        assert!(named(&eve).is_empty(), "nobody else learns of it");
+        assert_eq!(keeper.answer(&world, &eve.me.public(), Ask::Join), Reply::NotOffered);
+        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::Requested);
+
+        // The GM's device takes him in by itself; the server passes the world on.
+        let Reply::Digest { requests, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
+        crate::network::take_requests(&marla.store, &world, requests).unwrap();
+        assert!(marla.store.load_world_meta(&world).unwrap().member(bob.me.id().as_str()).is_some());
+        swap(&keeper, &marla, &world);
+        assert!(matches!(swap(&keeper, &bob, &world), Reply::Records { .. }));
+        assert!(named(&eve).is_empty());
+    }
+
     #[tokio::test]
     async fn a_save_while_someone_else_writes_waits_its_turn() {
         let dir = tempfile::tempdir().unwrap();
@@ -1310,7 +1360,7 @@ mod tests {
         there.sort();
         here.sort();
         assert_eq!(there, here);
-        assert_eq!(keeper.offers().unwrap().iter().map(|o| o.gm.clone()).collect::<Vec<_>>(), vec!["Marla"]);
+        assert_eq!(keeper.offers(Some(marla.me.id().as_str())).unwrap().iter().map(|o| o.gm.clone()).collect::<Vec<_>>(), vec!["Marla"]);
 
         // Being written: reading goes on; another write waits a moment, then
         // hears busy. The world is listed as last known.
@@ -1371,6 +1421,8 @@ mod tests {
         let (marla, olaf, eve) = (someone(dir.path(), "Marla"), someone(dir.path(), "Olaf"), someone(dir.path(), "Eve"));
         let keeper = keeper(dir.path(), &marla);
         let (eldermere, _) = world(&marla, "Eldermere");
+        // Named to everyone who asks the server — Thule is not.
+        marla.store.set_listed(&eldermere, true).unwrap();
         let (thule, _) = world(&olaf, "Thule");
 
         // The admin brings theirs; another GM waits for the admin.
@@ -1457,7 +1509,13 @@ mod tests {
         marla.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
         swap(&keeper, &marla, &world);
 
-        // Asked through the server, decided by the GM.
+        // Not on the list: to a stranger it is not there at all.
+        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::NotOffered);
+        let Reply::Worlds { worlds, .. } = keeper.answer("", &bob.me.public(), Ask::Worlds) else { panic!() };
+        assert!(worlds.is_empty(), "not named to a stranger");
+        // On the list: asked through the server, decided by the GM.
+        marla.store.set_listed(&world, true).unwrap();
+        swap(&keeper, &marla, &world);
         assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::Requested);
         assert_eq!(swap(&keeper, &bob, &world), Reply::NotMember);
         let Reply::Digest { requests, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
@@ -1470,7 +1528,7 @@ mod tests {
         assert!(bob.store.holds(&world) && bob.store.is_fleeting(&world));
         let seen = titles(&bob, &world);
         assert!(seen.contains(&"Rumours".to_string()) && !seen.contains(&"Truth".to_string()), "{seen:?}");
-        assert_eq!(swap(&keeper, &eve, &world), Reply::NotMember);
+        assert_eq!(swap(&keeper, &eve, &world), Reply::NotMember, "on the list, a stranger may ask");
 
         // With copies, he keeps it; the next start does not take it.
         marla.store.control(&world, aw_store::journal::Item::Copies { players: true }, "").unwrap();
