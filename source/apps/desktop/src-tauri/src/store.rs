@@ -1673,6 +1673,12 @@ impl Store {
         // The first time in this run: what was built at an earlier start, as
         // far as nothing it hangs on changed since.
         let mut earlier = if changed.is_none() { self.read_projection(world_id) } else { HashMap::new() };
+        // Nothing built before — a world opened the first time, a session
+        // read from its server: every document is opened, on every core.
+        if changed.is_none() && earlier.is_empty() {
+            let parts = guard.journal.all_parts();
+            guard.journal.open_many(&parts);
+        }
         let mut out = Vec::new();
         let mut built = 0;
         let mut prints = BTreeMap::new();

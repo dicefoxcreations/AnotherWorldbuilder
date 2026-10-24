@@ -2276,6 +2276,48 @@ impl Journal {
         self.opened.get_mut(&key)
     }
 
+    /// Opens many layers at once — what a first look at every document needs,
+    /// where nothing was built before. The costly part — keys, decryption,
+    /// the document's start — on every core; what was written since is taken
+    /// in one after the other, as `open_layer` does.
+    pub fn open_many(&mut self, wanted: &[(LayerId, u32)]) {
+        let Some(keys) = self.keys.clone() else { return };
+        let heads: Vec<((LayerId, u32), LayerHead)> = wanted
+            .iter()
+            .filter(|key| !self.opened.contains_key(key))
+            .filter_map(|&(layer, generation)| Some(((layer, generation), self.head_of(layer, generation)?.clone())))
+            .collect();
+        let open = |head: &LayerHead| -> Option<(LayerDoc, DataKey, Access, HashSet<ChangeHash>)> {
+            let dek = head.data_key(&keys).ok()??;
+            let access: Access = serde_json::from_slice(&dek.open(&head.access).ok()?).ok()?;
+            let genesis = dek.open(&head.genesis).ok()?;
+            let mut doc = LayerDoc::load(&genesis).ok()?;
+            let genesis = doc.doc.get_changes(&[]).iter().map(|c| c.hash()).collect();
+            Some((doc, dek, access, genesis))
+        };
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let chunk = heads.len().div_ceil(threads).max(1);
+        let made: Vec<((LayerId, u32), Option<(LayerDoc, DataKey, Access, HashSet<ChangeHash>)>)> = std::thread::scope(|scope| {
+            let workers: Vec<_> = heads
+                .chunks(chunk)
+                .map(|some| scope.spawn(move || some.iter().map(|(key, head)| (*key, open(head))).collect::<Vec<_>>()))
+                .collect();
+            workers.into_iter().flat_map(|w| w.join().unwrap_or_default()).collect()
+        });
+        for (key, opened) in made {
+            let Some((doc, dek, access, genesis)) = opened else { continue };
+            self.opened.insert(key, Opened { doc, dek, access, genesis, applied: HashMap::new(), visible: None, index: None });
+            for id in self.to_apply(key) {
+                self.apply_to_open(key, &id);
+            }
+        }
+    }
+
+    /// The layers of every document as they stand — for `open_many`.
+    pub fn all_parts(&self) -> Vec<(LayerId, u32)> {
+        self.article_ids().into_iter().flat_map(|(article, ..)| self.parts_of(article)).collect()
+    }
+
     /// What opening a layer takes in: every draft, and of the versions only
     /// the newest — each holds what came before — where their blocks checked
     /// out here before. Otherwise every version, in order, so each is checked
