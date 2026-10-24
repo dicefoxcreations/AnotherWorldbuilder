@@ -18,11 +18,15 @@ const out = path.join(root, "build/public/licenses.txt");
 
 let rust;
 try {
-  rust = execFileSync(
+  // Into a file, not through a pipe: under PowerShell cargo-about refuses that.
+  const rustFile = path.join(root, "build", "rust-notices.txt");
+  fs.mkdirSync(path.dirname(rustFile), { recursive: true });
+  execFileSync(
     "cargo",
-    ["about", "generate", "-c", "tools/licenses/about.toml", "-m", "apps/desktop/src-tauri/Cargo.toml", "tools/licenses/notices.hbs"],
-    { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "inherit"] },
+    ["about", "generate", "-c", "tools/licenses/about.toml", "-m", "apps/desktop/src-tauri/Cargo.toml", "-o", rustFile, "tools/licenses/notices.hbs"],
+    { cwd: root, stdio: ["ignore", "inherit", "inherit"] },
   );
+  rust = fs.readFileSync(rustFile, "utf8");
 } catch (e) {
   console.error("Third-party notices: `cargo about` failed — is it installed (`cargo install cargo-about --features cli`), and are all licenses accepted in tools/licenses/about.toml?");
   process.exit(1);

@@ -100,12 +100,16 @@ node tools/build/update-manifest.mjs "What is new"
 
 writes `programs/latest.json` from both platforms' signed packages. It goes into the release with the packages, which must keep their names.
 
-The Windows installer is built on Linux too, with NSIS (`makensis`, from the AUR on Arch):
+The Windows installer is built on Windows, by the workflow `.github/workflows/windows-installer.yml` (started by hand with a tag or commit) — unsigned. It is signed here, where the key is:
 
 ```sh
-node tools/build/desktop.mjs --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+gh workflow run windows-installer.yml -f ref=v0.1.57
+gh run download <run> -n windows-installer -D build/cargo/x86_64-pc-windows-msvc/release/bundle/nsis
+node tools/build/sign-update.mjs build/cargo/x86_64-pc-windows-msvc/release/bundle/nsis/AnotherWorldbuilder_0.1.57_x64-setup.exe
 node tools/build/collect-release.mjs x86_64-pc-windows-msvc
 ```
+
+(The NSIS of Arch's AUR makes 64-bit installers only, and Tauri's installer needs its 32-bit plugin.)
 
 AppImage packaging extracts its build tools without a FUSE mount. Stripping the system libraries afterwards is switched off, because the bundled older binutils do not understand current RELR relocations. These settings are part of the shared build script; they change no campaign data.
 
