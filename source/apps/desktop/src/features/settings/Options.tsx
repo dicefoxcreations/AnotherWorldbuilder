@@ -30,6 +30,8 @@ import { CalendarArea } from "./CalendarArea";
 import { AppearanceArea } from "./Appearance";
 import { DiceArea, SavedRolls } from "./DiceArea";
 import { AboutArea } from "./AboutArea";
+import { UpdatesArea } from "./UpdatesArea";
+import { useUpdates } from "../../shared/Updates";
 import { BrowserArea } from "./BrowserArea";
 import { USUAL_DICE } from "../dice/DiceTray";
 import { TransferArea } from "./Transfer";
@@ -52,6 +54,7 @@ const AREAS = [
   { id: "network", icon: "🌐", name: "Network", group: "device" },
   { id: "browser", icon: "🧩", name: "Browser", group: "device" },
   { id: "storage", icon: "💾", name: "Storage", group: "device" },
+  { id: "updates", icon: "⬆", name: "Updates", group: "app" },
   { id: "about", icon: "ℹ", name: "About", group: "app" },
 ] as const;
 
@@ -93,6 +96,7 @@ export function Options({
 }) {
   // What waits for the GM comes first.
   const due = world ? world.requests + (world.isGm ? world.waiting : 0) : 0;
+  const update = useUpdates();
   const [area, setArea] = useState<AreaId>(world ? (due > 0 ? "players" : "world") : "network");
   // Without a world only what belongs to the device as a whole.
   // Outside a world only what belongs to this device.
@@ -131,6 +135,7 @@ export function Options({
                 <span className="nav-icon">{b.icon}</span>
                 {b.name}
                 {b.id === "players" && due > 0 && <span className="badge">{due}</span>}
+                {b.id === "updates" && update.kind === "ready" && <span className="badge">↑</span>}
               </button>
             </Fragment>
           ))}
@@ -156,6 +161,7 @@ export function Options({
               rolls={world ? <SavedRolls world={world} onError={onError} /> : undefined}
             />
           )}
+          {area === "updates" && <UpdatesArea />}
           {area === "about" && <AboutArea />}
           {world && area === "types" && (
             <TypesArea

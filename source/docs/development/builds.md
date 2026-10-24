@@ -88,7 +88,7 @@ Without an explicit target folder, add `--host-output` to the collector. For an 
 
 ## Updates
 
-The app looks for a newer version once at the start (main window, released builds only; *Options → About → Look for updates at the start* switches it off) and on *Look now*. It asks `latest.json` of the newest GitHub release (`plugins.updater.endpoints`). A ⬆ in the header bar installs it and restarts. Only packages signed with the publisher's key install; its public half is `plugins.updater.pubkey` in `tauri.conf.json`.
+*Options → Updates*: *Look now* asks `latest.json` of the newest GitHub release (`plugins.updater.endpoints`); *Look for updates at the start* (off until switched on, per device) asks once at each start, in released builds. A version found marks the gear and *Updates* with ↑; *Install and restart* loads it, checks its signature, replaces the program and starts it anew (`app_restart`: an AppImage is started without the old one's open files, or its old mount would stay). Only packages signed with the publisher's key install; its public half is `plugins.updater.pubkey` in `tauri.conf.json`.
 
 What updates itself: the AppImage on Linux and the installed Windows app (NSIS installer, `-setup.exe`, for the current user). The DEB and a loose EXE do not; their users download the new version.
 

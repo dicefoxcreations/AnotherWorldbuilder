@@ -24,7 +24,7 @@ if (process.platform === "linux" && fs.existsSync(systemPlugins)) {
 const keyFile = path.join(os.homedir(), ".tauri", "anotherworldbuilder.key");
 const signing = fs.existsSync(keyFile)
   ? {
-      TAURI_SIGNING_PRIVATE_KEY: keyFile,
+      TAURI_SIGNING_PRIVATE_KEY: fs.readFileSync(keyFile, "utf8").trim(),
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: fs.existsSync(keyFile.replace(/key$/, "password")) ? fs.readFileSync(keyFile.replace(/key$/, "password"), "utf8").replace(/\r?\n$/, "") : "",
     }
   : {};

@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { isMainWindow } from "../api/changes";
 
 /**
- * Updates from the releases: looked for once at the start — unless this
- * device says not to — or when asked. Only what the publisher's key signed
- * installs (`plugins.updater.pubkey`); the release page tells nothing but
- * the newest version.
+ * Updates from the releases: looked for once at the start where this device
+ * says so (off until switched on), or when asked under Options → Updates.
+ * Only what the publisher's key signed installs (`plugins.updater.pubkey`).
  */
 export type UpdateState =
   | { kind: "idle" }
@@ -30,9 +29,9 @@ function set(next: UpdateState) {
 /** Whether this device looks for updates at the start. */
 export function lookingAtStart(): boolean {
   try {
-    return localStorage.getItem(KEY) !== "off";
+    return localStorage.getItem(KEY) === "on";
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -40,7 +39,7 @@ export function setLookingAtStart(on: boolean) {
   try {
     localStorage.setItem(KEY, on ? "on" : "off");
   } catch {
-    // Not kept: it looks again at the next start.
+    // Not kept: as before at the next start.
   }
 }
 
@@ -68,7 +67,7 @@ export async function installUpdate() {
       if (event.event === "Progress") done += event.data.chunkLength;
       set({ kind: "loading", version, done, total });
     });
-    await relaunch();
+    await invoke("app_restart");
   } catch (e) {
     set({ kind: "failed", error: String(e) });
   }

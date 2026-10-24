@@ -10,7 +10,7 @@ rust-version.workspace = true
 default = ["gui"]
 # The app with its window. Without it, what is left is the store, the network
 # and the host — for the server (`aw-server`), which runs without a screen.
-gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-window-state", "dep:tauri-plugin-updater", "dep:tauri-plugin-process"]
+gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-window-state", "dep:tauri-plugin-updater"]
 custom-protocol = ["gui", "tauri/custom-protocol"]
 
 [[bin]]
@@ -45,7 +45,6 @@ tauri = { version = "2", features = [], optional = true }
 tauri-plugin-dialog = { version = "2.7.3", optional = true }
 tauri-plugin-window-state = { version = "2.4.1", optional = true }
 tauri-plugin-updater = { version = "2.10", optional = true }
-tauri-plugin-process = { version = "2.3", optional = true }
 thiserror.workspace = true
 tempfile = "3"
 # The server's AW_LOG: what the network does, for finding why nobody gets through.
@@ -54,3 +53,6 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 [dev-dependencies]
 tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

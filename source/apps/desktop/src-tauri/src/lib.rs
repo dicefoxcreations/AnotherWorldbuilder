@@ -1047,6 +1047,32 @@ fn world_versions_set(app: tauri::AppHandle, world: String, max: u32) -> Answer<
 }
 
 #[cfg(feature = "gui")]
+/// Starts the app anew — after an update. An AppImage's old mount stays as
+/// long as anything holds what it was started with: the new one is started
+/// with none of the old one's open files.
+#[cfg_attr(feature = "gui", tauri::command)]
+fn app_restart(app: tauri::AppHandle) {
+    #[cfg(target_os = "linux")]
+    if let Some(image) = std::env::var_os("APPIMAGE") {
+        use std::os::unix::process::CommandExt;
+        let mut start = std::process::Command::new(image);
+        start.current_dir("/");
+        // SAFETY: between fork and exec only a system call that cannot allocate.
+        unsafe {
+            start.pre_exec(|| {
+                libc::close_range(3, libc::c_uint::MAX, 0);
+                Ok(())
+            });
+        }
+        if start.spawn().is_ok() {
+            app.exit(0);
+            return;
+        }
+    }
+    app.restart();
+}
+
+#[cfg(feature = "gui")]
 /// Lets go of what newer records replaced — the GM's. How many went.
 #[cfg_attr(feature = "gui", tauri::command)]
 fn world_tidy(app: tauri::AppHandle, world: String) -> Answer<usize> {
@@ -2191,7 +2217,6 @@ pub fn run() {
     builder.plugin(tauri_plugin_dialog::init())
         // Updates from the releases, signed with the publisher's key.
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         // Runs after the plugin has restored things: first the remembered size
         // stands, then it is clamped into the usable area.
         .setup(|app| {
@@ -2323,6 +2348,7 @@ pub fn run() {
             document::version_delete,
             world_versions_set,
             world_tidy,
+            app_restart,
             world_dice_set,
             world_encryption_set,
             world_readable_set,

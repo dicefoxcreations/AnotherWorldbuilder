@@ -4,26 +4,7 @@ import { api, type ArticleView, type IdentityInfo, type Template, type WorldInfo
 import { label } from "../shared/ui/Visibility";
 import { DiceButton } from "../features/dice/DiceTray";
 import { KeysDialog } from "../shared/ui/KeysDialog";
-import { installUpdate, lookAtStart, useUpdates } from "../shared/Updates";
-
-/** A new version is there: one click installs it and starts it. */
-function UpdateButton() {
-  const update = useUpdates();
-  useEffect(lookAtStart, []);
-  if (update.kind === "ready")
-    return (
-      <button className="ghost icon round update" onClick={() => void installUpdate()} title={`Update to ${update.version} — installs and restarts`}>
-        ⬆
-      </button>
-    );
-  if (update.kind === "loading")
-    return (
-      <button className="ghost icon round update" disabled title={`Loading ${update.version} …`}>
-        {update.total > 0 ? `${Math.floor((update.done * 100) / update.total)}%` : "…"}
-      </button>
-    );
-  return null;
-}
+import { lookAtStart, useUpdates } from "../shared/Updates";
 
 /** What every player holds — a preview always has it, nobody need tick it. */
 const EVERY_PLAYER = ["all", "players", "gm"];
@@ -106,6 +87,9 @@ export function HeaderBar({
   /** Receives the slot the page's switches are put into. */
   toolsRef: (slot: HTMLElement | null) => void;
 }) {
+  // Updates are looked for at the start where this device says so; one found shows at the gear.
+  const update = useUpdates();
+  useEffect(lookAtStart, []);
   const [eye, setEye] = useState(false);
   const [profile, setProfile] = useState(false);
   const eyeRef = useOutsideClick(eye, () => setEye(false));
@@ -213,14 +197,12 @@ export function HeaderBar({
           </div>
         )}
 
-        <UpdateButton />
-
         <button
           className="gear ghost icon round"
           onClick={onOptions}
-          title={waiting > 0 ? `${waiting} waiting for you — requests to join or changes to review` : world ? "Options of this world" : "Settings"}
+          title={waiting > 0 ? `${waiting} waiting for you — requests to join or changes to review` : update.kind === "ready" ? `Update ${update.version} — under Updates` : world ? "Options of this world" : "Settings"}
         >
-          ⚙{waiting > 0 && <span className="badge">{waiting}</span>}
+          ⚙{waiting > 0 ? <span className="badge">{waiting}</span> : update.kind === "ready" && <span className="badge">↑</span>}
         </button>
 
         <div className="dropdown" ref={profileRef}>
