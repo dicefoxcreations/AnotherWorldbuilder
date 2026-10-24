@@ -1,0 +1,15 @@
+{
+  "version": "0.1.57",
+  "notes": "Updates by themselves; Windows installer; faster saving on a server.",
+  "pub_date": "2026-10-24T10:54:24.531Z",
+  "platforms": {
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUVlCZ3k0L1RMUmY5MGdzRzFiRkJKRUVrMHJLYTFlNUM3Q2ZvMmluc1BoZUdoWm9jcVZLOXFETzcyVWsrYUc1bzVPRHdTMzVUWllVN2hpRUI5dnFRWHdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODM4MzE5CWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjEuNTdfYW1kNjQuQXBwSW1hZ2UKRVpNaXA2RDlqcFZCVExDTWVCblhxSG9VMmlock5XdUNscnZ4TEZ2SWpNNTdDcUxuZ1FmNUxCQ2txc2JlZXUvQ0Nqd3V0enoyVXY2K0hOYWg5blJRRFE9PQo=",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.1.57/AnotherWorldbuilder_0.1.57_amd64.AppImage"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUVZ0dlJWU1gzZStHb0ptV3JvdFVJK1JubzMxeUh6YmhQRkxWUTJub0dIeVhnaDN2S053Sy9BNk16U2NPTEFHMEhLTmdDQ0hmK1F6WG5vRjc4SFprSHc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODM5MjY0CWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjEuNTdfeDY0LXNldHVwLmV4ZQpGOHk0VlF4cERwOFNQdFZhb0I4QXZuTWxNS3FtZFdZNWd4YjU2UzNjZzlSOU5QZzhNVWh4dU02L3BweUhvNnJzUVpXZEl2dVM4bGswZ1ZYdS9VMXJBZz09Cg==",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.1.57/AnotherWorldbuilder_0.1.57_x64-setup.exe"
+    }
+  }
+}
