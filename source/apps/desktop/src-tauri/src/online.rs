@@ -81,6 +81,8 @@ struct Session {
     mark: Option<Mark>,
     /// Members and keys read since the records last changed.
     prepared: bool,
+    /// Records a command brought that the open world has not been told of.
+    untold: bool,
     /// Pictures fetched since the open world last redrew for them, and when it did.
     pictures: usize,
     pictures_shown: std::time::Instant,
@@ -136,7 +138,7 @@ impl Session {
         std::fs::create_dir_all(store.worlds_dir())?;
         copy_private(base, &store, world)?;
         Ok(Self { world: world.into(), store, _temporary: temporary, endpoint: endpoint.into(), copies: false,
-                  synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false,
+                  synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false, untold: false,
                   pictures: 0, pictures_shown: std::time::Instant::now() })
     }
 
@@ -430,7 +432,11 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
             if session.endpoint != server.endpoint { return Err(AppError(UNAVAILABLE.into())) }
             let transport = Connection { net, server: &server, me };
             // One digest when nothing changed — it carries who is here and the dice too.
-            if !session.synchronize_with(&world, &transport, PICTURES_PER_POLL).await? {
+            let brought = session.synchronize_with(&world, &transport, PICTURES_PER_POLL).await?;
+            if std::mem::take(&mut session.untold) && !brought {
+                return Ok(true);
+            }
+            if !brought {
                 // Pictures that came show now and then, and once all are here.
                 let all = session.store.missing_parts(&world)?.is_empty();
                 let due = session.pictures_shown.elapsed() >= PICTURES_SHOWN || all;
@@ -714,7 +720,11 @@ where T: Transport, F: FnOnce(Store) -> Fut, Fut: Future<Output = Answer<R>> {
     let mut changed = false;
     if !session.fresh() {
         match session.synchronize(world, transport).await {
-            Ok(brought) => changed = brought,
+            Ok(brought) => {
+                changed = brought;
+                // The poll tells the open world — it reads nothing new itself now.
+                session.untold |= brought;
+            }
             Err(error) => {
                 // Never read at all: nothing to keep.
                 if session.confirmed.is_empty() { *held = None }
