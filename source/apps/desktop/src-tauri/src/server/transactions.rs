@@ -54,6 +54,7 @@ impl Keeper {
                     return Err(AppError("Invalid world revision.".into()));
                 }
                 let meta = Transaction { world: world.into(), member, base, created: network::now() };
+                let mut bytes = Vec::new();
                 if let Ok(raw) = std::fs::read(path.join("transaction.json")) {
                     let before: Transaction = serde_json::from_slice(&raw)?;
                     if before.world != meta.world || before.member != meta.member || before.base != meta.base {
@@ -62,14 +63,15 @@ impl Keeper {
                 } else {
                     std::fs::create_dir_all(path.join("records"))?;
                     std::fs::create_dir_all(path.join("parts"))?;
-                    durable::write(&path.join("transaction.json"), &serde_json::to_vec(&meta)?)?;
+                    bytes.push((path.join("transaction.json"), serde_json::to_vec(&meta)?));
                 }
-                let mut bytes = Vec::new();
                 let public = self.store.load_world_meta(world)?.public;
                 let gm = self.store.with_journal(world, |j| Ok(j.world_item().map(|(.., gm)| gm.clone())))?;
+                let mut control = path.join("has-control").exists();
                 for record in records {
                     let parsed = aw_store::journal::verify_record_envelope(&record, &public, gm.as_ref())?;
-                    if matches!(parsed, aw_store::journal::Record::Control(_)) {
+                    if matches!(parsed, aw_store::journal::Record::Control(_)) && !control {
+                        control = true;
                         bytes.push((path.join("has-control"), Vec::new()));
                     }
                     let id = aw_store::journal::record_id(record.as_bytes());
@@ -82,18 +84,19 @@ impl Keeper {
                     }
                     bytes.push((path.join("parts").join(name), raw));
                 }
-                durable::write_all(&bytes)?;
-                durable::write(&path.join("touched"), b"")?;
                 if !finish {
+                    durable::write_all(&bytes)?;
                     return Ok(Reply::Staged);
                 }
                 // The per-world Keeper claim excludes every other writer here.
                 let current = self.store.digest(world)?;
-                if current != meta.base && path.join("has-control").exists() {
+                if current != meta.base && control {
                     std::fs::remove_dir_all(path)?;
                     return Ok(Reply::Conflict);
                 }
-                durable::write(&path.join("commit"), b"complete this command before serving the world")?;
+                // What came last and the intent to commit it: one wait on the disk.
+                bytes.push((path.join("commit"), b"complete this command before serving the world".to_vec()));
+                durable::write_all(&bytes)?;
                 self.finish_online_command(&path)
             }
             _ => Ok(Reply::NotOffered),
@@ -113,13 +116,22 @@ impl Keeper {
         if !records.is_empty() {
             self.store.receive(&meta.world, &records)?;
         }
+        // Pictures a few at a time: one wait on the disk for each handful.
+        let mut parts = Vec::new();
         for file in std::fs::read_dir(path.join("parts"))? {
             let file = file?;
-            let name = file.file_name().to_string_lossy().into_owned();
-            self.store.take_parts(&meta.world, &[(name, std::fs::read(file.path())?)])?;
+            parts.push((file.file_name().to_string_lossy().into_owned(), std::fs::read(file.path())?));
+            if parts.len() == 32 {
+                self.store.take_parts(&meta.world, &parts)?;
+                parts.clear();
+            }
+        }
+        if !parts.is_empty() {
+            self.store.take_parts(&meta.world, &parts)?;
         }
         let reply = Reply::Committed { digest: self.store.digest(&meta.world)? };
-        durable::write(&path.join("receipt.json"), &serde_json::to_vec(&reply)?)?;
+        // A receipt lost in a crash: the command is asked again and changes nothing.
+        durable::replace(&path.join("receipt.json"), &serde_json::to_vec(&reply)?)?;
         // Receipts make a retry safe if the connection went after the commit.
         std::fs::remove_dir_all(path.join("records"))?;
         std::fs::remove_dir_all(path.join("parts"))?;

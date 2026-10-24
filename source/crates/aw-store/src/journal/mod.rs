@@ -1249,7 +1249,8 @@ impl Journal {
             attached: self.attached.clone(),
             trusted: self.trusted.iter().cloned().collect(),
         };
-        crate::durable::write(&self.private.join("index.json"), &serde_json::to_vec(&index)?)?;
+        // Only what the folders hold, known in advance: lost, it is read again.
+        crate::durable::replace(&self.private.join("index.json"), &serde_json::to_vec(&index)?)?;
         self.dirty = false;
         Ok(())
     }

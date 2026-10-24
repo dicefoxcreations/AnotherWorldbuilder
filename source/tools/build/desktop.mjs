@@ -25,7 +25,7 @@ const keyFile = path.join(os.homedir(), ".tauri", "anotherworldbuilder.key");
 const signing = fs.existsSync(keyFile)
   ? {
       TAURI_SIGNING_PRIVATE_KEY: keyFile,
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: fs.existsSync(keyFile.replace(/key$/, "password")) ? fs.readFileSync(keyFile.replace(/key$/, "password"), "utf8") : "",
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: fs.existsSync(keyFile.replace(/key$/, "password")) ? fs.readFileSync(keyFile.replace(/key$/, "password"), "utf8").replace(/\r?\n$/, "") : "",
     }
   : {};
 const unsigned = fs.existsSync(keyFile) ? [] : ["--config", JSON.stringify({ bundle: { createUpdaterArtifacts: false } })];

@@ -13,6 +13,17 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     sync_parent(path)
 }
 
+/// Replaced atomically, without waiting on the disk: for what can be made
+/// anew — an index, a receipt. After a crash it is the old one, or none.
+pub fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let dir = path.parent().ok_or_else(|| std::io::Error::other("missing parent"))?;
+    std::fs::create_dir_all(dir)?;
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
+    file.write_all(bytes)?;
+    file.persist(path).map_err(|e| e.error)?;
+    Ok(())
+}
+
 pub fn sync_parent(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     std::fs::File::open(

@@ -447,13 +447,16 @@ impl Store {
     pub fn take_parts(&self, world_id: &str, parts: &[(String, Vec<u8>)]) -> Result<usize> {
         let needed = self.wanted_parts(world_id)?;
         let dir = self.world_dir(world_id);
-        let mut new = 0;
-        for (name, bytes) in parts {
-            let whole = media::has_part(&dir, name) && media::read_part(&dir, name).is_some();
-            if needed.contains(name) && !whole && media::put_part(&dir, name, bytes).is_ok() {
-                new += 1;
-            }
+        // All of them with one wait on the disk — those whose bytes are what their names say.
+        let fresh: Vec<(String, Vec<u8>)> = parts
+            .iter()
+            .filter(|(name, bytes)| needed.contains(name) && journal::record_id(bytes) == *name)
+            .filter(|(name, _)| !(media::has_part(&dir, name) && media::read_part(&dir, name).is_some()))
+            .cloned()
+            .collect();
+        if !fresh.is_empty() {
+            media::put_parts(&dir, &fresh)?;
         }
-        Ok(new)
+        Ok(fresh.len())
     }
 }
