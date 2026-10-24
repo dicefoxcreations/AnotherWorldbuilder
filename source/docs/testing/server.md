@@ -58,7 +58,7 @@ Result beside `source/` in `programs/server-linux-x86_64/`:
 - `aw-server-<version>-docker.tar` – a Docker image (the format of `docker save`), built without Docker: nothing but the program, the license notices, `/data` and `/tmp` ("FROM scratch"). Checked with `crane validate --tarball`.
 - `compose.yaml`, `Dockerfile`, `README.md`, `THIRD-PARTY-NOTICES.txt`.
 
-Without a window: `cargo build -p aw-desktop --no-default-features --bin aw-server` (feature `gui` off: no Tauri, no GTK, no WebKit).
+Without a window: `cargo build -p aw-desktop --no-default-features --features server --bin aw-server` (feature `gui` off: no Tauri, no GTK, no WebKit; `server` on: the program is built only when asked for, so the app's packages do not carry it).
 
 ## Synology (Container Manager)
 

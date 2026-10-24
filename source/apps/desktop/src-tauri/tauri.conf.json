@@ -37,15 +37,7 @@
         }
       }
     },
-    "createUpdaterArtifacts": true,
-    "windows": {
-      "nsis": {
-        "installMode": "currentUser"
-      },
-      "webviewInstallMode": {
-        "type": "downloadBootstrapper"
-      }
-    }
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "updater": {

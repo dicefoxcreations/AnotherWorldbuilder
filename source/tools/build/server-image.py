@@ -29,7 +29,7 @@ def build():
     env.setdefault("CC_x86_64_unknown_linux_musl", "clang")
     env.setdefault("CFLAGS_x86_64_unknown_linux_musl", "--target=x86_64-unknown-linux-musl")
     subprocess.run(["cargo", "build", "--release", "--locked", "-p", "aw-desktop", "--no-default-features",
-                    "--bin", "aw-server", "--target", TARGET], cwd=ROOT, env=env, check=True)
+                    "--features", "server", "--bin", "aw-server", "--target", TARGET], cwd=ROOT, env=env, check=True)
     return os.path.join(env["CARGO_TARGET_DIR"], TARGET, "release", "aw-server")
 
 def layer(binary, notices):

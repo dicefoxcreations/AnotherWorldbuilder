@@ -5,7 +5,7 @@ The pipeline needs **neither Git nor GitHub**. Configuration, lockfiles and buil
 ## Files there now
 
 - Linux: `programs/linux-x86_64/AnotherWorldbuilder_<version>_amd64.AppImage` (about 129 MiB), beside it a DEB package.
-- Windows: `programs/windows-x86_64/AnotherWorldbuilder.exe` (about 34 MiB). This is the portable application, not an installer. WebView2 must already be present.
+- Windows: `programs/windows-x86_64/AnotherWorldbuilder_<version>_x64-setup.exe`, the installer (for the current user; it updates itself, see *Updates*).
 - In both folders: `SHA256SUMS.txt` and `build-info.json`.
 
 The Linux files were built locally on CachyOS. The main program alone already needs glibc 2.39; the bundled libraries can have newer requirements. They are therefore **not yet the broadly compatible release built on Ubuntu 22.04**. On the build machine itself, a short start test ran without an error message. The Windows file compiles successfully for x86-64/MSVC and, according to its import table, needs no separate Visual C++ runtime.
@@ -25,7 +25,7 @@ Intel/AMD computers with a 64-bit system are the first target. ARM64 is another 
 
 A Linux AppImage does not lower the glibc version used for compiling afterwards. For broad releases, build on the oldest supported base, at first Ubuntu 22.04 with glibc 2.35. A local CachyOS build works on that system but is no proof of compatibility with older distributions. See [Tauri Linux packaging](https://v2.tauri.app/distribute/appimage/).
 
-The Windows installer installs for the current user and contains the WebView2 offline installer if needed. The portable Windows program needs an already installed WebView2 runtime. See [Tauri Windows packaging](https://v2.tauri.app/distribute/windows-installer/).
+The Windows installer installs for the current user. Where WebView2 is missing (rare: Windows 11 has it, Windows 10 through Edge) it downloads Microsoft's small bootstrapper — not the 215 MB offline installer, which every update would carry too. See [Tauri Windows packaging](https://v2.tauri.app/distribute/windows-installer/).
 
 ## One-time setup of the build machine
 
