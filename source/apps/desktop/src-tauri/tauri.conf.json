@@ -28,6 +28,9 @@
       "icons/icon.ico"
     ],
     "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
       "deb": {
         "files": {
           "/usr/share/doc/anotherworldbuilder/THIRD-PARTY-NOTICES.txt": "../../../build/public/licenses.txt"

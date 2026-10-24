@@ -36,7 +36,7 @@ MIT, Apache, BSD and the others require copyright notices and license texts to c
 | All | in the app under *Options → About → Third-party licenses* |
 | All | `THIRD-PARTY-NOTICES.txt` beside the package in the programs folder (`collect-release.mjs`) |
 | DEB | also `/usr/share/doc/anotherworldbuilder/THIRD-PARTY-NOTICES.txt` |
-| AppImage | also `APPIMAGE-LIBRARIES.txt`: every bundled system library with package, version, license and license text (`tools/licenses/appimage.mjs`, through pacman). A library that cannot be assigned to a package stops the collecting. |
+| AppImage | GStreamer for sound with a chosen few plugins only, all LGPL or MIT (`SOUND` in `tools/build/desktop.mjs`) — not every plugin of the build machine, some are GPL. Also `APPIMAGE-LIBRARIES.txt`: every bundled system library with package, version, license and license text (`tools/licenses/appimage.mjs`, through pacman). A library that cannot be assigned to a package stops the collecting. |
 | Windows | The Rust notices cover the Windows target too (`targets` in `about.toml`). Tauri links Microsoft's WebView2 loader statically; its SDK license allows passing it on as part of an app. |
 | aw-server | The same Rust packages as the app without Tauri, GTK and WebKit, linked statically against musl (musl: MIT). `THIRD-PARTY-NOTICES.txt` lies in the programs folder beside the program and the image, and in the image under `/usr/share/doc/aw-server/`. |
 
