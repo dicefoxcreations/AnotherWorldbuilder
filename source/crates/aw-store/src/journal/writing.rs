@@ -28,13 +28,42 @@ impl Journal {
         self.append(Record::Badge(badge))
     }
 
-    /// Lets a player in as a supporter: with what `content` holds — the keys
-    /// the supporter has for everyone — sealed for them, the supporter and
-    /// the game master.
-    pub fn admit_player(&mut self, by: &Identity, member: &IdentityPublic, content: &GrantContent, at: u64) -> Result<String> {
+    /// A supporter lets a player in or changes their roles: their grant,
+    /// sealed for them, the supporter, the game master and `others` — the
+    /// other supporters.
+    pub fn support_grant(&mut self, by: &Identity, member: &IdentityPublic, content: &GrantContent, others: &[IdentityPublic], at: u64) -> Result<String> {
+        let bytes = serde_json::to_vec(content)?;
+        let sealed = if self.encrypted() { self.seal_for_supporters(by, Some(member), others, &bytes)? } else { Sealed::plain(&bytes) };
+        self.support(by, Act::Grant { member: member.clone(), sealed }, at)
+    }
+
+    /// A supporter takes a player out.
+    pub fn support_revoke(&mut self, by: &Identity, member: &str, at: u64) -> Result<String> {
+        self.support(by, Act::Revoked { member: member.to_string() }, at)
+    }
+
+    /// A supporter hands on the keys they turned over: for the game master
+    /// and `others`.
+    pub fn support_keys(&mut self, by: &Identity, keys: &Keyring, others: &[IdentityPublic], at: u64) -> Result<String> {
+        let sealed = self.seal_for_supporters(by, None, others, keys.to_json()?.as_bytes())?;
+        self.support(by, Act::Keys { sealed }, at)
+    }
+
+    fn support(&mut self, by: &Identity, act: Act, at: u64) -> Result<String> {
+        let support = Support::new(self.world.world_id.as_str(), by, act, self.max_seq, at)?;
+        self.append(Record::Support(support))
+    }
+
+    fn seal_for_supporters(&self, by: &Identity, member: Option<&IdentityPublic>, others: &[IdentityPublic], bytes: &[u8]) -> Result<Sealed> {
         let gm = self.gm().cloned().ok_or("a world without its game master")?;
-        let admission = Admission::new(self.world.world_id.as_str(), by, member, &gm, content, self.max_seq, at, self.encrypted())?;
-        self.append(Record::Admission(admission))
+        let me = by.public();
+        let mut all: Vec<&IdentityPublic> = Vec::new();
+        for who in member.into_iter().chain([&me, &gm]).chain(others) {
+            if !all.iter().any(|a| a.id == who.id) {
+                all.push(who);
+            }
+        }
+        Sealed::new(&all, bytes)
     }
 
     /// A gallery entry of one's own: a new image, or a new name.
@@ -555,8 +584,8 @@ impl Journal {
                 _ => false,
             })
             .map(|(id, _)| id.clone())
-            // Admissions the game master's own grant took over.
-            .chain(self.admissions.iter().filter(|(member, _)| self.admitted_by(member).is_none()).map(|(_, (id, _))| id.clone()))
+            // Supporters' acts the game master's own word took over.
+            .chain(self.support.iter().filter(|(member, _)| self.acted_by(member).is_none()).map(|(_, (id, _))| id.clone()))
             .collect()
     }
 }

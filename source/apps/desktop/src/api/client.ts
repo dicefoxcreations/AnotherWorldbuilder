@@ -93,6 +93,8 @@ export type WorldInfo = {
   /** This device's member supports it: lets players in, and may take the GM's place. */
   supporter: boolean;
   canTakeOver: boolean;
+  /** The roles there are to give — the GM's and a supporter's. */
+  roles: string[];
 };
 
 /** What this device does on the local network. */
@@ -154,7 +156,7 @@ export type ServerEntry = {
 };
 
 /** A world on a server, as its admin sees it — nothing of its content. */
-export type HeldWorld = { world: string; name: string; gm: string; gm_id: string; bytes: number; encrypted: boolean; closed: boolean; requests: Person[] };
+export type HeldWorld = { world: string; name: string; gm: string; gm_id: string; bytes: number; encrypted: boolean; closed: boolean; requests: Person[]; members: Person[] };
 /** Someone a server knows; `last` in seconds since 1970, 0: not yet. */
 export type Person = { id: string; name: string; last: number; blocked: boolean };
 /** What a server's admin sees. */
@@ -163,7 +165,7 @@ export type ServerState = { worlds: HeldWorld[]; admins: Person[]; worldbuilders
 export type ServerOrder =
   | { kind: "allow" | "refuse" | "block" | "unblock"; id: string }
   | { kind: "admin"; id: string; on: boolean }
-  | { kind: "approve"; world: string; id: string }
+  | { kind: "approve" | "remove"; world: string; id: string }
   | { kind: "close" | "open" | "delete"; world: string };
 
 /** Where the data lies: the profile (identity, settings) and the worlds. */
@@ -552,6 +554,7 @@ const toWorld = (r: Raw): WorldInfo => ({
   admins: (r.admins as string[] | undefined) ?? [],
   supporter: !!r.supporter,
   canTakeOver: !!r.can_take_over,
+  roles: (r.roles as string[] | undefined) ?? [],
 });
 
 const toIdentity = (r: Raw): IdentityInfo => ({

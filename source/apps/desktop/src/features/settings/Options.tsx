@@ -812,7 +812,7 @@ function Assigned({
         hint: types.get(a.articleType)?.name,
       })),
     ...templates.map((t) => ({ id: typeAttribute(t.id), name: `All ${t.name}`, icon: t.icon, hint: "type" })),
-    ...world.attributes
+    ...world.roles
       .filter((a) => !PLAIN.includes(a) && !a.startsWith("doc:") && !a.startsWith("type:"))
       .map((a) => ({ id: a, name: a })),
   ];
@@ -924,21 +924,73 @@ function PlayersArea({
     </>
   );
 
+  const supports = (id: string) => world.supporters.includes(id);
+  const removeDialog = remove && (
+    <DeleteDialog
+      title={`Remove ${remove.name}`}
+      name={remove.name}
+      warning="What they have stays with them. Nothing new reaches them — their keys turn over."
+      onCancel={() => setRemove(null)}
+      onDelete={() => {
+        const who = remove.id;
+        setRemove(null);
+        void run(api.memberRemove(world.id, who));
+      }}
+    />
+  );
+
+  // A supporter sees the members as the GM does: gives players roles, takes them out.
+  const supporting = !world.isGm && world.supporter && world.members.some((m) => m.id !== me.id);
+
   if (!world.isGm)
     return (
       <div className="type-page">
         <h2>Players</h2>
         <ul className="members large">
-          <li>
-            <div>
-              <strong>{me.name}</strong> <span className="role-badge player">Player</span>
-              {world.supporter && <> <span className="role-badge">Supporter</span></>}
-              <small className="small">{world.attributes.filter((a) => !PLAIN.includes(a)).join(", ")}</small>
-            </div>
-            <OwnColour world={world} me={me} onChanged={onChanged} onError={onError} />
-          </li>
+          {!supporting && (
+            <li>
+              <div>
+                <strong>{me.name}</strong> <span className="role-badge player">Player</span>
+                {world.supporter && <> <span className="role-badge">Supporter</span></>}
+                <small className="small">{world.attributes.filter((a) => !PLAIN.includes(a)).join(", ")}</small>
+              </div>
+              <OwnColour world={world} me={me} onChanged={onChanged} onError={onError} />
+            </li>
+          )}
+          {supporting &&
+            world.members.map((m) => {
+              const extra = m.attributes.filter((a) => !PLAIN.includes(a));
+              const assign = (fresh: string[]) => run(api.memberAttributesSet(world.id, m.id, fresh));
+              return (
+                <li key={m.id}>
+                  <div>
+                    <strong>{m.name}</strong>{" "}
+                    <span className={`role-badge ${m.role}`}>{m.role === "gm" ? "GM" : "Player"}</span>
+                    {supports(m.id) && <> <span className="role-badge">Supporter</span></>}
+                    <small className="small">{m.fingerprint}</small>
+                    {m.role !== "gm" ? (
+                      <Assigned
+                        world={world}
+                        templates={templates}
+                        articles={articles}
+                        chosen={extra}
+                        onAdd={(a) => assign([...extra, a])}
+                        onRemove={(a) => assign(extra.filter((x) => x !== a))}
+                      />
+                    ) : (
+                      extra.length > 0 && <small className="small">{extra.join(", ")}</small>
+                    )}
+                  </div>
+                  {m.id === me.id && <OwnColour world={world} me={me} onChanged={onChanged} onError={onError} />}
+                  {m.id !== me.id && m.role !== "gm" && !supports(m.id) && (
+                    <DeleteButton what={m.name} onClick={() => setRemove({ id: m.id, name: m.name })} />
+                  )}
+                </li>
+              );
+            })}
         </ul>
         {asking}
+        {removeDialog}
         {world.canTakeOver && (
           <>
             <h3>Emergency</h3>
@@ -958,7 +1010,6 @@ function PlayersArea({
       </div>
     );
 
-  const supports = (id: string) => world.supporters.includes(id);
   const chooseSupporter = (id: string, on: boolean) =>
     run(api.worldSupportersSet(world.id, on ? [...world.chosen, id] : world.chosen.filter((c) => c !== id)));
 
@@ -1098,19 +1149,7 @@ function PlayersArea({
         <button onClick={admit}>From file</button>
       </div>
 
-      {remove && (
-        <DeleteDialog
-          title={`Remove ${remove.name}`}
-          name={remove.name}
-          warning="What they have stays with them. Nothing new reaches them — their keys turn over."
-          onCancel={() => setRemove(null)}
-          onDelete={() => {
-            const who = remove.id;
-            setRemove(null);
-            void run(api.memberRemove(world.id, who));
-          }}
-        />
-      )}
+      {removeDialog}
 
       {newId && (
         <NewIdDialog
@@ -1459,6 +1498,7 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
   const [state, setState] = useState<ServerState | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<HeldWorld | null>(null);
+  const [players, setPlayers] = useState<string | null>(null);
   const [gm, setGm] = useState("");
   const [admin, setAdmin] = useState("");
   const order = async (o: ServerOrder | null) => {
@@ -1488,6 +1528,11 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
               {[w.gm, w.bytes ? bytes(w.bytes) : "deleted", w.encrypted ? "encrypted" : "unencrypted", w.closed && "closed"].filter(Boolean).join(" · ")}
             </small>
           </span>
+          {w.members.length > 0 && (
+            <button className={players === w.world ? "on" : ""} onClick={() => setPlayers(players === w.world ? null : w.world)}>
+              Players
+            </button>
+          )}
           {w.closed ? (
             <>
               <button disabled={busy} onClick={() => void order({ kind: "open", world: w.world })}>Open</button>
@@ -1498,6 +1543,19 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
           )}
         </div>
       ))}
+      {state.worlds
+        .filter((w) => w.world === players)
+        .flatMap((w) =>
+          w.members.map((p) => (
+            <div key={`${w.world}-${p.id}`} className="server-row">
+              <span className="grow">
+                <strong>{p.name || p.id}</strong>
+                <small className="small muted">plays in {w.name}</small>
+              </span>
+              <button disabled={busy} onClick={() => void order({ kind: "remove", world: w.world, id: p.id })}>Take out</button>
+            </div>
+          )),
+        )}
       {state.worlds.flatMap((w) =>
         w.requests.map((p) => (
           <div key={`${w.world}-${p.id}`} className="server-row">

@@ -922,16 +922,16 @@ fn a_supporter_lets_a_player_in_with_the_keys_for_everyone_and_a_removal_after_i
     };
     t.to_bob();
 
-    // Not a supporter yet: his admission waits, and lets nobody in.
-    let id = t.bob_journal.admit_player(&t.bob, &carla.public(), &content(&carla), 5);
+    // Not a supporter yet: his act waits, and lets nobody in.
+    let id = t.bob_journal.support_grant(&t.bob, &carla.public(), &content(&carla), &[], 5);
     assert!(id.is_err(), "his own device does not take it either");
     t.gm_says(Item::Supporters { ids: vec![t.bob.id().to_string()] });
     t.to_bob();
-    t.bob_journal.admit_player(&t.bob, &carla.public(), &content(&carla), 5).unwrap();
+    t.bob_journal.support_grant(&t.bob, &carla.public(), &content(&carla), &[], 5).unwrap();
     t.to_gm();
     assert!(t.gm_journal.grant(carla.id().as_str()).is_some(), "in, on every device");
-    assert_eq!(t.gm_journal.admitted_by(carla.id().as_str()).map(|b| b.id.clone()), Some(t.bob.public().id));
-    assert_eq!(t.gm_journal.admitted().len(), 1, "for the game master's device to take in");
+    assert_eq!(t.gm_journal.acted_by(carla.id().as_str()).map(|b| b.id.clone()), Some(t.bob.public().id));
+    assert_eq!(t.gm_journal.acted_on(), vec![(carla.id().to_string(), true)], "for the game master's device to take in");
 
     // Carla reads what every player reads — and nothing of the GM's.
     let mut cara = open(t._dir.path(), "carla", &t.token);
@@ -942,15 +942,54 @@ fn a_supporter_lets_a_player_in_with_the_keys_for_everyone_and_a_removal_after_i
     assert_eq!(text_of(&mut cara, story), "The inn is old.");
     assert!(cara.plain(secret).is_err(), "the GM's part stays closed");
 
-    // The game master takes her out: the admission before it counts no more.
+    // The game master takes her out: the act before it counts no more.
     t.gm_says(Item::Revoked { member: carla.id().to_string() });
     assert!(t.gm_journal.grant(carla.id().as_str()).is_none());
+    assert!(!t.gm_journal.superseded().is_empty(), "the act the GM's word took over goes");
     // Let in again by the supporter, after the removal: in again.
     t.to_bob();
-    t.bob_journal.admit_player(&t.bob, &carla.public(), &content(&carla), 9).unwrap();
+    t.bob_journal.support_grant(&t.bob, &carla.public(), &content(&carla), &[], 9).unwrap();
     t.to_gm();
     assert!(t.gm_journal.grant(carla.id().as_str()).is_some());
     // No supporter any more: what he alone let in is out.
     t.gm_says(Item::Supporters { ids: Vec::new() });
     assert!(t.gm_journal.grant(carla.id().as_str()).is_none());
+}
+
+#[test]
+fn a_supporter_takes_a_player_out_and_hands_on_the_new_keys_but_never_touches_the_gm_or_a_supporter() {
+    let mut t = table();
+    let dana = Identity::create("Dana").unwrap();
+    let keys = t.ring.grant(&dana.public(), &[attr("players"), attr("all")]).unwrap();
+    t.gm_says(grant(&dana, &t.gm, &["players", "all"], &keys));
+    t.gm_says(Item::Supporters { ids: vec![t.bob.id().to_string()] });
+    t.to_bob();
+
+    // Bob takes Dana out, and turns the players' key over for those who stay.
+    let mut turned = Keyring::from_json(&t.ring.to_json().unwrap()).unwrap();
+    turned.rotate(&attr("players")).unwrap();
+    let new = turned.new_since(&t.ring);
+    t.bob_journal.support_revoke(&t.bob, dana.id().as_str(), 7).unwrap();
+    t.bob_journal.support_keys(&t.bob, &new, &[], 7).unwrap();
+    t.to_gm();
+    assert!(t.gm_journal.grant(dana.id().as_str()).is_none(), "out, on every device");
+    assert_eq!(t.gm_journal.acted_on(), vec![(dana.id().to_string(), false)]);
+    let theirs = t.gm_journal.turned_keys(t.gm.seal_secret());
+    assert_eq!(theirs.current(&attr("players")).unwrap().key, turned.current(&attr("players")).unwrap().key, "the GM gets the new key");
+    assert!(t.gm_journal.turned_keys(dana.seal_secret()).is_empty(), "Dana does not");
+
+    // The game master writes their own word: the act is taken over — the keys stay.
+    t.gm_says(Item::Revoked { member: dana.id().to_string() });
+    assert!(t.gm_journal.acted_on().is_empty());
+    let gone = t.gm_journal.superseded();
+    t.gm_says(Item::Deleted { records: gone });
+    assert!(!t.gm_journal.turned_keys(t.gm.seal_secret()).is_empty(), "what was written with them still opens");
+
+    // Neither the game master nor a supporter is his to take out.
+    t.to_bob();
+    t.bob_journal.support_revoke(&t.bob, t.gm.id().as_str(), 8).unwrap();
+    t.bob_journal.support_revoke(&t.bob, t.bob.id().as_str(), 9).unwrap();
+    t.to_gm();
+    assert!(t.gm_journal.grant(t.bob.id().as_str()).is_some(), "a supporter stays in");
+    assert!(t.gm_journal.acted_on().is_empty());
 }

@@ -739,6 +739,7 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
                 rolls,
                 requests: Vec::new(),
                 approved: Vec::new(),
+                removing: Vec::new(),
                 admins: Vec::new(),
                 no_copy: false,
                 mark: store.arrival_mark(world)?.map(|(epoch, at)| Mark { epoch, at }),
@@ -1345,11 +1346,7 @@ pub(crate) fn take_requests(store: &Store, world: &str, asking: Vec<IdentityPubl
             continue;
         }
         if expected.contains(&id) || approved.contains(&id) {
-            if gm {
-                crate::admit(store, world, who, Vec::new())?;
-            } else {
-                store.admit_as_supporter(world, &who)?;
-            }
+            crate::admit(store, world, who, Vec::new())?;
             continue;
         }
         if !requests.iter().any(|r| r.identity.id == who.id) {
@@ -1358,6 +1355,20 @@ pub(crate) fn take_requests(store: &Store, world: &str, asking: Vec<IdentityPubl
     }
     if requests.len() != before {
         store.save_requests(world, &requests)?;
+    }
+    Ok(())
+}
+
+/// Takes out whom a server's admin took out — the device of the GM or a
+/// supporter, holding the keys.
+pub(crate) fn take_out(store: &Store, world: &str, removing: &[String]) -> Answer<()> {
+    if removing.is_empty() || !(store.is_gm(world) || store.supports(world)?) {
+        return Ok(());
+    }
+    for id in removing {
+        if store.has_grant(world, id)? {
+            store.remove_member(world, id)?;
+        }
     }
     Ok(())
 }
@@ -1493,7 +1504,7 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
     let me_id = me.id().to_string();
     let rolls = recent_rolls(world, |r| r.member == me_id).iter().filter_map(|r| serde_json::to_string(r).ok()).collect();
     let theirs = match ask(net, via, world, me, Ask::Digest { presence, rolls }).await? {
-        Reply::Digest { digest, presence, rolls, requests, approved, admins, no_copy, .. } => {
+        Reply::Digest { digest, presence, rolls, requests, approved, removing, admins, no_copy, .. } => {
             // Held only while online, or kept — as the world says now.
             if !store.is_gm(world) {
                 store.hold_fleeting(world, no_copy)?;
@@ -1501,6 +1512,7 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
             if !requests.is_empty() {
                 take_requests(store, world, requests, &approved)?;
             }
+            take_out(store, world, &removing)?;
             // The admins of the server: the world's supporters, too.
             if store.is_gm(world) && matches!(via, Via::Server(_)) {
                 store.set_server_admins(world, admins)?;
@@ -2329,15 +2341,7 @@ pub fn join_answer(app: tauri::AppHandle, world: String, id: String, accept: boo
         .ok_or_else(|| AppError("There is no such request.".into()))?;
     requests.retain(|r| r.identity.id.as_str() != id);
     store.save_requests(&world, &requests)?;
-    let meta = match (accept, gm) {
-        (true, true) => admit(&store, &world, request.identity, Vec::new())?,
-        // A supporter: with the keys they hold for everyone.
-        (true, false) => {
-            store.admit_as_supporter(&world, &request.identity)?;
-            store.load_world_meta(&world)?
-        }
-        (false, _) => store.load_world_meta(&world)?,
-    };
+    let meta = if accept { admit(&store, &world, request.identity, Vec::new())? } else { store.load_world_meta(&world)? };
     world_info(&store, &meta, me.id().as_str())
 }
 
@@ -2788,7 +2792,7 @@ mod tests {
         document::save(&gm_store, &gm, &world, &meta.home, &open, &code.base, "s-gm").unwrap();
         admit(&gm_store, &world, bob.public(), Vec::new()).unwrap();
         swap_here(&gm_store, &player_store, &bob, &world);
-        assert!(player_store.admit_as_supporter(&world, &Identity::create("Eve").unwrap().public()).is_err(), "no supporter yet");
+        assert!(admit(&player_store, &world, Identity::create("Eve").unwrap().public(), Vec::new()).is_err(), "no supporter yet");
 
         // Bob supports the world: he holds the GM's keys sealed for him.
         gm_store.set_supporters(&world, vec![bob.id().to_string()]).unwrap();
@@ -2799,14 +2803,14 @@ mod tests {
         let carla = Identity::create("Carla").unwrap();
         let carla_store = Store::new(dir.path().join("carla"));
         carla_store.save_identity(&carla).unwrap();
-        player_store.admit_as_supporter(&world, &carla.public()).unwrap();
+        admit(&player_store, &world, carla.public(), Vec::new()).unwrap();
         swap_here(&gm_store, &player_store, &bob, &world);
         swap_here(&gm_store, &carla_store, &carla, &world);
         assert!(text(&carla_store, &carla, &world, &meta.home).contains("The inn."));
         // The GM's device makes her a member for good.
         crate::answer_proposals(&gm_store, &world).unwrap();
         assert!(gm_store.load_world_meta(&world).unwrap().member(carla.id().as_str()).is_some());
-        assert!(gm_store.with_journal(&world, |j| Ok(j.admitted().is_empty())).unwrap(), "her grant took over");
+        assert!(gm_store.with_journal(&world, |j| Ok(j.acted_on().is_empty())).unwrap(), "her grant took over");
 
         // Marla is gone: Bob takes her place, and everyone sees it.
         player_store.take_over(&world, &bob).unwrap();
@@ -2889,6 +2893,64 @@ mod tests {
         swap_here(&gm_store, &player_store, &bob, &world);
         assert!(!text(&player_store, &bob, &world, &meta.home).is_empty(), "the page from before the removal opens");
         drop(dir);
+    }
+
+    #[test]
+    fn a_supporter_gives_roles_and_takes_players_out_and_the_gm_takes_it_in() {
+        let (dir, gm_store, gm, player_store, bob) = stores();
+        let meta = new_world(&gm_store, &gm, "Eldermere".into()).unwrap();
+        let world = meta.public.world_id.to_string();
+        let joins = |name: &str| {
+            let store = Store::new(dir.path().join(name));
+            let who = Identity::create(name).unwrap();
+            store.save_identity(&who).unwrap();
+            admit(&gm_store, &world, who.public(), Vec::new()).unwrap();
+            (store, who)
+        };
+        admit(&gm_store, &world, bob.public(), Vec::new()).unwrap();
+        let (carla_store, carla) = joins("Carla");
+        let (dan_store, dan) = joins("Dan");
+        let secret = crate::NewLayer { title: String::new(), text: "The rogues' guild meets at dusk.".into(), policy: "gm OR class:rogue".into(), level: "open".into(), section: "text".into(), edit: "gm".into(), fields: serde_json::json!({}), parent: None };
+        let doc = crate::create_document(&gm_store, &world, String::new(), "notes".into(), "Guild".into(), "all".into(), vec![secret]).unwrap();
+        gm_store.set_supporters(&world, vec![bob.id().to_string()]).unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+        let change = |store: &Store, member: &Identity, roles: &[&str]| {
+            let before = store.roster(&world)?;
+            let mut after = before.clone();
+            after.assign(member.id().as_str(), &roles.iter().map(|r| r.to_string()).collect::<Vec<_>>())?;
+            store.keep_roster(&world, &before, &after)
+        };
+
+        // Bob makes Carla a rogue: she reads what rogues read, before the GM knows.
+        change(&player_store, &carla, &["class:rogue"]).unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+        swap_here(&gm_store, &carla_store, &carla, &world);
+        assert!(text(&carla_store, &carla, &world, &doc).contains("The rogues' guild"));
+
+        // He takes Dan out — not the GM, nor himself, a supporter.
+        assert!(player_store.remove_member(&world, gm.id().as_str()).is_err());
+        assert!(player_store.remove_member(&world, bob.id().as_str()).is_err());
+        player_store.remove_member(&world, dan.id().as_str()).unwrap();
+        assert!(!player_store.has_grant(&world, dan.id().as_str()).unwrap(), "out at once");
+        swap_here(&gm_store, &player_store, &bob, &world);
+        assert!(matches!(swap_here(&gm_store, &dan_store, &dan, &world), Reply::NotMember | Reply::NotOffered | Reply::Requested));
+
+        // The GM's device takes it in: its own word now, with Bob's new keys.
+        crate::answer_proposals(&gm_store, &world).unwrap();
+        let meta = gm_store.load_world_meta(&world).unwrap();
+        assert!(meta.member(dan.id().as_str()).is_none());
+        assert!(meta.member(carla.id().as_str()).unwrap().attributes.contains(&"class:rogue".to_string()));
+        assert!(gm_store.with_journal(&world, |j| Ok(j.acted_on().is_empty())).unwrap(), "the GM's word took over");
+        assert_eq!(gm_store.load_keyring(&world).unwrap().current_epoch(&"players".parse().unwrap()), Some(2), "Dan's keys turned over");
+
+        // What the GM writes now opens for those who stayed.
+        let page = create_page(&gm_store, &world, "notes", "News", "The bridge is down.".into()).unwrap();
+        swap_here(&gm_store, &carla_store, &carla, &world);
+        assert!(text(&carla_store, &carla, &world, &page).contains("The bridge is down."));
+        swap_here(&gm_store, &player_store, &bob, &world);
+        assert!(text(&player_store, &bob, &world, &page).contains("The bridge is down."));
+        // Bob sees the members as the GM does.
+        assert_eq!(player_store.roster(&world).unwrap().members.len(), 3, "Marla, Bob, Carla");
     }
 
     #[test]

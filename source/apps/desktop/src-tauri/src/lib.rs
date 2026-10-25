@@ -152,6 +152,8 @@ pub struct WorldInfo {
     /// GM's place — with the keys sealed for them (`can_take_over`).
     pub supporter: bool,
     pub can_take_over: bool,
+    /// The roles there are to give — the GM's and a supporter's.
+    pub roles: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -446,6 +448,12 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
     let is_gm = store.is_gm(&id) && meta.role_of(me) == Role::Gm;
     let (supporters, sealed) = store.with_journal(&id, |j| Ok((j.supporters(), j.keys_for(me).is_some())))?;
     let supporter = supporters.iter().any(|s| s == me);
+    // A supporter sees the members as the GM does — from the GM's keys sealed for them.
+    let roster = if is_gm || (supporter && sealed) { store.roster(&id).ok() } else { None };
+    let members = match &roster {
+        Some(r) if !is_gm => &r.members,
+        _ => &meta.members,
+    };
     let attributes = if is_gm {
         store
             .load_keyring(&id)?
@@ -467,8 +475,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         role: role_text(if is_gm { Role::Gm } else { Role::Player }).to_string(),
         is_gm,
         attributes,
-        members: meta
-            .members
+        members: members
             .iter()
             .map(|m| {
                 Ok(MemberInfo {
@@ -505,6 +512,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         chosen: if is_gm { meta.supporters.clone() } else { Vec::new() },
         admins: if is_gm { store.server_admins(&id)?.into_iter().map(|a| a.name).collect() } else { Vec::new() },
         can_take_over: supporter && sealed && !is_gm,
+        roles: roster.map(|r| r.ring.attributes().map(|a| a.to_string()).collect()).unwrap_or_default(),
         supporter,
         supporters,
         id,
@@ -938,7 +946,7 @@ fn member_add(
 
 /// Takes a player in — however they came: a file, an id let in ahead of
 /// time, a request on the network. They get `players` and `all`, plus what
-/// is asked for.
+/// is asked for. The game master's, or a supporter's.
 pub(crate) fn admit(
     store: &Store,
     world: &str,
@@ -948,50 +956,29 @@ pub(crate) fn admit(
     if !card.is_genuine() {
         return Err(AppError("This player id does not match its keys.".into()));
     }
-    let mut meta = store.load_world_meta(world)?;
-    // Create the attributes if they do not exist yet.
-    let mut ring = store.load_keyring(world)?;
-    let mut clean = vec!["players".to_string(), "all".to_string()];
-    ring.ensure(&Attribute::All)?;
-    ring.ensure(&Attribute::Players)?;
-    for a in attributes {
-        if let Ok(parsed) = a.parse::<Attribute>() {
-            ring.ensure(&parsed)?;
-            if !clean.contains(&a) {
-                clean.push(a);
-            }
-        }
+    let gm = store.is_gm(world);
+    if !gm && !store.supports(world)? {
+        return Err(AppError("Only the GM or a supporter lets players in.".into()));
     }
-    store.save_keyring(world, &ring)?;
-
+    if !gm && attributes.iter().any(|a| a == "gm") {
+        return Err(AppError("Only the GM makes someone GM.".into()));
+    }
+    let before = store.roster(world)?;
+    let mut after = before.clone();
     let id = card.id.to_string();
     // Taking someone's place: what was theirs is theirs now, and the old id leaves.
-    let replaced = store.takeovers(world)?.get(&id).and_then(|old| meta.member(old)).filter(|m| m.role == Role::Player).cloned();
+    let replaced = if gm { store.takeovers(world)?.get(&id).and_then(|old| before.member(old)).filter(|m| m.role == Role::Player).cloned() } else { None };
+    let mut attributes = attributes;
     if let Some(old) = &replaced {
-        for a in &old.attributes {
-            if !clean.contains(a) {
-                clean.push(a.clone());
-            }
-        }
+        attributes.extend(old.attributes.iter().cloned());
+        after.remove(old.identity.id.as_str())?;
     }
-    meta.members.retain(|m| m.identity.id != card.id);
-    meta.invited.retain(|i| i != &id);
-    meta.members.push(Member {
-        identity: card,
-        role: Role::Player,
-        attributes: clean,
-    });
-    store.save_world_meta(&meta)?;
-    let mut requests = store.load_requests(world)?;
-    requests.retain(|r| r.identity.id.as_str() != id);
-    store.save_requests(world, &requests)?;
-    if store.takeovers(world)?.contains_key(&id) {
+    after.admit(card, &attributes)?;
+    store.keep_roster(world, &before, &after)?;
+    if gm && store.takeovers(world)?.contains_key(&id) {
         store.set_takeover(world, &id, None)?;
     }
-    match replaced {
-        Some(old) => Ok(store.remove_member(world, old.identity.id.as_str())?),
-        None => Ok(meta),
-    }
+    Ok(store.load_world_meta(world)?)
 }
 
 #[cfg(feature = "gui")]
@@ -1071,9 +1058,6 @@ fn world_share(
 fn member_remove(app: tauri::AppHandle, world: String, id: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM can remove someone.".into()));
-    }
     let meta = store.remove_member(&world, &id)?;
     world_info(&store, &meta, me.id().as_str())
 }
@@ -1387,48 +1371,27 @@ fn attribute_create(app: tauri::AppHandle, world: String, attribute: String) -> 
 
 #[cfg(feature = "gui")]
 /// What a player is assigned to — documents (`doc:…`: their character, a
-/// class) and attributes — and so what they may see. The game master's. An
-/// attribute taken away is rotated: what is written from then on is closed
-/// to them; what they had, they keep.
+/// class) and attributes — and so what they may see. The game master's, or
+/// a supporter's for players. An attribute taken away is rotated: what is
+/// written from then on is closed to them; what they had, they keep.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_attributes_set(app: tauri::AppHandle, world: String, member: String, attributes: Vec<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM assigns players.".into()));
+    let gm = store.is_gm(&world);
+    if !gm && !store.supports(&world)? {
+        return Err(AppError("Only the GM or a supporter assigns players.".into()));
     }
-    let mut meta = store.load_world_meta(&world)?;
+    let before = store.roster(&world)?;
     // The GM too may note whom they play: they see everything anyway, but
     // handing the world over, what they play stays theirs as a player.
-    let Some(m) = meta.members.iter_mut().find(|m| m.identity.id.as_str() == member) else {
-        return Err(AppError("There is no such member.".into()));
-    };
-    let mut wanted = if m.role == Role::Gm { vec!["gm".to_string(), "players".to_string(), "all".to_string()] } else { vec!["players".to_string(), "all".to_string()] };
-    for a in attributes {
-        let a = a.trim().to_string();
-        a.parse::<Attribute>().map_err(AppError::from)?;
-        if !wanted.contains(&a) {
-            wanted.push(a);
-        }
+    if !gm && (before.member(&member).is_some_and(|m| m.role == Role::Gm) || attributes.iter().any(|a| a.trim() == "gm")) {
+        return Err(AppError("Only the GM assigns the GM.".into()));
     }
-    let mut ring = store.load_keyring(&world)?;
-    for a in &wanted {
-        ring.ensure(&a.parse::<Attribute>().map_err(AppError::from)?)?;
-    }
-    let gone: Vec<String> = m.attributes.iter().filter(|a| !wanted.contains(a)).cloned().collect();
-    for a in &gone {
-        if let Ok(parsed) = a.parse::<Attribute>() {
-            ring.rotate(&parsed)?;
-        }
-    }
-    m.attributes = wanted;
-    store.save_keyring(&world, &ring)?;
-    if !gone.is_empty() {
-        store.reseal(&world)?;
-    }
-    // Saving the members hands out the keys anew.
-    store.save_world_meta(&meta)?;
-    world_info(&store, &meta, me.id().as_str())
+    let mut after = before.clone();
+    after.assign(&member, &attributes)?;
+    store.keep_roster(&world, &before, &after)?;
+    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
 }
 
 #[cfg(feature = "gui")]
@@ -1775,8 +1738,8 @@ pub(crate) fn answer_proposals(store: &Store, world: &str) -> Answer<usize> {
     if !store.is_gm(world) {
         return Ok(0);
     }
-    // Whom supporters let in become members for good.
-    store.adopt_admissions(world)?;
+    // What supporters did becomes the GM's own word.
+    store.adopt_support(world)?;
     let me = store.load_identity()?;
     let asked = store.proposals(world, &me)?;
     if asked.is_empty() {

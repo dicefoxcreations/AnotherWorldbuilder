@@ -7,11 +7,16 @@
 //! wrapped for the remaining members. Everything new uses it. Ciphertext
 //! already delivered stays readable — that is unavoidable, and the UI says
 //! so.
+//!
+//! Supporters turn keys over too. Two who do so at once make the same epoch
+//! twice, with different keys: both stay, and whoever holds both opens what
+//! either wrote. Of an epoch's keys, the smallest counts as its current one,
+//! so every device that knows them all picks the same.
 
 use aw_crypto::{seal_key, unseal_key, ContentKey, IdentityPublic, WrappedKey};
 use aw_model::Attribute;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use x25519_dalek::StaticSecret;
 
 use crate::slot::AttributeAt;
@@ -28,9 +33,9 @@ pub struct AttributeKey {
 ///
 /// Lies next to the world token on disk and never leaves the device. What
 /// a member receives are only the individual keys wrapped via `grant`.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Keyring {
-    keys: BTreeMap<AttributeAt, [u8; 32]>,
+    keys: BTreeSet<(AttributeAt, [u8; 32])>,
     current: BTreeMap<Attribute, u32>,
 }
 
@@ -61,17 +66,41 @@ impl Keyring {
 
     fn install(&mut self, attribute: Attribute, epoch: u32) -> Result<()> {
         let key = aw_crypto::random_bytes::<32>()?;
-        self.keys.insert(AttributeAt::new(attribute.clone(), epoch), key);
+        self.keys.insert((AttributeAt::new(attribute.clone(), epoch), key));
         self.current.insert(attribute, epoch);
         Ok(())
+    }
+
+    /// Takes in the keys of another ring — a supporter's, turned over while
+    /// this one did not know: every key stays, the newest epoch counts.
+    pub fn merge(&mut self, other: &Keyring) -> bool {
+        let before = (self.keys.len(), self.current.clone());
+        self.keys.extend(other.keys.iter().cloned());
+        for (attribute, epoch) in &other.current {
+            let mine = self.current.entry(attribute.clone()).or_insert(*epoch);
+            *mine = (*mine).max(*epoch);
+        }
+        before != (self.keys.len(), self.current.clone())
+    }
+
+    /// The keys this ring has and `before` had not — what turning over made.
+    pub fn new_since(&self, before: &Keyring) -> Keyring {
+        let keys: BTreeSet<_> = self.keys.difference(&before.keys).cloned().collect();
+        let current = keys.iter().map(|(at, _)| (at.attribute.clone(), self.current.get(&at.attribute).copied().unwrap_or(at.epoch))).collect();
+        Keyring { keys, current }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
     }
 
     pub fn current_epoch(&self, attribute: &Attribute) -> Option<u32> {
         self.current.get(attribute).copied()
     }
 
+    /// The key of an attribute in an epoch — of two, the one that counts.
     pub fn key_at(&self, at: &AttributeAt) -> Option<[u8; 32]> {
-        self.keys.get(at).copied()
+        first_at(&self.keys, at)
     }
 
     /// The current key of an attribute together with its epoch.
@@ -92,32 +121,30 @@ impl Keyring {
     /// nothing, it simply gets fewer keys and so decrypts exactly as much as
     /// that player's real device would.
     pub fn restrict_to(&self, attributes: &[Attribute]) -> HeldKeys {
-        let mut held = HeldKeys::new();
-        for attribute in attributes {
-            if let Some(key) = self.current(attribute) {
-                held.insert(key.at, key.key);
-            }
-        }
-        held
+        let keys = self.keys.iter().filter(|(at, _)| attributes.contains(&at.attribute)).cloned().collect();
+        HeldKeys { keys }
     }
 
     /// All keys — the GM's view.
     pub fn everything(&self) -> HeldKeys {
-        let mut held = HeldKeys::new();
-        for (at, key) in &self.keys {
-            held.insert(at.clone(), *key);
-        }
-        held
+        HeldKeys { keys: self.keys.clone() }
     }
 
     pub fn to_json(&self) -> Result<String> {
+        let mut keys = BTreeMap::new();
+        let mut also = Vec::new();
+        for (at, key) in &self.keys {
+            match keys.entry(at.to_string()) {
+                std::collections::btree_map::Entry::Occupied(_) => also.push([at.to_string(), hex::encode(key)]),
+                std::collections::btree_map::Entry::Vacant(slot) => {
+                    slot.insert(hex::encode(key));
+                }
+            }
+        }
         let file = KeyringFile {
             version: KEYRING_VERSION,
-            keys: self
-                .keys
-                .iter()
-                .map(|(at, key)| (at.to_string(), hex::encode(key)))
-                .collect(),
+            keys,
+            also,
             current: self
                 .current
                 .iter()
@@ -139,13 +166,13 @@ impl Keyring {
             ));
         }
         let mut ring = Keyring::new();
-        for (at_text, key_hex) in file.keys {
+        for (at_text, key_hex) in file.keys.into_iter().chain(file.also.into_iter().map(|[at, key]| (at, key))) {
             let at: AttributeAt = at_text.parse()?;
             let key: [u8; 32] = hex::decode(&key_hex)
                 .map_err(|e| PolicyKeyError::BadSlot(e.to_string()))?
                 .try_into()
                 .map_err(|_| PolicyKeyError::BadSlot("key is not 32 bytes".into()))?;
-            ring.keys.insert(at, key);
+            ring.keys.insert((at, key));
         }
         for (a_text, epoch) in file.current {
             let attribute: Attribute = a_text
@@ -171,12 +198,10 @@ impl Keyring {
             let current = self
                 .current_epoch(attribute)
                 .ok_or_else(|| PolicyKeyError::UnknownAttribute(attribute.to_string()))?;
-            for epoch in 1..=current {
-                let at = AttributeAt::new(attribute.clone(), epoch);
-                let Some(key) = self.key_at(&at) else { continue };
+            for (at, key) in self.keys.iter().filter(|(at, _)| at.attribute == *attribute && at.epoch <= current) {
                 out.push(GrantedKey {
                     at: at.to_string(),
-                    wrapped: seal_key(&recipient, &ContentKey::from_bytes(key))?,
+                    wrapped: seal_key(&recipient, &ContentKey::from_bytes(*key))?,
                 });
             }
         }
@@ -191,6 +216,9 @@ pub const KEYRING_VERSION: u8 = 1;
 struct KeyringFile {
     version: u8,
     keys: BTreeMap<String, String>,
+    /// A second key of an epoch already in `keys` — see the module.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    also: Vec<[String; 2]>,
     current: BTreeMap<String, u32>,
 }
 
@@ -209,7 +237,7 @@ pub struct GrantedKey {
 /// or which documents the device received.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct HeldKeys {
-    keys: BTreeMap<AttributeAt, [u8; 32]>,
+    keys: BTreeSet<(AttributeAt, [u8; 32])>,
 }
 
 impl HeldKeys {
@@ -228,7 +256,7 @@ impl HeldKeys {
                 continue;
             };
             if let Ok(key) = unseal_key(secret, &entry.wrapped) {
-                held.keys.insert(at, *key.as_bytes());
+                held.keys.insert((at, *key.as_bytes()));
             }
         }
         held
@@ -246,16 +274,16 @@ impl HeldKeys {
     }
 
     pub fn insert(&mut self, at: AttributeAt, key: [u8; 32]) {
-        self.keys.insert(at, key);
+        self.keys.insert((at, key));
     }
 
     pub fn key_at(&self, at: &AttributeAt) -> Option<[u8; 32]> {
-        self.keys.get(at).copied()
+        first_at(&self.keys, at)
     }
 
     /// Every held key, with the attribute and epoch it is for.
     pub fn iter(&self) -> impl Iterator<Item = (&AttributeAt, &[u8; 32])> {
-        self.keys.iter()
+        self.keys.iter().map(|(at, key)| (at, key))
     }
 
     pub fn len(&self) -> usize {
@@ -270,8 +298,13 @@ impl HeldKeys {
     ///
     /// Exactly this set is what "preview as player" renders.
     pub fn attributes(&self) -> std::collections::BTreeSet<Attribute> {
-        self.keys.keys().map(|at| at.attribute.clone()).collect()
+        self.keys.iter().map(|(at, _)| at.attribute.clone()).collect()
     }
+}
+
+/// The first key of an epoch: the one that counts where there are two.
+fn first_at(keys: &BTreeSet<(AttributeAt, [u8; 32])>, at: &AttributeAt) -> Option<[u8; 32]> {
+    keys.range((at.clone(), [0; 32])..).next().filter(|(a, _)| a == at).map(|(_, key)| *key)
 }
 
 #[cfg(test)]
@@ -391,6 +424,30 @@ mod tests {
         let preview = ring.restrict_to(&[attr("players"), attr("class:rogue")]);
         assert_eq!(preview.len(), 2);
         assert_eq!(ring.everything().len(), 3);
+    }
+
+    #[test]
+    fn two_who_turn_a_key_over_at_once_keep_both_keys() {
+        let rogue = attr("class:rogue");
+        let mut gm = Keyring::new();
+        gm.ensure(&rogue).unwrap();
+        let mut supporter = Keyring::from_json(&gm.to_json().unwrap()).unwrap();
+        gm.rotate(&rogue).unwrap();
+        supporter.rotate(&rogue).unwrap();
+        let theirs = supporter.new_since(&Keyring::from_json(&gm.to_json().unwrap()).unwrap());
+        assert_eq!(theirs.everything().len(), 1, "what the supporter made, as the GM did not know it");
+
+        assert!(gm.merge(&supporter));
+        supporter.merge(&gm);
+        assert_eq!(gm.current_epoch(&rogue), Some(2));
+        assert_eq!(gm.everything().len(), 3, "the first epoch and both of the second");
+        assert_eq!(gm.current(&rogue).unwrap().key, supporter.current(&rogue).unwrap().key, "both pick the same");
+
+        // Both keys go to a member, and through the file.
+        let bob = Identity::create("Bob").unwrap();
+        assert_eq!(HeldKeys::unseal(bob.seal_secret(), &gm.grant(&bob.public(), std::slice::from_ref(&rogue)).unwrap()).len(), 3);
+        assert_eq!(Keyring::from_json(&gm.to_json().unwrap()).unwrap().everything().len(), 3);
+        assert!(!gm.merge(&supporter), "nothing new");
     }
 
     #[test]

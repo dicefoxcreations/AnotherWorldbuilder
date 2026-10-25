@@ -63,7 +63,7 @@ const BLOCK: &str = "anotherworldbuilder/block/1";
 const VERSION: &str = "anotherworldbuilder/version/1";
 const PROPOSAL: &str = "anotherworldbuilder/proposal/1";
 const BADGE: &str = "anotherworldbuilder/badge/1";
-const ADMISSION: &str = "anotherworldbuilder/admission/1";
+const SUPPORT: &str = "anotherworldbuilder/support/1";
 /// A whole document travels in one version — texts are not that big.
 pub const MAX_RECORD: usize = 16 * 1024 * 1024;
 /// Versions kept per document when the game master has not said otherwise.
@@ -556,46 +556,73 @@ pub enum Record {
     Image(crate::media::ImageEntry),
     Proposal(Proposal),
     Badge(Badge),
-    Admission(Admission),
+    Support(Support),
 }
 
-/// A player let in by a supporter: with the keys the supporter holds as a
-/// player — those for everyone — sealed for the new member, the supporter
-/// and the game master. It counts until the game master's device writes the
-/// member's grant itself; a removal the supporter had not seen outweighs it.
+/// What a supporter does in a world: lets a player in, gives or takes a
+/// player's roles, takes a player out — and hands on the keys that turned
+/// over on the way. Signed by the supporter, not with the world token: it
+/// counts while they are a supporter, and over the game master's word on
+/// the same member only where they knew that word (`after`). The game
+/// master's device takes it in and writes its own word after it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Admission {
+pub struct Support {
     pub world: String,
-    pub member: IdentityPublic,
     pub by: IdentityPublic,
     /// The newest control record the supporter knew, by its count.
     pub after: u64,
     /// Milliseconds since 1970, by the supporter's clock.
     pub at: u64,
-    /// `GrantContent`, as a grant holds it.
-    pub sealed: Sealed,
+    pub act: Act,
     pub signature: String,
 }
 
-impl Admission {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(world: &str, by: &Identity, member: &IdentityPublic, gm: &IdentityPublic, content: &GrantContent, after: u64, at: u64, encrypted: bool) -> Result<Self> {
-        let bytes = serde_json::to_vec(content)?;
-        let sealed = if encrypted { Sealed::new(&[member, &by.public(), gm], &bytes)? } else { Sealed::plain(&bytes) };
-        let mut a = Admission { world: world.to_string(), member: member.clone(), by: by.public(), after, at, sealed, signature: String::new() };
-        a.signature = hex::encode(by.sign(&a.signed_bytes()?));
-        Ok(a)
+/// What a supporter did — see `Support`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Act {
+    /// A player let in, or their roles changed: their grant
+    /// (`GrantContent`), sealed for them, the supporter, the game master and
+    /// the other supporters.
+    Grant { member: IdentityPublic, sealed: Sealed },
+    /// A player taken out.
+    Revoked { member: String },
+    /// Keys turned over — a `Keyring` of the new ones, as JSON, sealed for
+    /// the game master and the supporters. Kept for good: what was written
+    /// with them opens with nothing else.
+    Keys { sealed: Sealed },
+}
+
+impl Act {
+    /// The member it is about — none for keys.
+    fn member(&self) -> Option<&str> {
+        match self {
+            Act::Grant { member, .. } => Some(member.id.as_str()),
+            Act::Revoked { member } => Some(member),
+            Act::Keys { .. } => None,
+        }
+    }
+}
+
+impl Support {
+    pub fn new(world: &str, by: &Identity, act: Act, after: u64, at: u64) -> Result<Self> {
+        let mut s = Support { world: world.to_string(), by: by.public(), after, at, act, signature: String::new() };
+        s.signature = hex::encode(by.sign(&s.signed_bytes()?));
+        Ok(s)
     }
 
     fn signed_bytes(&self) -> Result<Vec<u8>> {
-        Ok(serde_json::to_vec(&(ADMISSION, &self.world, &self.member, &self.by, self.after, self.at, &self.sealed))?)
+        Ok(serde_json::to_vec(&(SUPPORT, &self.world, &self.by, self.after, self.at, &self.act))?)
     }
 
     fn verify(&self, world: &str) -> Result<()> {
         if self.world != world {
             return Err("a record of another world".into());
         }
-        if !self.by.is_genuine() || !self.member.is_genuine() {
+        let genuine = match &self.act {
+            Act::Grant { member, .. } => member.is_genuine(),
+            _ => true,
+        };
+        if !self.by.is_genuine() || !genuine {
             return Err("an id that does not match its keys".into());
         }
         self.by.verify(&self.signed_bytes()?, &signature(&self.signature)?)?;
@@ -780,7 +807,7 @@ pub fn verify_record_envelope(raw: &str, world: &WorldPublic, gm: Option<&Identi
         Record::Image(i) => i.verify(expected, gm)?,
         Record::Proposal(p) => p.verify(expected)?,
         Record::Badge(b) => b.verify(expected)?,
-        Record::Admission(a) => a.verify(expected)?,
+        Record::Support(a) => a.verify(expected)?,
     }
     Ok(record)
 }
@@ -801,7 +828,7 @@ fn shelved(id: &str, raw: &[u8], record: &Record) -> Stored {
         },
         Record::Version(v) => Some(v.article.to_string()),
         Record::Draft(d) => Some(d.article.to_string()),
-        Record::Image(_) | Record::Proposal(_) | Record::Badge(_) | Record::Admission(_) => None,
+        Record::Image(_) | Record::Proposal(_) | Record::Badge(_) | Record::Support(_) => None,
     };
     Stored { id: id.to_string(), kind: order(record).0, article, at: now(), raw: Some(raw.to_vec()) }
 }
@@ -988,9 +1015,11 @@ pub struct Journal {
     proposals: BTreeMap<String, Proposal>,
     /// The newest badge of each member, by member id — with its record's id.
     badges: BTreeMap<String, (String, Badge)>,
-    /// The newest admission of each member by a supporter, by member id —
-    /// with its record's id.
-    admissions: BTreeMap<String, (String, Admission)>,
+    /// The newest act of a supporter on each member, by member id — with
+    /// its record's id.
+    support: BTreeMap<String, (String, Support)>,
+    /// Keys supporters turned over, by their record's id.
+    turned: BTreeMap<String, Support>,
     /// Blocks whose changes checked out on this device.
     trusted: HashSet<String>,
     /// Versions known from the index, whose files need no reading.
@@ -1118,7 +1147,7 @@ fn order(record: &Record) -> (u8, u64) {
         Record::Image(i) => (3, i.time),
         Record::Proposal(p) => (4, p.at),
         Record::Badge(b) => (5, b.at),
-        Record::Admission(a) => (6, a.at),
+        Record::Support(a) => (6, a.at),
     }
 }
 
@@ -1149,7 +1178,8 @@ impl Journal {
             images: BTreeMap::new(),
             proposals: BTreeMap::new(),
             badges: BTreeMap::new(),
-            admissions: BTreeMap::new(),
+            support: BTreeMap::new(),
+            turned: BTreeMap::new(),
             attached: index.attached,
             trusted: index.trusted.into_iter().collect(),
             indexed: index.versions,
@@ -1441,7 +1471,7 @@ impl Journal {
                 _ => None,
             },
             Record::Draft(d) => Some(Some(d.article)),
-            Record::Proposal(_) | Record::Badge(_) | Record::Admission(_) => Some(None),
+            Record::Proposal(_) | Record::Badge(_) | Record::Support(_) => Some(None),
             Record::Image(_) | Record::Version(_) => None,
         };
         match record {
@@ -1498,23 +1528,30 @@ impl Journal {
                     self.badges.insert(member, (id.clone(), badge));
                 }
             }
-            Record::Admission(admission) => {
-                admission.verify(self.world.world_id.as_str())?;
+            Record::Support(support) => {
+                support.verify(self.world.world_id.as_str())?;
                 // Only a supporter's — whom the game master's word may still be on its way.
-                if !self.supports(&admission.by) {
-                    self.waiting.insert(id, Pending::Record(raw, Box::new(Record::Admission(admission)), write));
+                if !self.supports(&support.by) {
+                    self.waiting.insert(id, Pending::Record(raw, Box::new(Record::Support(support)), write));
                     return Ok(Added::Waiting);
                 }
                 self.waiting.remove(&id);
                 if write {
-                    self.store(&id, &raw, &Record::Admission(admission.clone()))?;
+                    self.store(&id, &raw, &Record::Support(support.clone()))?;
                 }
                 self.raw.insert(id.clone(), raw);
                 self.arrivals.push(id.clone());
                 self.arrived.entry(id.clone()).or_insert_with(now);
-                let member = admission.member.id.to_string();
-                if self.admissions.get(&member).is_none_or(|(_, a)| a.at <= admission.at) {
-                    self.admissions.insert(member, (id.clone(), admission));
+                match support.act.member().map(str::to_string) {
+                    Some(member) => {
+                        let newer = |a: &Support| (a.after, a.at) <= (support.after, support.at);
+                        if self.support.get(&member).is_none_or(|(_, a)| newer(a)) {
+                            self.support.insert(member, (id.clone(), support));
+                        }
+                    }
+                    None => {
+                        self.turned.insert(id.clone(), support);
+                    }
                 }
             }
             Record::Proposal(proposal) => {
@@ -1736,7 +1773,7 @@ impl Journal {
             Record::Version(v) => matches!(self.check_version(v), Ok(Some(_))),
             Record::Proposal(p) => self.is_member(&p.author),
             Record::Badge(b) => self.is_member(&b.author),
-            Record::Admission(a) => self.supports(&a.by),
+            Record::Support(a) => self.supports(&a.by),
         }
     }
 
@@ -1932,33 +1969,65 @@ impl Journal {
         }
     }
 
-    /// A member's grant: the game master's — or, until there is one, a
-    /// supporter's admission that no removal came after.
+    /// A member's grant: the game master's — or a supporter's, where it came
+    /// after the game master's word on them. `None`: not in, or taken out.
     pub fn grant(&self, member: &str) -> Option<(&IdentityPublic, &Sealed)> {
-        let removed = match self.item(&format!("grant {member}")).map(|c| (&c.item, c.seq)) {
-            Some((Item::Grant { member, sealed }, _)) => return Some((member, sealed)),
-            Some((_, seq)) => seq,
-            None => 0,
-        };
-        let (_, admission) = self.admissions.get(member)?;
-        (admission.after >= removed && self.supports(&admission.by)).then_some((&admission.member, &admission.sealed))
-    }
-
-    /// Who let a member in, where it was a supporter and not yet the game
-    /// master's grant.
-    pub fn admitted_by(&self, member: &str) -> Option<&IdentityPublic> {
-        let held = matches!(self.item(&format!("grant {member}")).map(|c| &c.item), Some(Item::Grant { .. }));
-        if held {
-            return None;
+        if let Some(act) = self.act_on(member) {
+            return match &act.act {
+                Act::Grant { member, sealed } => Some((member, sealed)),
+                _ => None,
+            };
         }
-        self.grant(member)?;
-        self.admissions.get(member).map(|(_, a)| &a.by)
+        match &self.item(&format!("grant {member}"))?.item {
+            Item::Grant { member, sealed } => Some((member, sealed)),
+            _ => None,
+        }
     }
 
-    /// The members admitted by supporters the game master has not granted
-    /// themselves yet — for the game master's device to take in.
-    pub fn admitted(&self) -> Vec<IdentityPublic> {
-        self.admissions.keys().filter(|m| self.admitted_by(m).is_some()).filter_map(|m| self.grant(m).map(|(i, _)| i.clone())).collect()
+    /// The supporter's act on a member that counts over the game master's
+    /// word: by a supporter, knowing that word — and never on the game
+    /// master, nor taking a supporter out.
+    fn act_on(&self, member: &str) -> Option<&Support> {
+        let (_, act) = self.support.get(member)?;
+        let word = self.item(&format!("grant {member}")).map_or(0, |c| c.seq);
+        let gm = self.gm().is_some_and(|gm| gm.id.as_str() == member);
+        let out = matches!(act.act, Act::Revoked { .. }) && self.supporters().iter().any(|s| s == member);
+        (act.after >= word && self.supports(&act.by) && !gm && !out).then_some(act)
+    }
+
+    /// The game master's own word on a member: let in, taken out, or none.
+    pub fn word_on(&self, member: &str) -> Option<bool> {
+        match self.item(&format!("grant {member}")).map(|c| &c.item) {
+            Some(Item::Grant { .. }) => Some(true),
+            Some(Item::Revoked { .. }) => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Who changed a member last, where it was a supporter and the game
+    /// master has not written their own word since.
+    pub fn acted_by(&self, member: &str) -> Option<&IdentityPublic> {
+        self.act_on(member).map(|a| &a.by)
+    }
+
+    /// The members supporters changed that the game master has not written
+    /// their own word on yet — for the game master's device to take in: in
+    /// with their grant, or out (`false`).
+    pub fn acted_on(&self) -> Vec<(String, bool)> {
+        self.support.keys().filter_map(|m| self.act_on(m).map(|a| (m.clone(), matches!(a.act, Act::Grant { .. })))).collect()
+    }
+
+    /// The keys supporters turned over, as far as `secret` opens them.
+    pub fn turned_keys(&self, secret: &x25519_dalek::StaticSecret) -> Keyring {
+        let mut ring = Keyring::new();
+        for support in self.turned.values() {
+            let Act::Keys { sealed } = &support.act else { continue };
+            let opened = sealed.open(secret).and_then(|raw| String::from_utf8(raw).ok()).and_then(|text| Keyring::from_json(&text).ok());
+            if let Some(theirs) = opened {
+                ring.merge(&theirs);
+            }
+        }
+        ring
     }
 
     /// The ids that let players in besides the game master.
@@ -1995,7 +2064,7 @@ impl Journal {
         }
     }
 
-    /// The highest control record count — for an admission written now.
+    /// The highest control record count — for a supporter's act written now.
     pub fn control_count(&self) -> u64 {
         self.max_seq
     }
@@ -2008,7 +2077,7 @@ impl Journal {
 
     /// The current signed admissions, excluding revoked members.
     pub fn granted_members(&self) -> Vec<IdentityPublic> {
-        let ids: BTreeSet<&str> = self.latest.keys().filter_map(|key| key.strip_prefix("grant ")).chain(self.admissions.keys().map(String::as_str)).collect();
+        let ids: BTreeSet<&str> = self.latest.keys().filter_map(|key| key.strip_prefix("grant ")).chain(self.support.keys().map(String::as_str)).collect();
         ids.into_iter().filter_map(|id| self.grant(id).map(|(member, _)| member.clone())).collect()
     }
 
@@ -2826,7 +2895,7 @@ impl Journal {
     }
 
     /// What every member gets: control, versions, gallery entries,
-    /// proposals, each member's newest badge and admission.
+    /// proposals, each member's newest badge, supporters' acts.
     pub fn shared(&self) -> Vec<String> {
         let mut out: Vec<String> = self
             .controls
@@ -2835,7 +2904,8 @@ impl Journal {
             .chain(self.images.keys())
             .chain(self.proposals.keys())
             .chain(self.badges.values().map(|(id, _)| id))
-            .chain(self.admissions.values().map(|(id, _)| id))
+            .chain(self.support.values().map(|(id, _)| id))
+            .chain(self.turned.keys())
             .cloned()
             .collect();
         out.sort();
@@ -2920,10 +2990,10 @@ impl Journal {
                 } else if let Some(p) = self.proposals.get(id) {
                     Some((5, p.at, id.clone()))
                 } else {
-                    // A badge or an admission — the newest of its member, or one before it.
+                    // A badge or a supporter's act — the newest of its member, or one before it.
                     match serde_json::from_slice::<Record>(self.raw.get(id)?).ok()? {
                         Record::Badge(b) => Some((6, b.at, id.clone())),
-                        Record::Admission(a) => Some((7, a.at, id.clone())),
+                        Record::Support(a) => Some((7, a.at, id.clone())),
                         _ => None,
                     }
                 }

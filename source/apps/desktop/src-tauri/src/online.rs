@@ -110,6 +110,7 @@ struct Session {
     /// (`answer_asking`).
     requests: Vec<aw_crypto::IdentityPublic>,
     approved: Vec<String>,
+    removing: Vec<String>,
     /// The server's admins, where they changed — the GM seals its keys for
     /// them.
     admins: Option<Vec<aw_crypto::IdentityPublic>>,
@@ -168,7 +169,7 @@ impl Session {
         std::fs::create_dir_all(store.worlds_dir())?;
         copy_private(base, &store, world)?;
         Ok(Self { world: world.into(), store, _temporary: temporary, endpoint: endpoint.into(), copies: false,
-                  synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false, untold: false, requests: Vec::new(), approved: Vec::new(), admins: None,
+                  synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false, untold: false, requests: Vec::new(), approved: Vec::new(), removing: Vec::new(), admins: None,
                   pictures: 0, pictures_shown: std::time::Instant::now() })
     }
 
@@ -224,7 +225,7 @@ impl Session {
     async fn read_server(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
         let reply = transport.ask(world, network::live_digest(world, self.store.load_identity()?.id().as_str())?).await?;
         network::receive_live(world, &reply);
-        let Reply::Digest { digest, requests, approved, admins, no_copy, mark, .. } = reply else {
+        let Reply::Digest { digest, requests, approved, removing, admins, no_copy, mark, .. } = reply else {
             return Err(AppError(match reply {
                 // Taken out: the world leaves the list, and may be asked for again.
                 Reply::NotMember | Reply::NotOffered => {
@@ -299,9 +300,10 @@ impl Session {
         }
         // Taken with what follows, so what they bring is sent with it.
         let gm = self.store.is_gm(world);
-        if !requests.is_empty() && (gm || self.store.supports(world)?) {
+        if (!requests.is_empty() || !removing.is_empty()) && (gm || self.store.supports(world)?) {
             self.requests = requests;
             self.approved = approved;
+            self.removing = removing;
         }
         if gm && self.store.server_admins(world)? != admins {
             self.admins = Some(admins);
@@ -593,7 +595,7 @@ pub(crate) fn remember_offer(base: &Store, world: &str, server: &Server, offer: 
         "attributes": [], "members": [], "article_count": 0, "home": "", "requests": 0, "invited": [],
         "takeovers": {}, "colours": {}, "moderated": false, "waiting": 0, "version_limit": 50,
         "encrypted": true, "readable": "", "readable_in_world": false, "offered": false, "dice": [],
-        "supporters": [], "chosen": [], "admins": [], "supporter": false, "can_take_over": false,
+        "supporters": [], "chosen": [], "admins": [], "supporter": false, "can_take_over": false, "roles": [],
         "calendar": WorldCalendar::default(),
     }));
     info["name"] = offer.name.clone().into();
@@ -757,6 +759,7 @@ fn answer_asking(session: &mut Session, world: &str) -> Answer<()> {
     }
     let approved = std::mem::take(&mut session.approved);
     let asking = std::mem::take(&mut session.requests);
+    network::take_out(&session.store, world, &std::mem::take(&mut session.removing))?;
     if asking.is_empty() {
         return Ok(());
     }

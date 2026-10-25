@@ -39,15 +39,17 @@ The network side: a connection is accepted only from an address that proved itse
 
 | Role | For | May |
 | --- | --- | --- |
-| Admin (one or more) | the server | manage it, name admins and worldbuilders, bring worlds, let players into any world on it; supporter of every world on it |
+| Admin (one or more) | the server | manage it, name admins and worldbuilders, bring worlds, let players into and take them out of any world on it; supporter of every world on it |
 | Worldbuilder | the server | bring worlds |
-| GM | one world | everything in it; let players in; name supporters; hand the world over |
-| Supporter | one world | let players in; take the GM's place when needed |
+| GM | one world | everything in it; let players in and take anyone out; name supporters; hand the world over |
+| Supporter | one world | let players in, give and take their roles, take them out; take the GM's place when needed |
 | Player | one world | what their view and rights say |
 
-Whoever brings or creates a world is its GM. Handing the world over (*Players → Make GM*), the GM becomes a player of it and sees no more than the others. The server holds no world's keys: letting someone in hands them keys, and only those who hold some can — the GM, and a supporter with the keys every player has (what only a character may see, the GM gives later). An admin who is not in the world lets in (*Manage → Let in*); the next device holding its keys, the GM's or a supporter's, does it without asking (`Reply::Digest.approved`).
+Whoever brings or creates a world is its GM. Handing the world over (*Players → Make GM*), the GM becomes a player of it and sees no more than the others. The server holds no world's keys: letting someone in hands them keys, and only those who hold the keys can — the GM, and the supporters with the GM's keys sealed for them. An admin who is not in the world lets in (*Manage → Let in*) and takes out (*Manage → Players → Take out*): the server turns whoever is taken out away at once, and the next device holding the world's keys, the GM's or a supporter's, does the rest without asking (`Reply::Digest.approved`, `removing`).
 
 **Supporters** (`Item::Supporters`, signed by the GM): the players the GM chose (*Players → Supporter*) and the server's admins, whose identities the server tells the GM's device (`Reply::Digest.admins`). For each, the GM's keys — world token, keyring, members — lie sealed in the world (`Item::Keys`), sealed anew when they change, taken back from whoever is no supporter any more. A supporter could read everything with them; the GM chooses them for that. *Players → Take the GM's place …* makes a supporter the GM, for everyone to see: the world names them; the old GM becomes a player, and every key they no longer need turns over. Handing the world over works the same way (`Item::Handover`): the member's device takes it over when it next reads the world.
+
+**What supporters do** (*Players*, as the GM sees it): let players in, give them roles or take roles away, take them out — not the GM, nor another supporter, and never the role `gm`. Their device works on the members and keyring as the GM's keys and the acts since tell them (`store::Roster`), the same way the GM's does, and writes what changed as acts signed by the supporter (`journal::Support`): a grant, a removal, and the keys that turned over on the way, sealed for the GM and the other supporters. An act counts at once on every device, as long as its author is a supporter and it came after the GM's last word on that member (`after`). The GM's device takes the acts in as its own word (`adopt_support`): it merges the new keys into its keyring, writes the grants anew and seals types and navigation with the new keys. Two who turn the same key over at once both keep their key; whoever holds both opens what either wrote.
 
 ## Admin
 

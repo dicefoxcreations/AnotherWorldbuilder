@@ -43,6 +43,10 @@ pub(crate) struct Book {
     /// lets them in.
     #[serde(default)]
     approved: BTreeMap<String, Vec<String>>,
+    /// By world: whom an admin took out — turned away at once; the next
+    /// device holding its keys takes them out for good.
+    #[serde(default)]
+    removing: BTreeMap<String, Vec<String>>,
     /// The admins as they proved themselves: for GMs to seal their keys for.
     #[serde(default)]
     identities: BTreeMap<String, IdentityPublic>,
@@ -345,6 +349,9 @@ impl Keeper {
             return self.bring(world, who, ask);
         }
         let store = &self.store;
+        if self.book()?.removing.get(world).is_some_and(|r| r.contains(&id)) {
+            return Ok(Reply::NotMember);
+        }
         if matches!(ask, Ask::Commit { .. } | Ask::Abort { .. } | Ask::Release { .. }) {
             if store.gm_of(world)?.as_deref() != Some(id.as_str()) && !store.has_grant(world, &id)? {
                 return Ok(Reply::NotMember);
@@ -354,8 +361,8 @@ impl Keeper {
         // Its GM: the whole of it, and who asked to join.
         if store.gm_of(world)?.as_deref() == Some(id.as_str()) {
             let mut reply = network::answer_member(store, world, &id, ask)?;
-            if let Reply::Digest { requests, approved, admins, no_copy, .. } = &mut reply {
-                (*requests, *approved) = self.requests(world)?;
+            if let Reply::Digest { requests, approved, removing, admins, no_copy, .. } = &mut reply {
+                (*requests, *approved, *removing) = self.requests(world)?;
                 *admins = self.admin_identities()?;
                 *no_copy = !store.copies(world)?;
             }
@@ -408,11 +415,11 @@ impl Keeper {
         // Encrypted: what only their keys open — kept while online where
         // the GM keeps players from copies.
         let mut reply = network::answer_member(store, world, &id, ask)?;
-        if let Reply::Digest { requests, approved, no_copy, .. } = &mut reply {
+        if let Reply::Digest { requests, approved, removing, no_copy, .. } = &mut reply {
             *no_copy = !store.copies(world)?;
             // A supporter hears who asked to join, as the GM does.
             if store.with_journal(world, |j| Ok(j.supporters().contains(&id)))? {
-                (*requests, *approved) = self.requests(world)?;
+                (*requests, *approved, *removing) = self.requests(world)?;
             }
         }
         Ok(reply)
@@ -437,6 +444,7 @@ impl Keeper {
                 rolls: Vec::new(),
                 requests: Vec::new(),
                 approved: Vec::new(),
+                removing: Vec::new(),
                 admins: Vec::new(),
                 no_copy: false,
                 mark: None,
@@ -475,8 +483,9 @@ impl Keeper {
 
     /// Who asked to join a world here — for its GM, who decides. Those let
     /// in meanwhile are done.
-    /// Who asked to join a world — and whom of them an admin let in.
-    fn requests(&self, world: &str) -> Answer<(Vec<IdentityPublic>, Vec<String>)> {
+    /// Who asked to join a world, whom of them an admin let in — and whom
+    /// an admin took out who is in still.
+    fn requests(&self, world: &str) -> Answer<(Vec<IdentityPublic>, Vec<String>, Vec<String>)> {
         let store = &self.store;
         let mut requests = store.load_requests(world)?;
         let before = requests.len();
@@ -492,7 +501,14 @@ impl Keeper {
             if still.is_empty() { book.approved.remove(world); } else { book.approved.insert(world.to_string(), still.clone()); }
             self.save(&book)?;
         }
-        Ok((requests.into_iter().map(|r| r.identity).collect(), still))
+        // Out for good once their grant is gone; until then turned away.
+        let removing = book.removing.get(world).cloned().unwrap_or_default();
+        let inside: Vec<String> = removing.iter().filter(|id| store.has_grant(world, id).unwrap_or(false)).cloned().collect();
+        if inside != removing {
+            if inside.is_empty() { book.removing.remove(world); } else { book.removing.insert(world.to_string(), inside.clone()); }
+            self.save(&book)?;
+        }
+        Ok((requests.into_iter().map(|r| r.identity).collect(), still, inside))
     }
 
     fn plan(&self, world: &str) -> Answer<BackupPlan> {
@@ -568,6 +584,19 @@ impl Keeper {
                     approved.push(id);
                 }
             }
+            Order::Remove { world, id } => {
+                if !self.store.holds(&world) {
+                    return Err(AppError("There is no such world here.".into()));
+                }
+                let (gm, supporter) = self.store.with_journal(&world, |j| Ok((j.world_item().is_some_and(|(.., g)| g.id.as_str() == id), j.supporters().contains(&id))))?;
+                if gm || supporter {
+                    return Err(AppError("Only players are taken out here — the GM takes out supporters.".into()));
+                }
+                let removing = book.removing.entry(world).or_default();
+                if !removing.contains(&id) {
+                    removing.push(id);
+                }
+            }
             Order::Close { world } => {
                 let name = self.store.load_world_meta(&world).map(|m| m.public.name).unwrap_or_default();
                 book.closed.insert(world, name);
@@ -605,6 +634,11 @@ impl Keeper {
             let world = meta.public.world_id.to_string();
             let known = self.known(&world)?;
             let requests = self.store.load_requests(&world).unwrap_or_default().into_iter().map(|r| person(r.identity.id.as_str())).collect();
+            let removing = book.removing.get(&world).cloned().unwrap_or_default();
+            let members = self.store.with_journal(&world, |j| Ok(j.granted_members())).unwrap_or_default().into_iter()
+                .filter(|m| !removing.iter().any(|r| r == m.id.as_str()))
+                .map(|m| Person { name: m.name.clone(), ..person(m.id.as_str()) })
+                .collect();
             worlds.push(HeldWorld {
                 name: meta.public.name.clone(),
                 gm: known.gm,
@@ -613,12 +647,13 @@ impl Keeper {
                 encrypted: known.encrypted,
                 closed: book.closed.contains_key(&world),
                 requests,
+                members,
                 world,
             });
         }
         // Closed and gone: by the name it had.
         for (world, name) in book.closed.iter().filter(|(w, _)| !self.store.holds(w)) {
-            worlds.push(HeldWorld { world: world.clone(), name: name.clone(), gm: String::new(), gm_id: String::new(), bytes: 0, encrypted: true, closed: true, requests: Vec::new() });
+            worlds.push(HeldWorld { world: world.clone(), name: name.clone(), gm: String::new(), gm_id: String::new(), bytes: 0, encrypted: true, closed: true, requests: Vec::new(), members: Vec::new() });
         }
         worlds.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         let mut users: Vec<Person> = book.users.keys().map(|id| person(id)).collect();
@@ -1143,6 +1178,21 @@ mod tests {
         swap(&keeper, &marla, &world);
         assert!(matches!(swap(&keeper, &eve, &world), Reply::Records { .. }));
         assert!(digest().1.is_empty(), "done with");
+
+        // Olaf takes her out again: turned away at once, out for good once
+        // Marla's device hears of it.
+        assert!(matches!(manage(&keeper, &olaf, Some(Order::Remove { world: world.clone(), id: marla.me.id().to_string() })), Reply::NotOffered | Reply::Managed { .. }));
+        assert!(marla.store.is_gm(&world), "not the GM");
+        let Reply::Managed { state } = manage(&keeper, &olaf, Some(Order::Remove { world: world.clone(), id: eve.me.id().to_string() })) else { panic!("Olaf manages") };
+        assert!(state.worlds.iter().find(|w| w.world == world).unwrap().members.is_empty(), "Eve is on her way out");
+        assert_eq!(swap(&keeper, &eve, &world), Reply::NotMember);
+        let Reply::Digest { removing, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
+        assert_eq!(removing, vec![eve.me.id().to_string()]);
+        crate::network::take_out(&marla.store, &world, &removing).unwrap();
+        assert!(marla.store.load_world_meta(&world).unwrap().member(eve.me.id().as_str()).is_none());
+        swap(&keeper, &marla, &world);
+        let Reply::Digest { removing, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
+        assert!(removing.is_empty(), "done with");
         // An admin cannot be turned away; the first one stays.
         assert!(matches!(manage(&keeper, &olaf, Some(Order::Block { id: marla.me.id().to_string() })), Reply::NotOffered));
         assert!(matches!(manage(&keeper, &olaf, Some(Order::Admin { id: marla.me.id().to_string(), on: false })), Reply::NotOffered));

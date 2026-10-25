@@ -174,6 +174,9 @@ pub enum Order {
     /// Lets someone who asked into a world: the next device holding its
     /// keys — its GM's, a supporter's — lets them in.
     Approve { world: String, id: String },
+    /// Takes a player out of a world: the server gives it to them no more,
+    /// at once; the next device holding its keys takes them out for good.
+    Remove { world: String, id: String },
     /// Nobody gets it any more, its GM neither; it stays as it is.
     Close { world: String },
     Open { world: String },
@@ -198,6 +201,9 @@ pub struct HeldWorld {
     /// Who asked to join it — for an admin to let in.
     #[serde(default)]
     pub requests: Vec<Person>,
+    /// Its players, as their grants name them — for an admin to take out.
+    #[serde(default)]
+    pub members: Vec<Person>,
 }
 
 /// Someone a server knows.
@@ -246,6 +252,10 @@ pub enum Reply {
         /// them in without asking.
         #[serde(default)]
         approved: Vec<String>,
+        /// Whom an admin took out: the device holding the keys takes them
+        /// out for good.
+        #[serde(default)]
+        removing: Vec<String>,
         /// The server's admins — the world's supporters too, for whom its GM
         /// seals their keys.
         #[serde(default)]
