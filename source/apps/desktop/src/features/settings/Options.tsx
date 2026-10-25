@@ -851,11 +851,12 @@ function PlayersArea({
   const takes = world.takeovers;
   const nameOf = (id: string) => world.members.find((m) => m.id === id)?.name ?? id;
 
+  const [takingOver, setTakingOver] = useState(false);
   // `world.requests` changes when someone new asks — then the list is read again.
   useEffect(() => {
-    if (!world.isGm) return;
+    if (!world.isGm && !world.supporter) return;
     api.joinRequests(world.id).then(setRequests).catch(onError);
-  }, [world.id, world.isGm, world.requests]);
+  }, [world.id, world.isGm, world.supporter, world.requests]);
   // `world.waiting` changes when a version comes in or is decided.
   useEffect(() => {
     if (!world.isGm) return;
@@ -900,6 +901,29 @@ function PlayersArea({
     }
   };
 
+  const asking = requests.length > 0 && (
+    <>
+      <h3>Asking to join</h3>
+      <ul className="members large requests">
+        {requests.map((r) => (
+          <li key={r.id}>
+            <div>
+              <strong>{r.name}</strong>
+              <small className="small">{r.fingerprint}</small>
+              {takes[r.id] && <small className="accent">Takes {nameOf(takes[r.id])}'s place</small>}
+            </div>
+            <div className="line">
+              <button className="primary compact" onClick={() => run(api.joinAnswer(world.id, r.id, true))}>
+                Accept
+              </button>
+              <button className="compact" onClick={() => run(api.joinAnswer(world.id, r.id, false))}>Decline</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+
   if (!world.isGm)
     return (
       <div className="type-page">
@@ -908,13 +932,35 @@ function PlayersArea({
           <li>
             <div>
               <strong>{me.name}</strong> <span className="role-badge player">Player</span>
+              {world.supporter && <span className="role-badge">Supporter</span>}
               <small className="small">{world.attributes.filter((a) => !PLAIN.includes(a)).join(", ")}</small>
             </div>
             <OwnColour world={world} me={me} onChanged={onChanged} onError={onError} />
           </li>
         </ul>
+        {asking}
+        {world.canTakeOver && (
+          <>
+            <h3>Emergency</h3>
+            {takingOver ? (
+              <div className="line">
+                <small className="small grow">You become GM. Everyone sees it.</small>
+                <button className="danger compact" onClick={() => run(api.worldTakeOver(world.id).then(() => setTakingOver(false)))}>
+                  Become GM
+                </button>
+                <button className="compact" onClick={() => setTakingOver(false)}>Cancel</button>
+              </div>
+            ) : (
+              <button onClick={() => setTakingOver(true)}>Take the GM's place …</button>
+            )}
+          </>
+        )}
       </div>
     );
+
+  const supports = (id: string) => world.supporters.includes(id);
+  const chooseSupporter = (id: string, on: boolean) =>
+    run(api.worldSupportersSet(world.id, on ? [...world.chosen, id] : world.chosen.filter((c) => c !== id)));
 
   return (
     <div className="type-page">
@@ -953,28 +999,7 @@ function PlayersArea({
         </>
       )}
 
-      {requests.length > 0 && (
-        <>
-          <h3>Asking to join</h3>
-          <ul className="members large requests">
-            {requests.map((r) => (
-              <li key={r.id}>
-                <div>
-                  <strong>{r.name}</strong>
-                  <small className="small">{r.fingerprint}</small>
-                  {takes[r.id] && <small className="accent">Takes {nameOf(takes[r.id])}'s place</small>}
-                </div>
-                <div className="line">
-                  <button className="primary compact" onClick={() => run(api.joinAnswer(world.id, r.id, true))}>
-                    Accept
-                  </button>
-                  <button className="compact" onClick={() => run(api.joinAnswer(world.id, r.id, false))}>Decline</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      {asking}
 
       <ul className="members large">
         {world.members.map((m) => {
@@ -985,6 +1010,7 @@ function PlayersArea({
               <div>
                 <strong>{m.name}</strong>{" "}
                 <span className={`role-badge ${m.role}`}>{m.role === "gm" ? "GM" : "Player"}</span>
+                {supports(m.id) && <span className="role-badge">Supporter</span>}
                 <small className="small">{m.fingerprint}</small>
                 {world.isGm && (m.role !== "gm" || m.id === me.id) && (
                   <Assigned
@@ -1016,6 +1042,15 @@ function PlayersArea({
                       Trusted
                     </button>
                   )}
+                  {m.role !== "gm" && (
+                    <button
+                      className={world.chosen.includes(m.id) ? "compact on" : "compact"}
+                      title="Lets players in; may become GM if you are gone"
+                      onClick={() => chooseSupporter(m.id, !world.chosen.includes(m.id))}
+                    >
+                      Supporter
+                    </button>
+                  )}
                   {world.handover === m.id ? (
                     <button className="compact" onClick={() => run(api.gmHandover(world.id, null))}>Keep GM</button>
                   ) : (
@@ -1043,6 +1078,10 @@ function PlayersArea({
           </li>
         ))}
       </ul>
+
+      {world.admins.length > 0 && (
+        <p className="small muted">Server admins support every world there: {world.admins.join(", ")}</p>
+      )}
 
       <h3>Add a player</h3>
       <div className="line">
@@ -1421,6 +1460,7 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState<HeldWorld | null>(null);
   const [gm, setGm] = useState("");
+  const [admin, setAdmin] = useState("");
   const order = async (o: ServerOrder | null) => {
     setBusy(true);
     try {
@@ -1458,14 +1498,47 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
           )}
         </div>
       ))}
-      <h4>GMs</h4>
-      {state.gms.map((p, i) => (
+      {state.worlds.flatMap((w) =>
+        w.requests.map((p) => (
+          <div key={`${w.world}-${p.id}`} className="server-row">
+            <span className="grow">
+              <strong>{p.name || p.id}</strong>
+              <small className="small muted">asks to join {w.name}</small>
+            </span>
+            <button disabled={busy} onClick={() => void order({ kind: "approve", world: w.world, id: p.id })}>Let in</button>
+          </div>
+        )),
+      )}
+      <h4>Admins</h4>
+      {state.admins.map((p, i) => (
         <div key={p.id} className="server-row">
           <span className="grow">
             <strong>{p.name || p.id}</strong>
-            <small className="small muted">{i === 0 ? "admin" : seen(p)}</small>
+            <small className="small muted">{i === 0 ? "first admin" : seen(p)}</small>
           </span>
-          {i > 0 && <button disabled={busy} onClick={() => void order({ kind: "refuse", id: p.id })}>Remove</button>}
+          {i > 0 && <button disabled={busy} onClick={() => void order({ kind: "admin", id: p.id, on: false })}>Remove</button>}
+        </div>
+      ))}
+      <input
+        value={admin}
+        disabled={busy}
+        placeholder="Add an admin by id"
+        onChange={(e) => setAdmin(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && admin.trim()) {
+            void order({ kind: "admin", id: admin.trim(), on: true });
+            setAdmin("");
+          }
+        }}
+      />
+      <h4>Worldbuilders</h4>
+      {state.worldbuilders.map((p) => (
+        <div key={p.id} className="server-row">
+          <span className="grow">
+            <strong>{p.name || p.id}</strong>
+            <small className="small muted">{seen(p)}</small>
+          </span>
+          <button disabled={busy} onClick={() => void order({ kind: "refuse", id: p.id })}>Remove</button>
         </div>
       ))}
       {state.asking.map((p) => (
@@ -1481,7 +1554,7 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
       <input
         value={gm}
         disabled={busy}
-        placeholder="Allow a GM by id"
+        placeholder="Add a worldbuilder by id"
         onChange={(e) => setGm(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && gm.trim()) {
@@ -1497,7 +1570,7 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
             <strong>{p.name}</strong>
             <small className="small muted">{p.blocked ? "turned away" : seen(p)}</small>
           </span>
-          {p.id !== state.gms[0]?.id &&
+          {!state.admins.some((a) => a.id === p.id) &&
             (p.blocked ? (
               <button disabled={busy} onClick={() => void order({ kind: "unblock", id: p.id })}>Let in</button>
             ) : (

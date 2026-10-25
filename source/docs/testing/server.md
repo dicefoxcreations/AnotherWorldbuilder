@@ -35,20 +35,35 @@ A world on a server is seen by its GM, its members, the ids its GM let in ahead 
 
 The network side: a connection is accepted only from an address that proved itself (QUIC retry), one address holds at most eight connections at once, and past 20 asks a second (bursts of 60) a connection is slowed down. A flood of traffic that fills the line itself is beyond any program: that is for the router or the provider.
 
+## Roles
+
+| Role | For | May |
+| --- | --- | --- |
+| Admin (one or more) | the server | manage it, name admins and worldbuilders, bring worlds, let players into any world on it; supporter of every world on it |
+| Worldbuilder | the server | bring worlds |
+| GM | one world | everything in it; let players in; name supporters; hand the world over |
+| Supporter | one world | let players in; take the GM's place when needed |
+| Player | one world | what their view and rights say |
+
+Whoever brings or creates a world is its GM. Handing the world over (*Players → Make GM*), the GM becomes a player of it and sees no more than the others. The server holds no world's keys: letting someone in hands them keys, and only those who hold some can — the GM, and a supporter with the keys every player has (what only a character may see, the GM gives later). An admin who is not in the world lets in (*Manage → Let in*); the next device holding its keys, the GM's or a supporter's, does it without asking (`Reply::Digest.approved`).
+
+**Supporters** (`Item::Supporters`, signed by the GM): the players the GM chose (*Players → Supporter*) and the server's admins, whose identities the server tells the GM's device (`Reply::Digest.admins`). For each, the GM's keys — world token, keyring, members — lie sealed in the world (`Item::Keys`), sealed anew when they change, taken back from whoever is no supporter any more. A supporter could read everything with them; the GM chooses them for that. *Players → Take the GM's place …* makes a supporter the GM, for everyone to see: the world names them; the old GM becomes a player, and every key they no longer need turns over. Handing the world over works the same way (`Item::Handover`): the member's device takes it over when it next reads the world.
+
 ## Admin
 
-At start one GM is named as **admin** (`AW_ADMIN`, her ID under *Profile* in the app). The admin manages the server in the app under *Options → Network → Servers and hosts → Manage*:
+At start one admin is named (`AW_ADMIN`, her ID under *Profile* in the app); she can name more. Admins manage the server in the app under *Options → Network → Servers and hosts → Manage*:
 
-- **Worlds:** every world with name, GM, size on disk and whether encrypted – no more than the server itself can read. **Close** closes a world for everyone, its GM too; **Open** opens it again; a closed world can be deleted (type its name) and stays closed, so that it is not brought straight back.
-- **GMs:** who may bring worlds. The admin always may. If another GM brings a world, it waits ("would bring a world") until the admin says **Allow**; meanwhile her app shows "A world of yours waits for the server's admin." A GM can also be allowed directly by ID or removed again (her worlds stay).
-- **Users:** everyone who was there, with "last seen". **Block** turns someone away, whatever they ask; not the admin.
+- **Worlds:** every world with name, GM, size on disk and whether encrypted – no more than the server itself can read. **Close** closes a world for everyone, its GM too; **Open** opens it again; a closed world can be deleted (type its name) and stays closed, so that it is not brought straight back. Who asks to join a world stands below it, with **Let in**.
+- **Admins:** the first, and those added by ID (**Remove** again; the first one stays).
+- **Worldbuilders:** who may bring worlds besides the admins. If someone else brings a world, it waits ("would bring a world") until an admin says **Allow**; meanwhile their app shows "A world of yours waits for the server's admin." A worldbuilder can also be added directly by ID or removed again (their worlds stay).
+- **Users:** everyone who was there, with "last seen". **Block** turns someone away, whatever they ask; not an admin.
 
 A GM brings only her own worlds: the entries must name her as GM, otherwise the server does not take the world.
 
 ```text
 <data>/profile/      the server's own identity, its endpoint key
 <data>/worlds/       the worlds, as in the app
-<data>/server.json   GMs, closed worlds, who was there, who is turned away
+<data>/server.json   admins, worldbuilders, closed worlds, who was there, who is turned away
 <data>/host-code.txt what GMs and players enter
 ```
 

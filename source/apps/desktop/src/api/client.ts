@@ -84,6 +84,15 @@ export type WorldInfo = {
   dice: number[];
   /** How the world counts its days. */
   calendar: WorldCalendar;
+  /** Who supports the world, by id: the players the GM chose and the admins of its server. */
+  supporters: string[];
+  /** The GM's choice among them. */
+  chosen: string[];
+  /** The admins of its server, by name — supporters of every world there. */
+  admins: string[];
+  /** This device's member supports it: lets players in, and may take the GM's place. */
+  supporter: boolean;
+  canTakeOver: boolean;
 };
 
 /** What this device does on the local network. */
@@ -145,14 +154,16 @@ export type ServerEntry = {
 };
 
 /** A world on a server, as its admin sees it — nothing of its content. */
-export type HeldWorld = { world: string; name: string; gm: string; gm_id: string; bytes: number; encrypted: boolean; closed: boolean };
+export type HeldWorld = { world: string; name: string; gm: string; gm_id: string; bytes: number; encrypted: boolean; closed: boolean; requests: Person[] };
 /** Someone a server knows; `last` in seconds since 1970, 0: not yet. */
 export type Person = { id: string; name: string; last: number; blocked: boolean };
 /** What a server's admin sees. */
-export type ServerState = { worlds: HeldWorld[]; gms: Person[]; asking: Person[]; users: Person[] };
+export type ServerState = { worlds: HeldWorld[]; admins: Person[]; worldbuilders: Person[]; asking: Person[]; users: Person[] };
 /** What a server's admin orders — see `aw_sync::world::Order`. */
 export type ServerOrder =
   | { kind: "allow" | "refuse" | "block" | "unblock"; id: string }
+  | { kind: "admin"; id: string; on: boolean }
+  | { kind: "approve"; world: string; id: string }
   | { kind: "close" | "open" | "delete"; world: string };
 
 /** Where the data lies: the profile (identity, settings) and the worlds. */
@@ -536,6 +547,11 @@ const toWorld = (r: Raw): WorldInfo => ({
   online: !!r.online || !!r.server_id || !!r.server,
   dice: (r.dice as number[] | undefined) ?? [],
   calendar: (r.calendar as WorldCalendar | undefined) ?? DEFAULT_CALENDAR,
+  supporters: (r.supporters as string[] | undefined) ?? [],
+  chosen: (r.chosen as string[] | undefined) ?? [],
+  admins: (r.admins as string[] | undefined) ?? [],
+  supporter: !!r.supporter,
+  canTakeOver: !!r.can_take_over,
 });
 
 const toIdentity = (r: Raw): IdentityInfo => ({
@@ -1404,6 +1420,10 @@ export const api = {
   calendarSet: async (world: string, calendar: WorldCalendar) => toWorld(await invoke<Raw>("calendar_set", { world, calendar })),
   worldVersionsSet: async (world: string, max: number) => toWorld(await invoke<Raw>("world_versions_set", { world, max })),
   worldListedSet: async (world: string, listed: boolean) => toWorld(await invoke<Raw>("world_listed_set", { world, listed })),
+  /** The GM's: which players support the world. */
+  worldSupportersSet: async (world: string, ids: string[]) => toWorld(await invoke<Raw>("world_supporters_set", { world, ids })),
+  /** A supporter takes the GM's place — everyone sees it. */
+  worldTakeOver: async (world: string) => toWorld(await invoke<Raw>("world_take_over", { world })),
   /** Lets go of what newer records replaced — how many went. */
   worldTidy: (world: string) => invoke<number>("world_tidy", { world }),
   /** Encrypts the world or opens it — the GM's. */
