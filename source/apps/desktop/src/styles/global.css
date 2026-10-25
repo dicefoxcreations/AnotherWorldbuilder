@@ -2044,6 +2044,7 @@ button.region-access:hover .bubble { border-color: var(--accent-line); }
 
 /* A table in the visual editor: as read; the cell written in holds its text. */
 .table-card td, .table-card th { cursor: text; min-width: 48px; }
+.table-card .markdown, .table-card .markdown > * { font-size: inherit; color: inherit; }
 .table-card .markdown > :first-child { margin-top: 0; }
 .table-card .markdown > :last-child { margin-bottom: 0; }
 .table-card .table-cell-input { width: 100%; min-width: 80px; font: inherit; padding: 0; border: none; outline: 1px solid var(--accent); background: transparent; color: inherit; }

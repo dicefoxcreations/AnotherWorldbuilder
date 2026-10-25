@@ -165,8 +165,13 @@ function PartOnly({ anchor, children }: { anchor: string; children: ReactNode })
       return true;
     };
     if (take()) return;
-    // The text is read after the page is drawn — wait for it.
-    const watch = new MutationObserver(() => take() && watch.disconnect());
+    // The text is read after the page is drawn — wait for it; found, the
+    // wait ends, and the page stays out of sight.
+    const watch = new MutationObserver(() => {
+      if (!take()) return;
+      watch.disconnect();
+      clearTimeout(give);
+    });
     watch.observe(page, { childList: true, subtree: true });
     const give = setTimeout(() => (watch.disconnect(), setMissing(true)), 2000);
     return () => (watch.disconnect(), clearTimeout(give));
