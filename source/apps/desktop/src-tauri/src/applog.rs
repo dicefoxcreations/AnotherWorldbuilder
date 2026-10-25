@@ -29,8 +29,11 @@ pub(crate) fn set_fallback(dir: PathBuf) {
 /// Writes a line: when, what kind, what.
 pub(crate) fn line(kind: &str, text: &str) {
     static WRITING: OnceLock<Mutex<()>> = OnceLock::new();
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let Some(dir) = folder() else { return };
     let Ok(_turn) = WRITING.get_or_init(Default::default).lock() else { return };
+    // The first line in the app's folder says which app writes it.
+    let first = profile::store_now().is_some() && !STARTED.swap(true, std::sync::atomic::Ordering::Relaxed);
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let (year, month, day) = civil((secs / 86_400) as i64);
     let path = dir.join(format!("{year:04}-{month:02}-{day:02}.log"));
@@ -39,8 +42,11 @@ pub(crate) fn line(kind: &str, text: &str) {
         return;
     }
     let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else { return };
-    let text = text.replace('\n', " ⏎ ");
-    let _ = writeln!(file, "{:02}:{:02}:{:02} UTC  {kind:<8} {text}", secs / 3600 % 24, secs / 60 % 60, secs % 60);
+    let at = format!("{:02}:{:02}:{:02} UTC", secs / 3600 % 24, secs / 60 % 60, secs % 60);
+    if first {
+        let _ = writeln!(file, "{at}  {:<8} AnotherWorldbuilder {} on {}", "start", env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+    }
+    let _ = writeln!(file, "{at}  {kind:<8} {}", text.replace('\n', " ⏎ "));
     // A new day: the oldest go.
     if fresh {
         let mut days: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "log")).collect();

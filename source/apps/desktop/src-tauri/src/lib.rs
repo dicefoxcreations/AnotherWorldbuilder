@@ -2294,7 +2294,6 @@ pub fn run() {
             if let Ok(dir) = profile::config_dir(app.handle()) {
                 applog::set_fallback(dir);
             }
-            applog::line("start", &format!("AnotherWorldbuilder {} on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
             // The game master's worlds in shared folders: the next state
             // once nobody wrote for a while.
             std::thread::spawn(|| loop {
