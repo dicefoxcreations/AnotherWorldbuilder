@@ -785,7 +785,7 @@ mod tests {
 
     async fn run_online<T, F, R>(base: &Store, world: &str, server: &Server, wire: &T, run: F) -> Answer<R>
     where T: crate::online::Transport, F: FnOnce(Store) -> Answer<R> {
-        crate::online::execute(base, world, server, wire, |cache| std::future::ready(run(cache))).await
+        crate::online::execute(base, world, server, wire, crate::online::Needs::Everything, |cache| std::future::ready(run(cache))).await
     }
 
     fn staged_control(keeper: &Keeper, gm: &Someone, world: &str, transaction: &str) -> Ask {
@@ -1025,6 +1025,54 @@ mod tests {
         crate::online::close_session(&bob.store, &world).await.unwrap();
         let cache = bob.store.profile_dir().join("online-sessions");
         assert!(std::fs::read_dir(cache).unwrap().next().is_none(), "closing releases the disposable data");
+    }
+
+    #[tokio::test]
+    async fn a_world_opens_with_its_frame_and_documents_follow_as_they_are_read() {
+        use crate::online::{execute, Needs};
+        use std::future::ready;
+        let dir = tempfile::tempdir().unwrap();
+        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
+        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
+        swap(&keeper, &gm, &world);
+        let server = on_server(&bob, &world);
+        let wire = online_wire(&keeper, &bob.me);
+        let parts = |cache: &Store| cache.load_articles(&world).map(|all| all.iter().map(|a| a.layers.len()).sum::<usize>());
+
+        // Opened: the document's name, not its parts.
+        let (names, held) = execute(&bob.store, &world, &server, &wire, Needs::Frame, |cache| {
+            ready((|| Ok::<_, AppError>((cache.load_articles(&world)?.iter().map(|a| a.slug.clone()).collect::<Vec<_>>(), parts(&cache)?)))())
+        }).await.unwrap();
+        assert!(names.contains(&"tavern".to_string()));
+        assert_eq!(held, names.len(), "of each, only its base");
+
+        // Read: whole — and Bob writes in it, on the server's world as he read it.
+        let code = execute(&bob.store, &world, &server, &wire, Needs::Articles(vec![article.clone()]), |cache| {
+            ready((|| {
+                let code = document::code_of(&cache, &bob.me, &world, &article)?;
+                let text = code.code.replace("Content of Rumours", "Content of Rumours. A dragon was seen.");
+                document::save(&cache, &bob.me, &world, &article, &text, &code.base, "s-bob")?;
+                Ok::<_, AppError>(code.code)
+            })())
+        }).await.unwrap();
+        assert!(code.contains("Content of Rumours") && !code.contains("Content of Truth"));
+        swap(&keeper, &gm, &world);
+        let gm_code = document::code_of(&gm.store, &gm.me, &world, &article).unwrap().code;
+        assert!(gm_code.contains("A dragon was seen."), "on the server, and so with the GM");
+
+        // The GM, with only the frame, changes the world's structure — built
+        // on the server's world, not on what the session holds of it.
+        let gm_server = on_server(&gm, &world);
+        let gm_wire = online_wire(&keeper, &gm.me);
+        execute(&gm.store, &world, &gm_server, &gm_wire, Needs::Frame, |cache| ready(cache.set_moderation(&world, true).map_err(AppError::from))).await.unwrap();
+        crate::online::close_session(&bob.store, &world).await.unwrap();
+        let moderated = execute(&bob.store, &world, &server, &wire, Needs::Frame, |cache| ready(cache.moderated(&world).map_err(AppError::from))).await.unwrap();
+        assert!(moderated);
+        crate::online::close_session(&bob.store, &world).await.unwrap();
+        crate::online::close_session(&gm.store, &world).await.unwrap();
     }
 
     #[tokio::test]
@@ -1382,13 +1430,18 @@ mod tests {
         let wire = online_wire(&keeper, &gm.me);
 
         let start = std::time::Instant::now();
-        let (count, home) = run_online(&gm.store, &world, &server, &wire, |cache| {
-            Ok((cache.load_articles(&world)?.len(), cache.load_world_meta(&world)?.home))
+        let (count, home) = crate::online::execute(&gm.store, &world, &server, &wire, crate::online::Needs::Frame, |cache| {
+            std::future::ready((|| Ok::<_, AppError>((cache.load_articles(&world)?.len(), cache.load_world_meta(&world)?.home)))())
         }).await.unwrap();
         let opened = start.elapsed();
         let start = std::time::Instant::now();
-        let code = run_online(&gm.store, &world, &server, &wire, |cache| Ok(document::code_of(&cache, &gm.me, &world, &home)?.code)).await.unwrap();
-        println!("{count} documents; opened in {opened:?}; the start document ({} bytes) in {:?}; {} asks", code.len(), start.elapsed(), wire.asks.load(Ordering::SeqCst));
+        let code = crate::online::execute(&gm.store, &world, &server, &wire, crate::online::Needs::Articles(vec![home.clone()]), |cache| {
+            std::future::ready(document::code_of(&cache, &gm.me, &world, &home).map(|d| d.code))
+        }).await.unwrap();
+        let read = start.elapsed();
+        let start = std::time::Instant::now();
+        let all = run_online(&gm.store, &world, &server, &wire, |cache| Ok(cache.load_articles(&world)?.iter().map(|a| a.layers.len()).sum::<usize>())).await.unwrap();
+        println!("{count} documents; opened in {opened:?}; the start document ({} bytes) in {read:?}; all {all} parts in {:?} more; {} asks", code.len(), start.elapsed(), wire.asks.load(Ordering::SeqCst));
         crate::online::close_session(&gm.store, &world).await.unwrap();
     }
 

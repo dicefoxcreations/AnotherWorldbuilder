@@ -1032,6 +1032,9 @@ pub struct Journal {
     batch: Option<Vec<Stored>>,
     /// Records whose layer head or parents have not come yet.
     waiting: BTreeMap<String, Pending>,
+    /// Taking many in at once: what waits is looked at again once, at the
+    /// end, not after each of them.
+    holding: bool,
     /// Item key → newest (seq, record id).
     latest: BTreeMap<String, (u64, String)>,
     /// Every generation of every layer → (seq, record id) of its head.
@@ -1044,6 +1047,9 @@ pub struct Journal {
     /// Drafts and versions by layer and generation, in the order they came.
     by_layer: BTreeMap<(LayerId, u32), Vec<String>>,
     max_seq: u64,
+    /// The count its server stands at — where this device holds only part of
+    /// the world, what the game master writes counts on from there.
+    floor: u64,
     keys: Option<HeldKeys>,
     /// Whose device this is — their own waiting versions show here — and
     /// their secret, which opens what is sealed for them.
@@ -1186,6 +1192,7 @@ impl Journal {
             indexed: index.versions,
             dirty: false,
             batch: None,
+            holding: false,
             waiting: BTreeMap::new(),
             latest: BTreeMap::new(),
             generations: BTreeMap::new(),
@@ -1193,6 +1200,7 @@ impl Journal {
             article_layers: HashMap::new(),
             by_layer: BTreeMap::new(),
             max_seq: 0,
+            floor: 0,
             keys: None,
             me: None,
             verdicts: HashMap::new(),
@@ -1410,11 +1418,14 @@ impl Journal {
             }
         }
         let mut new = 0;
+        self.holding = true;
         for (raw, record) in parsed {
             if let Ok(Added::New(_)) = self.take(raw.to_vec(), record, true) {
                 new += 1;
             }
         }
+        self.holding = false;
+        self.retry_waiting();
         if gone {
             self.write_batch()?;
             self.reload()?;
@@ -1493,11 +1504,13 @@ impl Journal {
     fn reload(&mut self) -> Result<()> {
         let keys = self.keys.take();
         let me = self.me.take();
+        let floor = self.floor;
         let version = self.version;
         self.flush()?;
         let mut fresh = Journal::open(&self.dir, &self.private, &self.world, self.shelf.mode())?;
         fresh.keys = keys;
         fresh.me = me;
+        fresh.floor = floor;
         fresh.version = version + fresh.version + 1;
         fresh.all_changed_at = fresh.version;
         *self = fresh;
@@ -1782,6 +1795,9 @@ impl Journal {
 
     /// Takes in what waited for what just came.
     fn retry_waiting(&mut self) {
+        if self.holding {
+            return;
+        }
         loop {
             let ready: Vec<String> = self
                 .waiting
@@ -2113,7 +2129,13 @@ impl Journal {
 
     /// The highest control record count — for a supporter's act written now.
     pub fn control_count(&self) -> u64 {
-        self.max_seq
+        self.max_seq.max(self.floor)
+    }
+
+    /// Counts on from `seq` — its server's count, where this device holds
+    /// only part of the world.
+    pub fn count_from(&mut self, seq: u64) {
+        self.floor = self.floor.max(seq);
     }
 
     /// What a member's grant holds — for the member, or the game master who
@@ -2437,7 +2459,7 @@ impl Journal {
 
     /// The game master's next count.
     pub fn next_seq(&self) -> u64 {
-        self.max_seq + 1
+        self.control_count() + 1
     }
 
     // --- Keys and documents -------------------------------------------------
@@ -3031,35 +3053,94 @@ impl Journal {
     /// Records in an order the receiver can take them in: control first,
     /// then versions, then drafts — gallery entries, proposals and badges last.
     pub fn in_order(&self, ids: &[String]) -> Vec<String> {
-        let mut out: Vec<(u8, u64, String)> = ids
-            .iter()
+        let mut out: Vec<((u8, u64), &String)> = ids.iter().filter_map(|id| Some((self.order_of(id)?, id))).collect();
+        out.sort();
+        out.into_iter().map(|(_, id)| id.clone()).collect()
+    }
+
+    /// Where a record stands in `in_order`: its kind, then its count or time.
+    fn order_of(&self, id: &str) -> Option<(u8, u64)> {
+        if let Some(c) = self.controls.get(id) {
+            // The world's own record first, whatever its count: whoever
+            // takes a world in recognises it by that, in the first piece
+            // already — and a tidied world's oldest one may be long gone.
+            let first = matches!(c.item, Item::World { .. });
+            Some((if first { 0 } else { 1 }, c.seq))
+        } else if let Some(v) = self.versions.get(id) {
+            Some((2, v.until))
+        } else if let Some(d) = self.drafts.get(id) {
+            Some((3, d.time))
+        } else if let Some(i) = self.images.get(id) {
+            Some((4, i.time))
+        } else if let Some(p) = self.proposals.get(id) {
+            Some((5, p.at))
+        } else {
+            // A badge or a supporter's act — the newest of its member, or one before it.
+            match serde_json::from_slice::<Record>(self.raw.get(id)?).ok()? {
+                Record::Badge(b) => Some((6, b.at)),
+                Record::Support(a) => Some((7, a.at)),
+                _ => None,
+            }
+        }
+    }
+
+    // --- The frame: a world given a piece at a time -------------------------
+
+    /// Whether a record belongs to the world's frame: everything but the
+    /// parts of documents besides their base — their heads, and what is
+    /// being written in them. With the frame, a world shows itself and the
+    /// names of its documents; the rest of a document comes when it is read.
+    fn in_frame(&self, id: &str) -> bool {
+        if let Some(c) = self.controls.get(id) {
+            return !matches!(&c.item, Item::Layer(h) if !h.is_base);
+        }
+        if let Some(d) = self.drafts.get(id) {
+            return self.head(d.layer).is_some_and(|h| h.is_base);
+        }
+        true
+    }
+
+    /// The frame, in the order it is taken in, from where `after` left off —
+    /// each with where it stands, for the next piece to start from. And how
+    /// many there are in all.
+    pub fn frame_after(&self, after: Option<&str>) -> (usize, Vec<(String, String)>) {
+        let mut all: Vec<(String, String)> = self
+            .inventory()
+            .into_iter()
+            .filter(|id| self.in_frame(id))
             .filter_map(|id| {
-                if let Some(c) = self.controls.get(id) {
-                    // The world's own record first, whatever its count: whoever
-                    // takes a world in recognises it by that, in the first piece
-                    // already — and a tidied world's oldest one may be long gone.
-                    let first = matches!(c.item, Item::World { .. });
-                    Some((if first { 0 } else { 1 }, c.seq, id.clone()))
-                } else if let Some(v) = self.versions.get(id) {
-                    Some((2, v.until, id.clone()))
-                } else if let Some(d) = self.drafts.get(id) {
-                    Some((3, d.time, id.clone()))
-                } else if let Some(i) = self.images.get(id) {
-                    Some((4, i.time, id.clone()))
-                } else if let Some(p) = self.proposals.get(id) {
-                    Some((5, p.at, id.clone()))
-                } else {
-                    // A badge or a supporter's act — the newest of its member, or one before it.
-                    match serde_json::from_slice::<Record>(self.raw.get(id)?).ok()? {
-                        Record::Badge(b) => Some((6, b.at, id.clone())),
-                        Record::Support(a) => Some((7, a.at, id.clone())),
-                        _ => None,
-                    }
-                }
+                let (kind, n) = self.order_of(&id)?;
+                Some((format!("{kind}:{n:020}:{id}"), id))
             })
             .collect();
-        out.sort();
-        out.into_iter().map(|(_, _, id)| id).collect()
+        all.sort();
+        let total = all.len();
+        let rest = match after {
+            Some(after) => all.into_iter().filter(|(at, _)| at.as_str() > after).collect(),
+            None => all,
+        };
+        (total, rest)
+    }
+
+    /// What the frame left out of these documents — the heads of their other
+    /// parts, and what is being written there — document by document, each
+    /// in the order it is taken in.
+    pub fn rest_of(&self, articles: &[ArticleId]) -> Vec<(ArticleId, Vec<String>)> {
+        let wanted: HashSet<ArticleId> = articles.iter().copied().collect();
+        let mut by: HashMap<ArticleId, Vec<String>> = HashMap::new();
+        for (id, c) in &self.controls {
+            if let Item::Layer(h) = &c.item {
+                if !h.is_base && wanted.contains(&h.article) {
+                    by.entry(h.article).or_default().push(id.clone());
+                }
+            }
+        }
+        for (id, d) in &self.drafts {
+            if wanted.contains(&d.article) && !self.in_frame(id) {
+                by.entry(d.article).or_default().push(id.clone());
+            }
+        }
+        articles.iter().map(|a| (*a, self.in_order(&by.remove(a).unwrap_or_default()))).collect()
     }
 }
 

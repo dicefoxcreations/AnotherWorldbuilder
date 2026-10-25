@@ -3,7 +3,6 @@
 //! No command may fall back to an offline world, including the GM's.
 
 use super::*;
-use aw_store::journal::Journal;
 use aw_sync::world::{Ask, Mark, Reply, Server, WorldNet};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::{collections::{BTreeSet, HashMap, HashSet}, future::Future, pin::Pin,
@@ -82,10 +81,45 @@ pub(crate) const FRESH: std::time::Duration = std::time::Duration::from_millis(1
 const MISSES: u32 = 3;
 /// Image parts asked for in one go.
 const PARTS_AT_ONCE: usize = 16;
+/// Documents asked for in one go, where they are read in the background.
+const ARTICLES_AT_ONCE: usize = 500;
+/// How long a poll goes on reading the documents not read yet.
+const ARTICLES_PER_POLL: std::time::Duration = std::time::Duration::from_millis(1500);
 /// How long a poll goes on fetching pictures.
 const PICTURES_PER_POLL: std::time::Duration = std::time::Duration::from_millis(1500);
-/// How often fetched pictures redraw the open world.
-const PICTURES_SHOWN: std::time::Duration = std::time::Duration::from_secs(8);
+/// How often fetched pictures and documents redraw the open world.
+const SHOWN_EVERY: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// What a command needs of the world before it runs: what the frame holds,
+/// these documents whole, or all of it.
+pub(crate) enum Needs {
+    Frame,
+    Articles(Vec<String>),
+    Everything,
+}
+
+impl Needs {
+    /// What a command of the app needs: documents it names by id, or —
+    /// for what looks at all of them — everything.
+    pub(crate) fn of(command: &str, args: &serde_json::Value) -> Self {
+        const WHOLE: [&str; 12] = ["world_copy", "world_check", "package_export", "world_tidy", "world_readable_set", "world_encryption_set",
+            "template_save", "template_delete", "image_delete", "backup_now", "gm_handover_file", "world_share"];
+        if WHOLE.contains(&command) {
+            return Needs::Everything;
+        }
+        fn ids(value: &serde_json::Value, out: &mut Vec<String>) {
+            match value {
+                serde_json::Value::String(s) if s.starts_with("art:") => out.push(s.clone()),
+                serde_json::Value::Array(all) => all.iter().for_each(|v| ids(v, out)),
+                serde_json::Value::Object(all) => all.values().for_each(|v| ids(v, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        ids(args, &mut out);
+        if out.is_empty() { Needs::Frame } else { Needs::Articles(out) }
+    }
+}
 
 struct Session {
     world: String,
@@ -114,9 +148,18 @@ struct Session {
     /// The server's admins, where they changed — the GM seals its keys for
     /// them.
     admins: Option<Vec<aw_crypto::IdentityPublic>>,
-    /// Pictures fetched since the open world last redrew for them, and when it did.
-    pictures: usize,
-    pictures_shown: std::time::Instant,
+    /// Pictures and documents fetched since the open world last redrew for
+    /// them, and when it did.
+    unshown: usize,
+    shown_at: std::time::Instant,
+    /// The server's digest as last read — what a command builds on.
+    remote: String,
+    /// Whether the frame was read: what shows the world and the names of
+    /// its documents.
+    framed: bool,
+    /// The documents not read whole yet, by id — asked for when a command
+    /// needs them, and a batch at each poll.
+    pending: Vec<String>,
 }
 
 type Slot = Arc<tokio::sync::Mutex<Option<Session>>>;
@@ -170,7 +213,7 @@ impl Session {
         copy_private(base, &store, world)?;
         Ok(Self { world: world.into(), store, _temporary: temporary, endpoint: endpoint.into(), copies: false,
                   synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false, untold: false, requests: Vec::new(), approved: Vec::new(), removing: Vec::new(), admins: None,
-                  pictures: 0, pictures_shown: std::time::Instant::now() })
+                  unshown: 0, shown_at: std::time::Instant::now(), remote: String::new(), framed: false, pending: Vec::new() })
     }
 
     fn fresh(&self) -> bool {
@@ -200,7 +243,13 @@ impl Session {
         next.confirmed = next.store.inventory(world)?.into_iter().collect();
         // Everything acknowledged is here: the server's order goes on from where it was.
         next.mark = self.mark.clone();
+        next.remote = self.remote.clone();
+        next.framed = self.framed;
+        next.pending = self.pending.clone();
         next.prepared = true;
+        if next.store.holds(world) {
+            next.store.count_from(world, self.store.control_count(world)?)?;
+        }
         Ok(next)
     }
 
@@ -239,58 +288,23 @@ impl Session {
             }.into()));
         };
         self.copies = !no_copy;
-        let mut remote = digest;
         let mut came = false;
-        if self.store.digest(world)? != remote {
-            let same_order = self.mark.as_ref().zip(mark.as_ref()).is_some_and(|(here, there)| here.epoch == there.epoch);
-            if same_order {
-                let mut at = self.mark.clone().unwrap();
-                loop {
-                    let Reply::Since { records, mark: next, digest } = transport.ask(world, Ask::Since { mark: at.clone() }).await? else {
-                        return Err(AppError(UNAVAILABLE.into()));
-                    };
-                    remote = digest;
-                    let Some(next) = next else { break };
-                    if !records.is_empty() && self.store.receive(world, &records)? > 0 {
-                        came = true;
-                    }
-                    let done = records.is_empty() || next.at == at.at;
-                    at = next;
-                    self.mark = Some(at.clone());
-                    if done || self.store.digest(world)? == remote {
-                        break;
-                    }
-                }
+        let same_order = self.mark.as_ref().zip(mark.as_ref()).is_some_and(|(here, there)| here.epoch == there.epoch);
+        if !self.framed || (!same_order && !self.pending.is_empty()) {
+            // New to this session — or the server's order begun anew before
+            // all of it was here: the frame first; documents follow as they
+            // are read.
+            came |= self.read_frame(world, transport).await?;
+        } else if !same_order {
+            // All of it here, the server's order another one: what is
+            // missing, by name.
+            if digest != self.remote {
+                came |= self.read_missing(world, transport, &mark).await?;
             }
-            if self.store.digest(world)? != remote {
-                loop {
-                    let have = self.store.inventory(world)?;
-                    if Journal::digest(&have) == remote {
-                        break;
-                    }
-                    let Reply::Records { records, wanted, digest } = transport.ask(world, Ask::Swap { have, give: Vec::new() }).await? else {
-                        return Err(AppError(UNAVAILABLE.into()));
-                    };
-                    // A stale or failed command is discarded, never uploaded as sync.
-                    if !wanted.is_empty() || records.is_empty() {
-                        return Err(AppError(format!("{UNAVAILABLE} The session must be read from the server again.")));
-                    }
-                    let added = self.store.receive(world, &records)?;
-                    remote = digest;
-                    if added == 0 {
-                        return Err(AppError(format!("{UNAVAILABLE} The server revision is incomplete.")));
-                    }
-                    came = true;
-                    // The server's order tells how many there are, about.
-                    let total = mark.as_ref().map_or(0, |m| m.at as usize);
-                    progress(world, "loading", self.store.inventory(world)?.len(), total.max(1));
-                }
-                progress(world, "loading", 0, 0);
-                // Asked before the swap: nothing that came after it is missed.
-                self.mark = mark;
-            }
-        } else if mark.is_some() {
             self.mark = mark;
+        }
+        if digest != self.remote || came {
+            came |= self.read_since(world, transport).await?;
         }
         if came || !self.prepared {
             self.store.refresh_online_members(world).map_err(|e| AppError(format!("[online] {e}")))?;
@@ -307,6 +321,130 @@ impl Session {
         }
         if gm && self.store.server_admins(world)? != admins {
             self.admins = Some(admins);
+        }
+        Ok(came)
+    }
+
+    /// The frame, a piece at a time — see `Ask::Frame`. Its mark is the one
+    /// it began at: what came meanwhile follows with `read_since`.
+    async fn read_frame(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
+        let mut after = None;
+        let mut first = None;
+        let mut came = false;
+        let mut done = 0;
+        loop {
+            let Reply::Frame { records, next, mark, seq, total } = transport.ask(world, Ask::Frame { after: after.take() }).await? else {
+                return Err(AppError(format!("{UNAVAILABLE} The server needs an update.")));
+            };
+            first.get_or_insert(mark);
+            done += records.len();
+            if !records.is_empty() && self.store.receive(world, &records)? > 0 {
+                came = true;
+            }
+            if self.store.holds(world) {
+                self.store.count_from(world, seq)?;
+            }
+            progress(world, "loading", done, total.max(1));
+            match next {
+                Some(next) => after = Some(next),
+                None => break,
+            }
+        }
+        progress(world, "loading", 0, 0);
+        self.mark = first.flatten();
+        self.framed = true;
+        self.pending = if self.store.holds(world) { self.store.article_ids(world)? } else { Vec::new() };
+        Ok(came)
+    }
+
+    /// What came after the mark, in the order it came.
+    async fn read_since(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
+        let mut came = false;
+        let Some(mut at) = self.mark.clone() else { return Ok(false) };
+        loop {
+            let Reply::Since { records, mark: next, digest } = transport.ask(world, Ask::Since { mark: at.clone() }).await? else {
+                return Err(AppError(UNAVAILABLE.into()));
+            };
+            self.remote = digest;
+            // The server's order begun anew meanwhile: read again from the start.
+            let Some(next) = next else {
+                self.mark = None;
+                break;
+            };
+            if !records.is_empty() && self.store.receive(world, &records)? > 0 {
+                came = true;
+            }
+            let done = records.is_empty() || next.at == at.at;
+            at = next;
+            self.mark = Some(at.clone());
+            if done {
+                break;
+            }
+        }
+        Ok(came)
+    }
+
+    /// What this session lacks, by name — where all of the world is here and
+    /// the server's order is another one.
+    async fn read_missing(&mut self, world: &str, transport: &impl Transport, mark: &Option<Mark>) -> Answer<bool> {
+        let mut came = false;
+        loop {
+            let have = self.store.inventory(world)?;
+            let Reply::Records { records, wanted, digest } = transport.ask(world, Ask::Swap { have, give: Vec::new() }).await? else {
+                return Err(AppError(UNAVAILABLE.into()));
+            };
+            // A stale or failed command is discarded, never uploaded as sync.
+            if !wanted.is_empty() {
+                return Err(AppError(format!("{UNAVAILABLE} The session must be read from the server again.")));
+            }
+            self.remote = digest;
+            if records.is_empty() || self.store.receive(world, &records)? == 0 {
+                break;
+            }
+            came = true;
+            let total = mark.as_ref().map_or(0, |m| m.at as usize);
+            progress(world, "loading", self.store.inventory(world)?.len(), total.max(1));
+        }
+        progress(world, "loading", 0, 0);
+        Ok(came)
+    }
+
+    /// The documents named, whole — what the frame left out of them.
+    async fn read_articles(&mut self, world: &str, transport: &impl Transport, wanted: &[String]) -> Answer<bool> {
+        let mut asked: Vec<String> = wanted.iter().filter(|a| self.pending.contains(a)).cloned().collect();
+        asked.dedup();
+        let mut came = false;
+        while !asked.is_empty() {
+            let Reply::Articles { records, done } = transport.ask(world, Ask::Articles { articles: asked.clone() }).await? else {
+                return Err(AppError(format!("{UNAVAILABLE} The server needs an update.")));
+            };
+            if done.is_empty() {
+                return Err(AppError(UNAVAILABLE.into()));
+            }
+            if !records.is_empty() && self.store.receive(world, &records)? > 0 {
+                came = true;
+            }
+            let done: HashSet<String> = done.into_iter().collect();
+            self.pending.retain(|a| !done.contains(a));
+            asked.retain(|a| !done.contains(a));
+        }
+        Ok(came)
+    }
+
+    /// The documents not read yet, a batch at a time, for as long as given —
+    /// none: until all are here. So lists and search fill while the world is
+    /// open.
+    async fn read_rest(&mut self, world: &str, transport: &impl Transport, time: Option<std::time::Duration>) -> Answer<bool> {
+        let until = time.map(|t| std::time::Instant::now() + t);
+        let total = self.store.article_count(world)?.max(self.pending.len());
+        let mut came = false;
+        while !self.pending.is_empty() && until.is_none_or(|u| std::time::Instant::now() < u) {
+            let batch: Vec<String> = self.pending.iter().take(ARTICLES_AT_ONCE).cloned().collect();
+            came |= self.read_articles(world, transport, &batch).await?;
+            progress(world, "loading", total - self.pending.len(), total.max(1));
+        }
+        if self.pending.is_empty() {
+            progress(world, "loading", 0, 0);
         }
         Ok(came)
     }
@@ -332,7 +470,7 @@ impl Session {
             if self.store.take_parts(world, &decoded)? == 0 {
                 return Err(AppError(format!("{UNAVAILABLE} Images are still missing on the server.")));
             }
-            self.pictures += decoded.len();
+            self.unshown += decoded.len();
         }
     }
 
@@ -435,6 +573,7 @@ pub(crate) async fn materialize_for_move(base: &Store, world: &str, server: &Ser
     if held.is_none() { *held = Some(Session::new(base, world, &server.endpoint)?) }
     let session = held.as_mut().unwrap();
     session.synchronize(world, transport).await?;
+    session.read_rest(world, transport, None).await?;
     session.persist_metadata(base, world)?;
     let stage = base.worlds_dir().join(format!(".moving-from-server-{}", store::dir_name(world)));
     if stage.exists() { std::fs::remove_dir_all(&stage)? }
@@ -473,18 +612,23 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
             let transport = Connection { net, server: &server, me };
             // One digest when nothing changed — it carries who is here and the dice too.
             let brought = session.synchronize_with(&world, &transport, PICTURES_PER_POLL).await?;
+            // Documents not read yet, a batch or so — they show with the pictures.
+            if !session.pending.is_empty() && session.read_rest(&world, &transport, Some(ARTICLES_PER_POLL)).await? {
+                session.unshown += 1;
+                session.confirmed = session.store.inventory(&world)?.into_iter().collect();
+            }
             if std::mem::take(&mut session.untold) && !brought {
                 return Ok(true);
             }
             // Handed to this device's member: theirs now.
             let handed = !session.store.is_gm(&world) && session.store.handing_to(&world)?.as_deref() == Some(me.id().as_str());
             if !brought && session.requests.is_empty() && session.admins.is_none() && !handed {
-                // Pictures that came show now and then, and once all are here.
-                let all = session.store.missing_parts(&world)?.is_empty();
-                let due = session.pictures_shown.elapsed() >= PICTURES_SHOWN || all;
-                if session.pictures > 0 && due {
-                    session.pictures = 0;
-                    session.pictures_shown = std::time::Instant::now();
+                // Pictures and documents that came show now and then, and once all are here.
+                let all = session.store.missing_parts(&world)?.is_empty() && session.pending.is_empty();
+                let due = session.shown_at.elapsed() >= SHOWN_EVERY || all;
+                if session.unshown > 0 && due {
+                    session.unshown = 0;
+                    session.shown_at = std::time::Instant::now();
                     return Ok(true);
                 }
                 return Ok(false);
@@ -566,6 +710,9 @@ pub(crate) async fn adopt_uploaded(base: &Store, world: &str, server: &Server) -
     session.store.refresh_online_members(world)?;
     session.copies = copies;
     session.confirmed = session.store.inventory(world)?.into_iter().collect();
+    // All of it is here: what the server holds now is what was sent.
+    session.framed = true;
+    session.remote = session.store.digest(world)?;
     let version = session.store.journal_version(world)?;
     let info = session.info(base, world, server)?;
     remember_info(base, world, server, info, version)?;
@@ -652,7 +799,8 @@ pub(crate) async fn world_call(app: tauri::AppHandle, world: String, command: St
     let me = base.load_identity()?;
     let connection = Connection { net: &net, server: &server, me: &me };
     let name = world.clone();
-    let result = execute(&base, &world, &server, &connection, |cache| async move {
+    let needs = Needs::of(&command, &args);
+    let result = execute(&base, &world, &server, &connection, needs, |cache| async move {
         if command == "world_connect" { return Ok(serde_json::Value::Null) }
         dispatch::run(app.clone(), cache, &name, &command, &args).await
     }).await;
@@ -700,8 +848,10 @@ fn left() -> &'static Mutex<Option<String>> {
     LEFT.get_or_init(Default::default)
 }
 
-/// Sends what a command wrote; the records sent come back.
-async fn publish(session: &Session, base: &Store, world: &str, transport: &impl Transport, before: &Before) -> Answer<Vec<String>> {
+/// Sends what a command wrote; the records sent come back. Built on the
+/// server's world as last read: changed meanwhile, a command that writes the
+/// world's structure is refused.
+async fn publish(session: &mut Session, base: &Store, world: &str, transport: &impl Transport, before: &Before) -> Answer<Vec<String>> {
     let added = before.added(&session.store, world)?;
     let parts: Vec<_> = session.store.wanted_parts(world)?.difference(&before.parts).cloned().collect();
     if added.is_empty() && parts.is_empty() {
@@ -709,7 +859,7 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
     }
     session.remember_keys(base, world)?;
     let transaction = hex::encode(aw_crypto::random_bytes::<32>()?);
-    let revision = before.digest.clone();
+    let revision = session.remote.clone();
     let result = async {
         let records = session.store.in_order(world, &added)?;
         let total = records.len() + parts.len();
@@ -747,7 +897,8 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
     if result.is_err() {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(1), transport.ask(world, Ask::Abort { transaction })).await;
     }
-    result.map(|_| added)
+    session.remote = result?;
+    Ok(added)
 }
 
 /// Who asked to join: kept for the GM to decide — or, let in ahead of time
@@ -791,18 +942,19 @@ impl Before {
     }
 }
 
-/// The last piece of a command, and the commit. The server keeps the
-/// receipt a while for a repeated ask, then lets it go by itself.
-async fn finish(transport: &impl Transport, world: &str, transaction: &str, revision: &str, records: Vec<String>) -> Answer<()> {
+/// The last piece of a command, and the commit — the server's digest after
+/// it. The server keeps the receipt a while for a repeated ask, then lets
+/// it go by itself.
+async fn finish(transport: &impl Transport, world: &str, transaction: &str, revision: &str, records: Vec<String>) -> Answer<String> {
     let ask = Ask::Commit { transaction: transaction.into(), base: revision.into(), records, parts: Vec::new(), finish: true };
     match transport.ask(world, ask).await? {
-        Reply::Committed { .. } => Ok(()),
+        Reply::Committed { digest } => Ok(digest),
         Reply::Conflict => Err(AppError("The server world changed meanwhile. This edit was not saved; please try again.".into())),
         _ => Err(AppError(UNAVAILABLE.into())),
     }
 }
 
-pub(crate) async fn execute<T, F, Fut, R>(base: &Store, world: &str, server: &Server, transport: &T, operation: F) -> Answer<R>
+pub(crate) async fn execute<T, F, Fut, R>(base: &Store, world: &str, server: &Server, transport: &T, needs: Needs, operation: F) -> Answer<R>
 where T: Transport, F: FnOnce(Store) -> Fut, Fut: Future<Output = Answer<R>> {
     let handle = slot(base, world)?;
     let mut held = handle.lock().await;
@@ -825,6 +977,20 @@ where T: Transport, F: FnOnce(Store) -> Fut, Fut: Future<Output = Answer<R>> {
                 return Err(error);
             }
         }
+    }
+    // The documents the command reads, whole.
+    let fetched = match needs {
+        Needs::Frame => Ok(false),
+        Needs::Articles(ids) => session.read_articles(world, transport, &ids).await,
+        Needs::Everything => session.read_rest(world, transport, None).await,
+    };
+    match fetched {
+        Ok(true) => {
+            session.confirmed = session.store.inventory(world)?.into_iter().collect();
+            session.untold = true;
+        }
+        Ok(false) => {}
+        Err(error) => return Err(error),
     }
     let before = Before::take(&session.store, world)?;
     // What players asked to be made, and who asked to join, go with this command.

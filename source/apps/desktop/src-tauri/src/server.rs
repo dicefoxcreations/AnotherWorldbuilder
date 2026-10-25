@@ -127,6 +127,14 @@ async fn run(o: Options) -> Answer<()> {
         store.save_identity(&Identity::create(&o.name).map_err(|e| AppError(e.to_string()))?)?;
     }
     let keeper = Arc::new(Keeper::open(store.clone(), &o.data, o.admin.clone())?);
+    // Every world read once now, in the background: whoever comes first
+    // does not wait for it.
+    let reading = store.clone();
+    std::thread::spawn(move || {
+        for world in reading.held_worlds().unwrap_or_default() {
+            let _ = reading.digest(&world);
+        }
+    });
     let reach = Reach {
         lan: o.lan,
         internet: true,

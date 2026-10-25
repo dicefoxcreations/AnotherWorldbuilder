@@ -993,3 +993,47 @@ fn a_supporter_takes_a_player_out_and_hands_on_the_new_keys_but_never_touches_th
     assert!(t.gm_journal.grant(t.bob.id().as_str()).is_some(), "a supporter stays in");
     assert!(t.gm_journal.acted_on().is_empty());
 }
+
+#[test]
+fn a_world_comes_as_its_frame_first_and_each_document_whole_when_asked() {
+    let mut t = table();
+    let (tavern, tavern_base, rumours) = t.article(("players", "players", "The inn is old.", Level::Open));
+    let (harbour, _, tides) = t.article(("players", "players", "The tide is high.", Level::Open));
+    t.to_bob();
+    t.bob_writes(rumours, "The inn is old. It rains.", "s-bob");
+    t.to_gm();
+
+    // The frame: everything but the parts besides the documents' bases.
+    let (total, all) = t.gm_journal.frame_after(None);
+    assert_eq!(total, all.len());
+    let ids: Vec<&String> = all.iter().map(|(_, id)| id).collect();
+    let layer_of = |id: &String| match t.gm_journal.controls.get(id).map(|c| &c.item) {
+        Some(Item::Layer(h)) => Some(h.layer),
+        _ => None,
+    };
+    let layers: Vec<LayerId> = ids.iter().filter_map(|id| layer_of(id)).collect();
+    assert!(layers.contains(&tavern_base), "the base is in it");
+    assert!(!layers.contains(&rumours) && !layers.contains(&tides), "the other parts are not");
+    assert!(!ids.iter().any(|id| t.gm_journal.drafts.get(*id).is_some_and(|d| d.layer == rumours)), "nor what is written there");
+
+    // A piece at a time: from where the last one ended, nothing twice.
+    let (_, rest) = t.gm_journal.frame_after(Some(&all[2].0));
+    assert_eq!(rest.len(), all.len() - 3);
+    assert_eq!(rest[0], all[3]);
+
+    // A new device takes the frame in: the names, not the parts.
+    let mut carla = open(t._dir.path(), "carla", &t.token);
+    carla.set_keys(t.ring.everything());
+    for (_, id) in &all {
+        carla.add(&t.gm_journal.raw(id).unwrap()).unwrap();
+    }
+    assert!(carla.plain(rumours).is_err(), "not here yet");
+    // Then a document, whole.
+    let whole = t.gm_journal.rest_of(&[tavern, harbour]);
+    assert_eq!(whole.len(), 2);
+    let tavern_rest = &whole.iter().find(|(a, _)| *a == tavern).unwrap().1;
+    let raws: Vec<Vec<u8>> = tavern_rest.iter().map(|id| t.gm_journal.raw(id).unwrap()).collect();
+    carla.add_all(&raws.iter().map(|r| r.as_slice()).collect::<Vec<_>>()).unwrap();
+    assert_eq!(text_of(&mut carla, rumours), "The inn is old. It rains.");
+    assert!(carla.plain(tides).is_err(), "the harbour still waits");
+}

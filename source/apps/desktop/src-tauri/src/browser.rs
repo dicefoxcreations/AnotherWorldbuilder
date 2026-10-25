@@ -319,7 +319,7 @@ fn authorized<R>(store: &Store, world: &str, run: impl FnOnce(&Store) -> Answer<
     let net = network::running().ok_or_else(|| AppError(online::UNAVAILABLE.into()))?;
     let me = store.load_identity()?;
     let connection = online::Connection { net: &net, server: &server, me: &me };
-    tauri::async_runtime::block_on(online::execute(store, world, &server, &connection,
+    tauri::async_runtime::block_on(online::execute(store, world, &server, &connection, online::Needs::Everything,
         |cache| std::future::ready(run(&cache))))
 }
 

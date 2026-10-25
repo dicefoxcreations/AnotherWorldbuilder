@@ -112,6 +112,12 @@ pub enum Ask {
     /// Takes records, and answers nothing back — a world brought over a
     /// little at a time, without naming everything held each time.
     Give { records: Vec<String> },
+    /// The frame of a world: everything but the parts of documents besides
+    /// their base — enough to show it and the names of its documents. A
+    /// piece at a time, from where the last one ended (`after`).
+    Frame { after: Option<String> },
+    /// What the frame left out of these documents, by id.
+    Articles { articles: Vec<String> },
     /// An online command, staged in encrypted pieces. Only `finish` publishes
     /// the complete command, provided the world still has `base` as its digest.
     /// A lost connection before finish leaves the world unchanged.
@@ -274,6 +280,14 @@ pub enum Reply {
     /// after the last of them. No mark: the host's order is another one
     /// now; ask with `Swap`.
     Since { records: Vec<String>, mark: Option<Mark>, digest: String },
+    /// A piece of the frame — as much as fits — and where the next one
+    /// starts; none: that was the last. The host's mark and count as it was
+    /// asked: what came meanwhile follows with `Since`. `total`: how many
+    /// records the frame has in all.
+    Frame { records: Vec<String>, next: Option<String>, mark: Option<Mark>, seq: u64, total: usize },
+    /// What the frame left out of the documents named in `done` — those that
+    /// did not fit are asked for again.
+    Articles { records: Vec<String>, done: Vec<String> },
     /// Parts of images asked for (name, base64) — as many as fit — and the
     /// parts the host still lacks.
     Parts { parts: Vec<(String, String)>, want: Vec<String> },

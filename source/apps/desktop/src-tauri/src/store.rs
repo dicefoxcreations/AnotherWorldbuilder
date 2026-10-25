@@ -1230,6 +1230,30 @@ impl Store {
         self.with_journal(world_id, |journal| Ok(journal.since(epoch, at)))
     }
 
+    /// The frame from where `after` left off, and how many records it has in
+    /// all — see `Journal::frame_after`.
+    pub fn frame_after(&self, world_id: &str, after: Option<&str>) -> Result<(usize, Vec<(String, String)>)> {
+        self.with_journal(world_id, |journal| Ok(journal.frame_after(after)))
+    }
+
+    /// What the frame left out of these documents — see `Journal::rest_of`.
+    pub fn rest_of(&self, world_id: &str, articles: &[ArticleId]) -> Result<Vec<(ArticleId, Vec<String>)>> {
+        self.with_journal(world_id, |journal| Ok(journal.rest_of(articles)))
+    }
+
+    /// The highest control record count.
+    pub fn control_count(&self, world_id: &str) -> Result<u64> {
+        self.with_journal(world_id, |journal| Ok(journal.control_count()))
+    }
+
+    /// Counts on from its server's count — see `Journal::count_from`.
+    pub fn count_from(&self, world_id: &str, seq: u64) -> Result<()> {
+        self.with_journal(world_id, |journal| {
+            journal.count_from(seq);
+            Ok(())
+        })
+    }
+
     /// Whether a server names the world to everyone — see `Item::Listing`.
     pub fn on_the_list(&self, world_id: &str) -> Result<bool> {
         self.with_journal(world_id, |journal| Ok(journal.on_the_list()))
@@ -1861,6 +1885,11 @@ impl Store {
         Ok(keys)
     }
 
+    /// The ids of the documents — without reading any of them.
+    pub fn article_ids(&self, world_id: &str) -> Result<Vec<String>> {
+        self.with_journal(world_id, |journal| Ok(journal.article_list().into_iter().map(|(a, ..)| a.to_string()).collect()))
+    }
+
     /// The number of documents — without reading any of them.
     pub fn article_count(&self, world_id: &str) -> Result<usize> {
         if !self.holds(world_id) {
@@ -1896,14 +1925,8 @@ impl Store {
         // The first time in this run: what was built at an earlier start, as
         // far as nothing it hangs on changed since.
         let mut earlier = if changed.is_none() { self.read_projection(world_id) } else { HashMap::new() };
-        // Nothing built before — a world opened the first time, a session
-        // read from its server: every document is opened, on every core.
-        if changed.is_none() && earlier.is_empty() {
-            let parts = guard.journal.all_parts();
-            guard.journal.open_many(&parts);
-        }
         let mut out = Vec::new();
-        let mut states = Vec::new();
+        let mut building = Vec::new();
         let mut prints = BTreeMap::new();
         for (article, article_type, slug) in guard.journal.article_list() {
             let kept = changed.as_ref().filter(|c| !c.contains(&article)).and_then(|_| before.remove(&article));
@@ -1914,7 +1937,7 @@ impl Store {
                     match earlier.remove(&article.to_string()) {
                         Some((p, same)) if p == print => out.push(Some(same)),
                         _ => {
-                            states.push((out.len(), guard.journal.article_state(article, article_type, slug)));
+                            building.push((out.len(), article, article_type, slug));
                             out.push(None);
                         }
                     }
@@ -1922,6 +1945,14 @@ impl Store {
                 }
             }
         }
+        // Many to build — a world opened the first time, a session read from
+        // its server, documents come in a batch: their parts opened on every
+        // core first.
+        let parts: Vec<(LayerId, u32)> = building.iter().flat_map(|(_, article, ..)| guard.journal.parts_of(*article)).collect();
+        if parts.len() > 64 {
+            guard.journal.open_many(&parts);
+        }
+        let states: Vec<_> = building.into_iter().map(|(at, article, article_type, slug)| (at, guard.journal.article_state(article, article_type, slug))).collect();
         let built = states.len();
         for (at, article) in stored_all(states)? {
             out[at] = Some(article);

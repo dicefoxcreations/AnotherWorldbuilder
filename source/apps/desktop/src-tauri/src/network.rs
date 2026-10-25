@@ -766,6 +766,48 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
             }
             Reply::Since { records, mark: Some(Mark { epoch: mark.epoch, at }), digest: store.digest(world)? }
         }
+        Ask::Frame { after } => {
+            // A piece of the frame, as much as fits — the mark and count as it began.
+            let mark = store.arrival_mark(world)?.map(|(epoch, at)| Mark { epoch, at });
+            let seq = store.control_count(world)?;
+            let (total, rest) = store.frame_after(world, after.as_deref())?;
+            let mut records = Vec::new();
+            let mut size = 0;
+            // Where the last one that fit stands — once one did not.
+            let mut next = None;
+            let mut last = None;
+            'pieces: for piece in rest.chunks(2000) {
+                let ids: Vec<String> = piece.iter().map(|(_, id)| id.clone()).collect();
+                for ((at, _), record) in piece.iter().zip(store.records(world, &ids)?) {
+                    if size + record.len() > SWAP_BUDGET && !records.is_empty() {
+                        next = last;
+                        break 'pieces;
+                    }
+                    size += record.len();
+                    records.push(record);
+                    last = Some(at.clone());
+                }
+            }
+            Reply::Frame { records, next, mark, seq, total }
+        }
+        Ask::Articles { articles } => {
+            // Whole documents, as many as fit; at least one.
+            let ids: Vec<ArticleId> = articles.iter().filter_map(|a| a.parse().ok()).collect();
+            let mut records = Vec::new();
+            let mut done: Vec<String> = articles.iter().filter(|a| a.parse::<ArticleId>().is_err()).cloned().collect();
+            let mut size = 0;
+            for (article, rest) in store.rest_of(world, &ids)? {
+                let these = store.records(world, &rest)?;
+                let more: usize = these.iter().map(String::len).sum();
+                if size + more > SWAP_BUDGET && !records.is_empty() {
+                    break;
+                }
+                size += more;
+                records.extend(these);
+                done.push(article.to_string());
+            }
+            Reply::Articles { records, done }
+        }
         Ask::Parts { want, give } => {
             // Whatever is not needed or does not match its name is not kept.
             store.take_parts(world, &decode_parts(give))?;
