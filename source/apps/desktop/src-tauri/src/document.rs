@@ -1296,7 +1296,17 @@ pub(crate) fn save(
                     // was — is no layer. A section of the document's own that
                     // was given a name is kept, to be written in.
                     let named_own = !typed(&block.key) && !block.title.trim().is_empty() && part.key == block.key;
-                    if part.text.trim().is_empty() && !named_own {
+                    // A type's section given access of its own is kept too —
+                    // empty, it would read as the type has it.
+                    let as_typed = opened.template.as_ref().and_then(|t| t.blocks.iter().find(|b| b.key == block.key)).and_then(|b| b.parts.iter().find(|p| p.key == part.key));
+                    let own_access = as_typed.is_some_and(|t| {
+                        let id = stored.id.to_string();
+                        let same = |a: &str, b: &str| a == b || a.parse::<Policy>().ok().is_some_and(|a| b.parse::<Policy>().ok() == Some(a));
+                        !(same(&crate::own_view(&t.view, &id, &opened.article_type), &part.view)
+                            && same(&crate::own_view(&t.edit, &id, &opened.article_type), &part.edit)
+                            && t.level == part.level)
+                    });
+                    if part.text.trim().is_empty() && !named_own && !own_access {
                         continue;
                     }
                     if !gm {
@@ -2691,6 +2701,14 @@ mod tests {
         save_now(&w.store, &w.gm, &w.id, &tavern, &code.code.replace("<block title=Allies view=players edit=gm>\n", "<block title=Allies view=players edit=gm>\nThe smugglers.\n")).unwrap();
         let back = code_of(&w.store, &w.gm, &w.id, &tavern).unwrap();
         assert!(back.code.contains("<block title=Allies view=players edit=gm>\nThe smugglers.\n</block>"), "{}", back.code);
+        // Empty, but with access of its own: that is kept.
+        let inn = doc(&w, "place", "Inn", Vec::new());
+        let empty = code_of(&w.store, &w.gm, &w.id, &inn).unwrap().code;
+        let ruled = empty.replace("<block title=Allies view=players edit=gm>", "<block title=Allies view=players edit=\"gm OR player:bob\">");
+        assert_ne!(ruled, empty);
+        save_now(&w.store, &w.gm, &w.id, &inn, &ruled).unwrap();
+        let again = code_of(&w.store, &w.gm, &w.id, &inn).unwrap();
+        assert!(again.code.contains("<block title=Allies view=players edit=\"gm OR player:bob\">\n</block>"), "{}", again.code);
     }
 
     #[test]

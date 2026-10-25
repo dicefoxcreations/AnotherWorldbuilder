@@ -29,6 +29,7 @@ import { nameFrom, nextNumber } from "../templates/NamePattern";
 import { linkIcon } from "./DocLink";
 import { ArticleHead } from "./ArticleHead";
 import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
+import { withAccess } from "../../shared/Policies";
 import { late, VersionsPanel } from "./Versions";
 import { linker, linkIn, linksIn, linkText, linkTo, MARK, scanLinks, typeNames, type Link } from "../../shared/Links";
 import { anchorName, anchorRange, anchorsIn, markSection, relinked, renameInText, withoutAnchor } from "../../shared/Anchors";
@@ -960,8 +961,8 @@ function DocumentEditor({
                 world={world}
                 view={doc.access.view}
                 edit={doc.access.edit}
-                onView={world.isGm ? (view) => changeDoc({ ...doc, access: { ...doc.access, view } }) : undefined}
-                onEdit={world.isGm ? (edit) => changeDoc({ ...doc, access: { ...doc.access, edit } }) : undefined}
+                onView={world.isGm ? (view) => changeDoc(withAccess(doc, { view })) : undefined}
+                onEdit={world.isGm ? (edit) => changeDoc(withAccess(doc, { edit })) : undefined}
               />
               {deleteButton}
             </>

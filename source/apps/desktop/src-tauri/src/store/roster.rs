@@ -195,13 +195,15 @@ impl Store {
             journal.support_revoke(&me, &by, id, at)?;
         }
         for m in after.members.iter().filter(|m| m.role == Role::Player) {
-            let attributes: Vec<Attribute> = m.attributes.iter().filter_map(|a| a.parse().ok()).collect();
+            let granted = m.granted_attributes();
+            // A key the ring lacks — a player's own name, say — is left out.
+            let attributes: Vec<Attribute> = granted.iter().filter_map(|a| a.parse().ok()).filter(|a| after.ring.current_epoch(a).is_some()).collect();
             let same = before.member(m.identity.id.as_str()).is_some_and(|b| b.attributes == m.attributes);
             if same && !attributes.iter().any(|a| turned.contains(a)) {
                 continue;
             }
             let keys = if encrypted { after.ring.grant(&m.identity, &attributes)? } else { Vec::new() };
-            journal.support_grant(&me, &by, &m.identity, &GrantContent { attributes: m.attributes.clone(), keys }, &others, at)?;
+            journal.support_grant(&me, &by, &m.identity, &GrantContent { attributes: granted, keys }, &others, at)?;
         }
         Ok(())
     }

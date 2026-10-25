@@ -180,6 +180,26 @@ pub struct Member {
     pub attributes: Vec<String>,
 }
 
+impl Member {
+    /// What names a player by themselves — `player:<name>`, as a view or an
+    /// edit rule picks them.
+    pub fn own_attribute(identity: &IdentityPublic) -> Option<String> {
+        let own = format!("player:{}", identity.name.trim().to_lowercase());
+        own.parse::<aw_model::Attribute>().is_ok().then_some(own)
+    }
+
+    /// The attributes their grant holds: those assigned, and their own name.
+    pub fn granted_attributes(&self) -> Vec<String> {
+        let mut all = self.attributes.clone();
+        if let Some(own) = Self::own_attribute(&self.identity) {
+            if !all.contains(&own) {
+                all.push(own);
+            }
+        }
+        all
+    }
+}
+
 /// Default icon of a world.
 pub const WORLD_ICON: &str = "🌍";
 
@@ -1493,12 +1513,22 @@ impl Store {
             return Ok(());
         }
         let local = self.load_local(world_id)?;
-        let ring = self.load_keyring(world_id)?;
+        let mut ring = self.load_keyring(world_id)?;
         let gm = self.load_identity()?;
         let encrypted = self.is_encrypted(world_id)?;
+        // Each player's own name as an attribute: the key comes into being with them.
+        let before = ring.attributes().count();
         for member in local.members.iter().filter(|m| m.role == Role::Player) {
-            let attributes: Vec<aw_model::Attribute> =
-                member.attributes.iter().filter_map(|a| a.parse().ok()).collect();
+            for a in member.granted_attributes().iter().filter_map(|a| a.parse::<aw_model::Attribute>().ok()) {
+                ring.ensure(&a)?;
+            }
+        }
+        if ring.attributes().count() != before {
+            self.write_keyring(world_id, &ring)?;
+        }
+        for member in local.members.iter().filter(|m| m.role == Role::Player) {
+            let granted = member.granted_attributes();
+            let attributes: Vec<aw_model::Attribute> = granted.iter().filter_map(|a| a.parse().ok()).collect();
             // Unencrypted, a grant names attributes alone, as it is — a
             // server holding the world reads whose views are whose. No keys:
             // they would lie open for good.
@@ -1516,11 +1546,11 @@ impl Store {
             let same = current.as_ref().is_some_and(|((identity, plain), g)| {
                 *identity == member.identity
                     && *plain != encrypted
-                    && g.attributes == member.attributes
+                    && g.attributes == granted
                     && g.keys.iter().map(|k| &k.at).collect::<Vec<_>>() == wanted
             });
             if !same {
-                let content = serde_json::to_vec(&GrantContent { attributes: member.attributes.clone(), keys })?;
+                let content = serde_json::to_vec(&GrantContent { attributes: granted.clone(), keys })?;
                 let sealed = if encrypted { Sealed::new(&[&member.identity, &gm.public()], &content)? } else { Sealed::plain(&content) };
                 self.control(world_id, Item::Grant { member: member.identity.clone(), sealed }, "")?;
             }

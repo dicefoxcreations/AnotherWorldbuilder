@@ -73,6 +73,8 @@ pub(crate) fn acting_for(store: &Store, world: &str, member: &IdentityPublic) ->
     };
     let mut attributes: BTreeSet<Attribute> = [Attribute::All, Attribute::Players].into_iter().collect();
     attributes.extend(listed.iter().filter_map(|a| a.parse().ok()));
+    // Their own name, as a view or an edit rule picks them.
+    attributes.extend(Member::own_attribute(member).and_then(|a| a.parse().ok()));
     let granted: BTreeSet<String> = grant.map(|g| g.keys.into_iter().map(|k| k.at).collect()).unwrap_or_default();
     let mut held = HeldKeys::new();
     for (at, key) in store.load_keyring(world)?.everything().iter() {

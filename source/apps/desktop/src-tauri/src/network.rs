@@ -3088,6 +3088,17 @@ mod tests {
     }
 
     #[test]
+    fn a_player_is_picked_by_their_own_name() {
+        let (_dir, gm_store, gm, bob_store, bob) = stores();
+        let world = new_world(&gm_store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        admit(&gm_store, &world, bob.public(), Vec::new()).unwrap();
+        let secret = crate::NewLayer { title: String::new(), text: "For Bob by name.".into(), policy: "gm OR player:bob".into(), level: "open".into(), section: "text".into(), edit: "gm OR player:bob".into(), fields: serde_json::json!({}), parent: None };
+        let doc = crate::create_document(&gm_store, &world, String::new(), "letter".into(), "Letter".into(), "all".into(), vec![secret]).unwrap();
+        swap_here(&gm_store, &bob_store, &bob, &world);
+        assert!(text(&bob_store, &bob, &world, &doc).contains("For Bob by name."), "his name is a key he holds");
+    }
+
+    #[test]
     fn a_new_id_takes_a_players_place_with_what_was_theirs() {
         let (dir, gm_store, gm, _old_store, anna) = stores();
         let world = new_world(&gm_store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
