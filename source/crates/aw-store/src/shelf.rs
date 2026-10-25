@@ -156,8 +156,35 @@ fn uri(path: &Path) -> String {
 }
 
 fn schema(db: &Connection) -> Result<()> {
+    // Big pages: an entry of a few kilobytes fills a small page half.
+    db.execute_batch("PRAGMA page_size = 16384;")?;
     db.execute_batch(SCHEMA)?;
     Ok(())
+}
+
+/// An entry's bytes as the state keeps them: compressed — the hex of keys
+/// and ciphertext takes half the room so.
+fn pack(raw: &[u8]) -> Result<Vec<u8>> {
+    Ok(zstd::bulk::compress(raw, 3)?)
+}
+
+fn unpack(blob: &[u8]) -> Option<Vec<u8>> {
+    zstd::stream::decode_all(blob).ok()
+}
+
+/// `unpack` for many, on every core.
+fn unpack_all(rows: &mut [Stored]) {
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let chunk = rows.len().div_ceil(threads).max(256);
+    std::thread::scope(|scope| {
+        for some in rows.chunks_mut(chunk) {
+            scope.spawn(move || {
+                for row in some {
+                    row.raw = row.raw.take().and_then(|blob| unpack(&blob));
+                }
+            });
+        }
+    });
 }
 
 fn included_of(db: &Connection) -> Result<BTreeMap<String, u64>> {
@@ -184,6 +211,8 @@ pub struct Shelf {
     next: u64,
     /// When this device last wrote.
     written: Option<std::time::Instant>,
+    /// Deleted entries the state is known not to hold.
+    gone: HashSet<String>,
     /// When the folders were last looked at — unchanged, nothing came.
     stamps: (Option<std::time::SystemTime>, Option<std::time::SystemTime>),
 }
@@ -228,6 +257,7 @@ impl Shelf {
             device: String::new(),
             next: 1,
             written: None,
+            gone: HashSet::new(),
             stamps: (None, None),
         }
     }
@@ -333,6 +363,7 @@ impl Shelf {
                 new.push(Stored { id, kind, article, at: at as u64, raw: Some(raw) });
             }
         }
+        unpack_all(&mut new);
         self.included = included_of(&db)?;
         self.db = db;
         self.state = Some(newest);
@@ -388,6 +419,7 @@ impl Shelf {
             Ok(Stored { id: hex::encode(r.get::<_, Vec<u8>>(0)?), kind, article: r.get(2)?, at: r.get::<_, i64>(3)? as u64, raw })
         })?;
         let mut out: Vec<Stored> = rows.collect::<std::result::Result<_, _>>()?;
+        unpack_all(&mut out);
         for loose in self.loose.values() {
             let mut record = loose.clone();
             if !with_raw(record.kind) {
@@ -420,7 +452,8 @@ impl Shelf {
             return loose.raw.clone();
         }
         let key = hex::decode(id).ok()?;
-        self.db.query_row("SELECT raw FROM records WHERE id = ?1", [key], |r| r.get(0)).optional().ok()?
+        let blob: Vec<u8> = self.db.query_row("SELECT raw FROM records WHERE id = ?1", [key], |r| r.get(0)).optional().ok()??;
+        unpack(&blob)
     }
 
     /// Keeps records — on the disk when this returns.
@@ -434,7 +467,7 @@ impl Shelf {
                 {
                     let mut q = tx.prepare("INSERT OR IGNORE INTO records(id, kind, article, at, raw) VALUES (?1, ?2, ?3, ?4, ?5)")?;
                     for r in records {
-                        q.execute(params![hex::decode(&r.id)?, r.kind, r.article, r.at as i64, r.raw.as_deref().ok_or("a record without its bytes")?])?;
+                        q.execute(params![hex::decode(&r.id)?, r.kind, r.article, r.at as i64, pack(r.raw.as_deref().ok_or("a record without its bytes")?)?])?;
                     }
                 }
                 tx.commit()?;
@@ -485,78 +518,69 @@ impl Shelf {
     /// each device's without a gap — and without `drop`. The game master's
     /// device does this; any other leaves it. Then the files two states back
     /// go: whoever is a state behind still finds what they need. Returns
-    /// whether a new state was written.
+    /// whether a new state was written. Alone, `drop` simply goes.
     pub fn consolidate(&mut self, drop: &HashSet<String>) -> Result<bool> {
         if self.mode == Mode::Alone {
             let ids: Vec<String> = drop.iter().cloned().collect();
             self.remove(&ids)?;
             return Ok(!ids.is_empty());
         }
+        let Some(next) = self.next_state(drop)? else { return Ok(false) };
+        let written = next.write()?;
+        self.adopt(written)?;
+        Ok(true)
+    }
+
+    /// What the next state of a shared folder takes — worked out quickly;
+    /// `NextState::write` then writes it without the shelf, and `adopt`
+    /// takes it in. None: nothing to do.
+    pub fn next_state(&mut self, drop: &HashSet<String>) -> Result<Option<NextState>> {
+        if self.mode == Mode::Alone {
+            return Ok(None);
+        }
         self.fresh()?;
         // Each device's updates in order, up to the first that is not here.
-        let mut taken: Vec<(String, u64)> = Vec::new();
+        let mut records = Vec::new();
         let mut included = self.included.clone();
-        for (device, number) in self.files.keys() {
+        for ((device, number), ids) in &self.files {
             let upto = included.entry(device.clone()).or_insert(0);
             if *number == *upto + 1 {
                 *upto = *number;
-                taken.push((device.clone(), *number));
+                records.extend(ids.iter().filter(|id| !drop.contains(*id)).filter_map(|id| self.loose.get(id)).cloned());
             }
         }
-        let dropping = drop.iter().any(|id| self.in_state(id).unwrap_or(false));
-        if taken.is_empty() && !dropping {
-            return Ok(false);
-        }
-        let generation = self.state.as_ref().map_or(0, |s| s.generation) + 1;
-        let part = self.dir.join(format!(".state-{generation:010}-{}.part", self.device));
-        let _ = std::fs::remove_file(&part);
-        if let Some(state) = &self.state {
-            std::fs::copy(self.dir.join(&state.name), &part)?;
-        }
-        {
-            let mut db = Connection::open(&part)?;
-            db.execute_batch("PRAGMA journal_mode = DELETE; PRAGMA synchronous = OFF;")?;
-            schema(&db)?;
-            let tx = db.transaction()?;
-            {
-                let mut put = tx.prepare("INSERT OR IGNORE INTO records(id, kind, article, at, raw) VALUES (?1, ?2, ?3, ?4, ?5)")?;
-                for key in &taken {
-                    for id in self.files.get(key).into_iter().flatten() {
-                        let Some(r) = self.loose.get(id) else { continue };
-                        if drop.contains(id) {
-                            continue;
-                        }
-                        put.execute(params![hex::decode(&r.id)?, r.kind, r.article, r.at as i64, r.raw.as_deref().ok_or("a record without its bytes")?])?;
-                    }
-                }
-                let mut gone = tx.prepare("DELETE FROM records WHERE id = ?1")?;
-                for id in drop {
-                    gone.execute([hex::decode(id)?])?;
-                }
-                tx.execute(
-                    "INSERT OR REPLACE INTO meta(key, value) VALUES ('included', ?1), ('generation', ?2)",
-                    params![serde_json::to_vec(&included)?, generation.to_string().into_bytes()],
-                )?;
-            }
-            tx.commit()?;
-            // Much let go: the file shrinks.
-            let (free, pages): (i64, i64) = db.query_row("SELECT freelist_count, page_count FROM pragma_freelist_count(), pragma_page_count()", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            if free * 4 > pages {
-                db.execute_batch("VACUUM")?;
+        // What was deleted and is still in the state — looked up once each.
+        let mut gone = Vec::new();
+        let unknown: Vec<&String> = drop.iter().filter(|id| !self.gone.contains(*id)).collect();
+        for id in unknown {
+            if self.in_state(id)? {
+                gone.push(hex::decode(id)?);
+            } else {
+                self.gone.insert(id.clone());
             }
         }
-        std::fs::File::open(&part)?.sync_all()?;
-        let mut hasher = blake3::Hasher::new();
-        hasher.update_reader(std::fs::File::open(&part)?)?;
-        let name = StateName::new(generation, &hasher.finalize().to_hex()[..16]);
-        std::fs::rename(&part, self.dir.join(&name.name))?;
-        crate::durable::sync_parent(&self.dir.join(&name.name))?;
-        let _ = crate::durable::replace(&self.private.join("whole"), format!("{} {}", name.name, std::fs::metadata(self.dir.join(&name.name))?.len()).as_bytes());
-        let previous = std::mem::take(&mut self.included);
-        let previous_generation = self.state.as_ref().map(|s| s.generation);
+        if included == self.included && gone.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(NextState {
+            dir: self.dir.clone(),
+            private: self.private.clone(),
+            device: self.device.clone(),
+            base: self.state.as_ref().map(|s| s.name.clone()),
+            generation: self.state.as_ref().map_or(0, |s| s.generation) + 1,
+            records,
+            gone,
+            included,
+            before: self.included.clone(),
+            before_generation: self.state.as_ref().map(|s| s.generation),
+        }))
+    }
+
+    /// Takes in the state just written, and lets go of what two back held.
+    pub fn adopt(&mut self, written: Written) -> Result<()> {
         self.adopt_newest()?;
-        self.tidy(&previous, previous_generation);
-        Ok(true)
+        self.tidy(&written.before, written.before_generation);
+        Ok(())
     }
 
     /// Lets go of what a state two back held: update files the previous
@@ -574,6 +598,80 @@ impl Shelf {
                 }
             }
         }
+    }
+}
+
+/// The next state of a shared folder, as `Shelf::next_state` worked it out.
+pub struct NextState {
+    dir: PathBuf,
+    private: PathBuf,
+    device: String,
+    base: Option<String>,
+    generation: u64,
+    records: Vec<Stored>,
+    gone: Vec<Vec<u8>>,
+    included: BTreeMap<String, u64>,
+    before: BTreeMap<String, u64>,
+    before_generation: Option<u64>,
+}
+
+/// A state written — for `Shelf::adopt`.
+pub struct Written {
+    before: BTreeMap<String, u64>,
+    before_generation: Option<u64>,
+}
+
+impl NextState {
+    /// Writes it: a copy of the last state, the new entries in, the
+    /// deleted out — under a name of its own once whole.
+    pub fn write(self) -> Result<Written> {
+        let part = self.dir.join(format!(".state-{:010}-{}.part", self.generation, self.device));
+        let _ = std::fs::remove_file(&part);
+        if let Some(base) = &self.base {
+            std::fs::copy(self.dir.join(base), &part)?;
+        }
+        let result = self.fill(&part);
+        if result.is_err() {
+            let _ = std::fs::remove_file(&part);
+        }
+        result?;
+        std::fs::File::open(&part)?.sync_all()?;
+        let mut hasher = blake3::Hasher::new();
+        hasher.update_reader(std::fs::File::open(&part)?)?;
+        let name = StateName::new(self.generation, &hasher.finalize().to_hex()[..16]);
+        let path = self.dir.join(&name.name);
+        std::fs::rename(&part, &path)?;
+        crate::durable::sync_parent(&path)?;
+        let _ = crate::durable::replace(&self.private.join("whole"), format!("{} {}", name.name, std::fs::metadata(&path)?.len()).as_bytes());
+        Ok(Written { before: self.before, before_generation: self.before_generation })
+    }
+
+    fn fill(&self, part: &Path) -> Result<()> {
+        let mut db = Connection::open(part)?;
+        db.execute_batch("PRAGMA journal_mode = DELETE; PRAGMA synchronous = OFF;")?;
+        schema(&db)?;
+        let tx = db.transaction()?;
+        {
+            let mut put = tx.prepare("INSERT OR IGNORE INTO records(id, kind, article, at, raw) VALUES (?1, ?2, ?3, ?4, ?5)")?;
+            for r in &self.records {
+                put.execute(params![hex::decode(&r.id)?, r.kind, r.article, r.at as i64, pack(r.raw.as_deref().ok_or("a record without its bytes")?)?])?;
+            }
+            let mut gone = tx.prepare("DELETE FROM records WHERE id = ?1")?;
+            for id in &self.gone {
+                gone.execute([id])?;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES ('included', ?1), ('generation', ?2)",
+                params![serde_json::to_vec(&self.included)?, self.generation.to_string().into_bytes()],
+            )?;
+        }
+        tx.commit()?;
+        // Much let go: the file shrinks.
+        let (free, pages): (i64, i64) = db.query_row("SELECT freelist_count, page_count FROM pragma_freelist_count(), pragma_page_count()", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        if free * 4 > pages {
+            db.execute_batch("VACUUM")?;
+        }
+        Ok(())
     }
 }
 

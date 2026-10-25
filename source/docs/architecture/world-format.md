@@ -28,9 +28,9 @@ Every entry is signed and named after the hash of its bytes, as before: GM entri
 
 **Nothing in the folder is ever changed in place.** A cloud folder copies whole files and cannot merge two writers, and a file may arrive in pieces:
 
-- **The state** is a SQLite file with one row per entry (`records`: id, kind, article, arrival, bytes) and what it holds of each device's updates (`meta`). Its name carries the hash of its bytes: a state that has not fully arrived does not check out, and the one before is read.
+- **The state** is a SQLite file with one row per entry (`records`: id, kind, article, arrival, bytes compressed with zstd) and what it holds of each device's updates (`meta`). Its name carries the hash of its bytes: a state that has not fully arrived does not check out, and the one before is read.
 - **An update file** holds what one device wrote at once — a version, a change to the world — with a checksum at its end. Each device writes only its own files and numbers them without gaps. A file still on its way waits.
-- **Consolidating:** the GM's device writes the next state once nobody wrote for a minute: the last state, every device's updates in order up to the first gap, without what the GM deleted. Then it lets go of what the state before already held — whoever is a state behind still finds what they need.
+- **Consolidating:** the GM's device writes the next state once nobody wrote for a minute — the long part without holding the world, which stays open to work in: the last state, every device's updates in order up to the first gap, without what the GM deleted. Then it lets go of what the state before already held — whoever is a state behind still finds what they need.
 - **Reading:** the newest whole state plus every update it does not hold.
 
 A server, and a session reading a world from its server, keep the state alone: one SQLite file changed in place, transaction by transaction, without updates.

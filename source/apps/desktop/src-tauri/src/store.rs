@@ -850,12 +850,24 @@ impl Store {
             Err(_) => return,
         };
         for open in open {
-            let Ok(mut guard) = open.try_lock() else { continue };
-            let world = guard.journal.world().world_id.to_string();
-            if self.holds_token(&world) && guard.journal.consolidation_due(STATE_AFTER) {
-                if let Err(e) = guard.journal.consolidate() {
-                    eprintln!("{world}: the next state was not written: {e}");
+            // Worked out with the journal, written without it — the world
+            // stays open to work in meanwhile — and taken in with it again.
+            let (world, next) = {
+                let Ok(mut guard) = open.try_lock() else { continue };
+                let world = guard.journal.world().world_id.to_string();
+                if !self.holds_token(&world) || !guard.journal.consolidation_due(STATE_AFTER) {
+                    continue;
                 }
+                (world, guard.journal.next_state())
+            };
+            let written = match next {
+                Ok(Some(next)) => next.write(),
+                Ok(None) => continue,
+                Err(e) => Err(e),
+            };
+            let taken = written.and_then(|w| open.lock().map_err(|_| "the world is poisoned".into()).and_then(|mut g| g.journal.adopt_state(w)));
+            if let Err(e) = taken {
+                eprintln!("{world}: the next state was not written: {e}");
             }
         }
     }

@@ -1757,6 +1757,17 @@ impl Journal {
         self.shelf.consolidate(&self.deleted)
     }
 
+    /// `consolidate` in three steps, the long one without the journal: what
+    /// the next state takes, ...
+    pub fn next_state(&mut self) -> Result<Option<crate::shelf::NextState>> {
+        self.shelf.next_state(&self.deleted)
+    }
+
+    /// ... then `NextState::write`, then this: the state written, taken in.
+    pub fn adopt_state(&mut self, written: crate::shelf::Written) -> Result<()> {
+        self.shelf.adopt(written)
+    }
+
     /// Whether the next state of a shared folder is due — see `Shelf::due`.
     pub fn consolidation_due(&self, quiet: std::time::Duration) -> bool {
         self.shelf.due(quiet)
