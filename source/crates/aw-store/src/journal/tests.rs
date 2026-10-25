@@ -908,3 +908,49 @@ fn a_tidied_world_still_sends_its_own_record_first() {
     let first = vec![String::from_utf8(t.gm_journal.raw(&order[0]).unwrap()).unwrap()];
     assert!(world_of(&first, t.token.public().world_id.as_str()).is_ok(), "the world's own record comes first");
 }
+
+#[test]
+fn a_supporter_lets_a_player_in_with_the_keys_for_everyone_and_a_removal_after_it_counts() {
+    let mut t = table();
+    let (_, _, story) = t.article(("players", "players", "The inn is old.", Level::Open));
+    let (_, _, secret) = t.article(("gm", "gm", "The innkeeper is a spy.", Level::Open));
+    let carla = Identity::create("Carla").unwrap();
+    let held = HeldKeys::unseal(t.bob.seal_secret(), &t.ring.grant(&t.bob.public(), &[attr("players"), attr("all")]).unwrap());
+    let content = |member: &Identity| GrantContent {
+        attributes: vec!["players".into(), "all".into()],
+        keys: held.grant_to(&member.public(), &[attr("players"), attr("all")]).unwrap(),
+    };
+    t.to_bob();
+
+    // Not a supporter yet: his admission waits, and lets nobody in.
+    let id = t.bob_journal.admit_player(&t.bob, &carla.public(), &content(&carla), 5);
+    assert!(id.is_err(), "his own device does not take it either");
+    t.gm_says(Item::Supporters { ids: vec![t.bob.id().to_string()] });
+    t.to_bob();
+    t.bob_journal.admit_player(&t.bob, &carla.public(), &content(&carla), 5).unwrap();
+    t.to_gm();
+    assert!(t.gm_journal.grant(carla.id().as_str()).is_some(), "in, on every device");
+    assert_eq!(t.gm_journal.admitted_by(carla.id().as_str()).map(|b| b.id.clone()), Some(t.bob.public().id));
+    assert_eq!(t.gm_journal.admitted().len(), 1, "for the game master's device to take in");
+
+    // Carla reads what every player reads — and nothing of the GM's.
+    let mut cara = open(t._dir.path(), "carla", &t.token);
+    cara.set_me(&carla);
+    t.to(&mut cara);
+    let grant = cara.grant_content(carla.id().as_str(), carla.seal_secret()).unwrap();
+    cara.set_keys(HeldKeys::unseal(carla.seal_secret(), &grant.keys));
+    assert_eq!(text_of(&mut cara, story), "The inn is old.");
+    assert!(cara.plain(secret).is_err(), "the GM's part stays closed");
+
+    // The game master takes her out: the admission before it counts no more.
+    t.gm_says(Item::Revoked { member: carla.id().to_string() });
+    assert!(t.gm_journal.grant(carla.id().as_str()).is_none());
+    // Let in again by the supporter, after the removal: in again.
+    t.to_bob();
+    t.bob_journal.admit_player(&t.bob, &carla.public(), &content(&carla), 9).unwrap();
+    t.to_gm();
+    assert!(t.gm_journal.grant(carla.id().as_str()).is_some());
+    // No supporter any more: what he alone let in is out.
+    t.gm_says(Item::Supporters { ids: Vec::new() });
+    assert!(t.gm_journal.grant(carla.id().as_str()).is_none());
+}

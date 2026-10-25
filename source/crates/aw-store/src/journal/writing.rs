@@ -28,6 +28,15 @@ impl Journal {
         self.append(Record::Badge(badge))
     }
 
+    /// Lets a player in as a supporter: with what `content` holds — the keys
+    /// the supporter has for everyone — sealed for them, the supporter and
+    /// the game master.
+    pub fn admit_player(&mut self, by: &Identity, member: &IdentityPublic, content: &GrantContent, at: u64) -> Result<String> {
+        let gm = self.gm().cloned().ok_or("a world without its game master")?;
+        let admission = Admission::new(self.world.world_id.as_str(), by, member, &gm, content, self.max_seq, at, self.encrypted())?;
+        self.append(Record::Admission(admission))
+    }
+
     /// A gallery entry of one's own: a new image, or a new name.
     pub fn put_image(&mut self, entry: crate::media::ImageEntry) -> Result<String> {
         self.append(Record::Image(entry))
@@ -531,7 +540,10 @@ impl Journal {
                 | Item::Encryption { .. }
                 | Item::Copies { .. }
                 | Item::Hosts { .. }
-                | Item::Listing { .. } => !current.contains(id),
+                | Item::Listing { .. }
+                | Item::Supporters { .. }
+                | Item::Keys { .. }
+                | Item::Handover { .. } => !current.contains(id),
                 Item::Verdict { versions, keys, .. } => {
                     versions.iter().all(|v| !self.versions.contains_key(v)) && keys.keys().all(|b| !blocks.contains(b))
                 }
@@ -543,6 +555,8 @@ impl Journal {
                 _ => false,
             })
             .map(|(id, _)| id.clone())
+            // Admissions the game master's own grant took over.
+            .chain(self.admissions.iter().filter(|(member, _)| self.admitted_by(member).is_none()).map(|(_, (id, _))| id.clone()))
             .collect()
     }
 }

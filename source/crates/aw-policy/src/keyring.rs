@@ -234,6 +234,17 @@ impl HeldKeys {
         held
     }
 
+    /// The keys held for these attributes, every epoch of them, wrapped for
+    /// someone else — what a supporter hands a player they let in.
+    pub fn grant_to(&self, member: &IdentityPublic, attributes: &[Attribute]) -> Result<Vec<GrantedKey>> {
+        let recipient = member.seal_public()?;
+        let mut out = Vec::new();
+        for (at, key) in self.keys.iter().filter(|(at, _)| attributes.contains(&at.attribute)) {
+            out.push(GrantedKey { at: at.to_string(), wrapped: seal_key(&recipient, &ContentKey::from_bytes(*key))? });
+        }
+        Ok(out)
+    }
+
     pub fn insert(&mut self, at: AttributeAt, key: [u8; 32]) {
         self.keys.insert(at, key);
     }

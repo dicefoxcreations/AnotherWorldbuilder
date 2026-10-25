@@ -63,6 +63,7 @@ const BLOCK: &str = "anotherworldbuilder/block/1";
 const VERSION: &str = "anotherworldbuilder/version/1";
 const PROPOSAL: &str = "anotherworldbuilder/proposal/1";
 const BADGE: &str = "anotherworldbuilder/badge/1";
+const ADMISSION: &str = "anotherworldbuilder/admission/1";
 /// A whole document travels in one version — texts are not that big.
 pub const MAX_RECORD: usize = 16 * 1024 * 1024;
 /// Versions kept per document when the game master has not said otherwise.
@@ -290,6 +291,17 @@ pub enum Item {
         #[serde(default)]
         expected: Vec<String>,
     },
+    /// Who besides the game master lets players in — and may take the game
+    /// master's place when they are gone: the members the GM chose, and the
+    /// admins of the server the world lies on. By id.
+    Supporters { ids: Vec<String> },
+    /// The game master's keys — world token, keyring, members (`GmKeys`) —
+    /// sealed for one supporter and the game master: what they take over
+    /// with. None: no more for them.
+    Keys { to: String, sealed: Option<Sealed> },
+    /// The game master hands the world to a member, whose device takes it
+    /// over with the keys sealed for them. None: no more.
+    Handover { to: Option<String> },
 }
 
 impl Item {
@@ -316,6 +328,9 @@ impl Item {
             Item::Copies { .. } => "copies".into(),
             Item::Hosts { .. } => "hosts".into(),
             Item::Listing { .. } => "listing".into(),
+            Item::Supporters { .. } => "supporters".into(),
+            Item::Keys { to, .. } => format!("keys {to}"),
+            Item::Handover { .. } => "handover".into(),
         }
     }
 }
@@ -541,6 +556,51 @@ pub enum Record {
     Image(crate::media::ImageEntry),
     Proposal(Proposal),
     Badge(Badge),
+    Admission(Admission),
+}
+
+/// A player let in by a supporter: with the keys the supporter holds as a
+/// player — those for everyone — sealed for the new member, the supporter
+/// and the game master. It counts until the game master's device writes the
+/// member's grant itself; a removal the supporter had not seen outweighs it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Admission {
+    pub world: String,
+    pub member: IdentityPublic,
+    pub by: IdentityPublic,
+    /// The newest control record the supporter knew, by its count.
+    pub after: u64,
+    /// Milliseconds since 1970, by the supporter's clock.
+    pub at: u64,
+    /// `GrantContent`, as a grant holds it.
+    pub sealed: Sealed,
+    pub signature: String,
+}
+
+impl Admission {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(world: &str, by: &Identity, member: &IdentityPublic, gm: &IdentityPublic, content: &GrantContent, after: u64, at: u64, encrypted: bool) -> Result<Self> {
+        let bytes = serde_json::to_vec(content)?;
+        let sealed = if encrypted { Sealed::new(&[member, &by.public(), gm], &bytes)? } else { Sealed::plain(&bytes) };
+        let mut a = Admission { world: world.to_string(), member: member.clone(), by: by.public(), after, at, sealed, signature: String::new() };
+        a.signature = hex::encode(by.sign(&a.signed_bytes()?));
+        Ok(a)
+    }
+
+    fn signed_bytes(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&(ADMISSION, &self.world, &self.member, &self.by, self.after, self.at, &self.sealed))?)
+    }
+
+    fn verify(&self, world: &str) -> Result<()> {
+        if self.world != world {
+            return Err("a record of another world".into());
+        }
+        if !self.by.is_genuine() || !self.member.is_genuine() {
+            return Err("an id that does not match its keys".into());
+        }
+        self.by.verify(&self.signed_bytes()?, &signature(&self.signature)?)?;
+        Ok(())
+    }
 }
 
 /// How a member is shown in a world: their colour — on their name, and on
@@ -720,6 +780,7 @@ pub fn verify_record_envelope(raw: &str, world: &WorldPublic, gm: Option<&Identi
         Record::Image(i) => i.verify(expected, gm)?,
         Record::Proposal(p) => p.verify(expected)?,
         Record::Badge(b) => b.verify(expected)?,
+        Record::Admission(a) => a.verify(expected)?,
     }
     Ok(record)
 }
@@ -729,10 +790,6 @@ pub fn dir_name(id: &str) -> String {
     id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' }).collect()
 }
 
-/// Where a record lies below the world's folder — the same in a local
-/// folder and in a shared one: `control/<hash>.json` (the world's own record
-/// `control/world-<hash>.json`) and `articles/<article>/<hash>.json`. Drafts
-/// are not shared through folders: `None`.
 /// How a record is kept: its kind — the order it is taken in, see `order`
 /// — and the article it belongs to, where it belongs to one.
 fn shelved(id: &str, raw: &[u8], record: &Record) -> Stored {
@@ -744,7 +801,7 @@ fn shelved(id: &str, raw: &[u8], record: &Record) -> Stored {
         },
         Record::Version(v) => Some(v.article.to_string()),
         Record::Draft(d) => Some(d.article.to_string()),
-        Record::Image(_) | Record::Proposal(_) | Record::Badge(_) => None,
+        Record::Image(_) | Record::Proposal(_) | Record::Badge(_) | Record::Admission(_) => None,
     };
     Stored { id: id.to_string(), kind: order(record).0, article, at: now(), raw: Some(raw.to_vec()) }
 }
@@ -931,6 +988,9 @@ pub struct Journal {
     proposals: BTreeMap<String, Proposal>,
     /// The newest badge of each member, by member id — with its record's id.
     badges: BTreeMap<String, (String, Badge)>,
+    /// The newest admission of each member by a supporter, by member id —
+    /// with its record's id.
+    admissions: BTreeMap<String, (String, Admission)>,
     /// Blocks whose changes checked out on this device.
     trusted: HashSet<String>,
     /// Versions known from the index, whose files need no reading.
@@ -1058,6 +1118,7 @@ fn order(record: &Record) -> (u8, u64) {
         Record::Image(i) => (3, i.time),
         Record::Proposal(p) => (4, p.at),
         Record::Badge(b) => (5, b.at),
+        Record::Admission(a) => (6, a.at),
     }
 }
 
@@ -1088,6 +1149,7 @@ impl Journal {
             images: BTreeMap::new(),
             proposals: BTreeMap::new(),
             badges: BTreeMap::new(),
+            admissions: BTreeMap::new(),
             attached: index.attached,
             trusted: index.trusted.into_iter().collect(),
             indexed: index.versions,
@@ -1379,7 +1441,7 @@ impl Journal {
                 _ => None,
             },
             Record::Draft(d) => Some(Some(d.article)),
-            Record::Proposal(_) | Record::Badge(_) => Some(None),
+            Record::Proposal(_) | Record::Badge(_) | Record::Admission(_) => Some(None),
             Record::Image(_) | Record::Version(_) => None,
         };
         match record {
@@ -1434,6 +1496,25 @@ impl Journal {
                 let member = badge.author.id.to_string();
                 if self.badges.get(&member).is_none_or(|(_, b)| b.at <= badge.at) {
                     self.badges.insert(member, (id.clone(), badge));
+                }
+            }
+            Record::Admission(admission) => {
+                admission.verify(self.world.world_id.as_str())?;
+                // Only a supporter's — whom the game master's word may still be on its way.
+                if !self.supports(&admission.by) {
+                    self.waiting.insert(id, Pending::Record(raw, Box::new(Record::Admission(admission)), write));
+                    return Ok(Added::Waiting);
+                }
+                self.waiting.remove(&id);
+                if write {
+                    self.store(&id, &raw, &Record::Admission(admission.clone()))?;
+                }
+                self.raw.insert(id.clone(), raw);
+                self.arrivals.push(id.clone());
+                self.arrived.entry(id.clone()).or_insert_with(now);
+                let member = admission.member.id.to_string();
+                if self.admissions.get(&member).is_none_or(|(_, a)| a.at <= admission.at) {
+                    self.admissions.insert(member, (id.clone(), admission));
                 }
             }
             Record::Proposal(proposal) => {
@@ -1655,7 +1736,14 @@ impl Journal {
             Record::Version(v) => matches!(self.check_version(v), Ok(Some(_))),
             Record::Proposal(p) => self.is_member(&p.author),
             Record::Badge(b) => self.is_member(&b.author),
+            Record::Admission(a) => self.supports(&a.by),
         }
+    }
+
+    /// Whether someone lets players in: the game master, or a supporter the
+    /// game master named.
+    fn supports(&self, who: &IdentityPublic) -> bool {
+        self.gm().is_some_and(|gm| gm.id == who.id) || self.supporters().iter().any(|s| s == who.id.as_str())
     }
 
     /// Whether someone belongs to the world: granted keys, or its GM.
@@ -1844,11 +1932,62 @@ impl Journal {
         }
     }
 
+    /// A member's grant: the game master's — or, until there is one, a
+    /// supporter's admission that no removal came after.
     pub fn grant(&self, member: &str) -> Option<(&IdentityPublic, &Sealed)> {
-        match &self.item(&format!("grant {member}"))?.item {
-            Item::Grant { member, sealed } => Some((member, sealed)),
+        let removed = match self.item(&format!("grant {member}")).map(|c| (&c.item, c.seq)) {
+            Some((Item::Grant { member, sealed }, _)) => return Some((member, sealed)),
+            Some((_, seq)) => seq,
+            None => 0,
+        };
+        let (_, admission) = self.admissions.get(member)?;
+        (admission.after >= removed && self.supports(&admission.by)).then_some((&admission.member, &admission.sealed))
+    }
+
+    /// Who let a member in, where it was a supporter and not yet the game
+    /// master's grant.
+    pub fn admitted_by(&self, member: &str) -> Option<&IdentityPublic> {
+        let held = matches!(self.item(&format!("grant {member}")).map(|c| &c.item), Some(Item::Grant { .. }));
+        if held {
+            return None;
+        }
+        self.grant(member)?;
+        self.admissions.get(member).map(|(_, a)| &a.by)
+    }
+
+    /// The members admitted by supporters the game master has not granted
+    /// themselves yet — for the game master's device to take in.
+    pub fn admitted(&self) -> Vec<IdentityPublic> {
+        self.admissions.keys().filter(|m| self.admitted_by(m).is_some()).filter_map(|m| self.grant(m).map(|(i, _)| i.clone())).collect()
+    }
+
+    /// The ids that let players in besides the game master.
+    pub fn supporters(&self) -> Vec<String> {
+        match self.item("supporters").map(|c| &c.item) {
+            Some(Item::Supporters { ids }) => ids.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The game master's keys sealed for a supporter, if there are any.
+    pub fn keys_for(&self, id: &str) -> Option<&Sealed> {
+        match self.item(&format!("keys {id}")).map(|c| &c.item) {
+            Some(Item::Keys { sealed, .. }) => sealed.as_ref(),
             _ => None,
         }
+    }
+
+    /// To whom the game master hands the world, if to anyone.
+    pub fn handing_to(&self) -> Option<String> {
+        match self.item("handover").map(|c| &c.item) {
+            Some(Item::Handover { to }) => to.clone(),
+            _ => None,
+        }
+    }
+
+    /// The highest control record count — for an admission written now.
+    pub fn control_count(&self) -> u64 {
+        self.max_seq
     }
 
     /// What a member's grant holds — for the member, or the game master who
@@ -1859,8 +1998,8 @@ impl Journal {
 
     /// The current signed admissions, excluding revoked members.
     pub fn granted_members(&self) -> Vec<IdentityPublic> {
-        self.latest.keys().filter_map(|key| key.strip_prefix("grant "))
-            .filter_map(|id| self.grant(id).map(|(member, _)| member.clone())).collect()
+        let ids: BTreeSet<&str> = self.latest.keys().filter_map(|key| key.strip_prefix("grant ")).chain(self.admissions.keys().map(String::as_str)).collect();
+        ids.into_iter().filter_map(|id| self.grant(id).map(|(member, _)| member.clone())).collect()
     }
 
     /// Whether a server names the world to whoever asks — not unless the GM said so.
@@ -2677,7 +2816,7 @@ impl Journal {
     }
 
     /// What every member gets: control, versions, gallery entries,
-    /// proposals and each member's newest badge.
+    /// proposals, each member's newest badge and admission.
     pub fn shared(&self) -> Vec<String> {
         let mut out: Vec<String> = self
             .controls
@@ -2686,6 +2825,7 @@ impl Journal {
             .chain(self.images.keys())
             .chain(self.proposals.keys())
             .chain(self.badges.values().map(|(id, _)| id))
+            .chain(self.admissions.values().map(|(id, _)| id))
             .cloned()
             .collect();
         out.sort();
@@ -2770,9 +2910,10 @@ impl Journal {
                 } else if let Some(p) = self.proposals.get(id) {
                     Some((5, p.at, id.clone()))
                 } else {
-                    // A badge — the newest of its member, or one before it.
+                    // A badge or an admission — the newest of its member, or one before it.
                     match serde_json::from_slice::<Record>(self.raw.get(id)?).ok()? {
                         Record::Badge(b) => Some((6, b.at, id.clone())),
+                        Record::Admission(a) => Some((7, a.at, id.clone())),
                         _ => None,
                     }
                 }
