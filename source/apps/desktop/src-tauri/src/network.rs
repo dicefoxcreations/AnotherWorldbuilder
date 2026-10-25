@@ -1392,6 +1392,16 @@ pub(crate) fn forget_online(store: &Store, world: &str) -> Answer<()> {
     save_online(store, &all)
 }
 
+/// Forgets a member's server world, and where it lived.
+pub(crate) fn drop_online(store: &Store, world: &str) -> Answer<()> {
+    forget_online(store, world)?;
+    let mut settings = store.load_network()?;
+    if settings.homes.remove(world).is_some() {
+        store.save_network(&settings)?;
+    }
+    Ok(())
+}
+
 /// Asks the host to do a command in this member's name.
 async fn call_via(net: &WorldNet, me: &Identity, world: &str, via: &Via, command: &str, args: &serde_json::Value) -> Answer<serde_json::Value> {
     match ask(net, via, world, me, Ask::Call { command: command.to_string(), args: args.to_string() }).await? {
@@ -1914,6 +1924,14 @@ pub(crate) async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, w
             }
         }
         let there: HashSet<&str> = held.iter().map(|o| o.world.as_str()).collect();
+        // A member's world the server names no more — taken out, say, or
+        // closed: gone from the list here too.
+        for entry in online_worlds(store) {
+            let on_it = entry.server.as_deref().is_some_and(|c| c.split('@').next() == Some(server.endpoint.as_str()));
+            if on_it && !there.contains(entry.world.as_str()) && !store.holds_token(&entry.world) {
+                drop_online(store, &entry.world)?;
+            }
+        }
         let mut worlds: Vec<String> = store.list_worlds()?.into_iter().map(|m| m.public.world_id.to_string()).collect();
         // Asked for, and held only while online — let go when the app last ended.
         let remembered = online_worlds(store).into_iter().filter(|w| w.server.as_deref().is_some_and(|c| c.split('@').next() == Some(server.endpoint.as_str()))).map(|w| w.world);
@@ -2315,12 +2333,17 @@ pub fn member_invite(app: tauri::AppHandle, world: String, id: String) -> Answer
             "That is no player id. It is the whole id — id: and 16 characters. The short form is only for reading aloud.".into(),
         ));
     }
-    let mut meta = store.load_world_meta(&world)?;
-    if meta.member(&id).is_none() && !meta.invited.contains(&id) {
-        meta.invited.push(id);
+    let meta = invite(&store, &world, &id)?;
+    world_info(&store, &meta, me.id().as_str())
+}
+
+pub(crate) fn invite(store: &Store, world: &str, id: &str) -> Answer<WorldMeta> {
+    let mut meta = store.load_world_meta(world)?;
+    if meta.member(id).is_none() && !meta.invited.iter().any(|i| i == id) {
+        meta.invited.push(id.to_string());
         store.save_world_meta(&meta)?;
     }
-    world_info(&store, &meta, me.id().as_str())
+    Ok(meta)
 }
 
 #[cfg(test)]

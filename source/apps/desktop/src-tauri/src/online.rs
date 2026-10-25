@@ -220,7 +220,17 @@ impl Session {
         let reply = transport.ask(world, network::live_digest(world, self.store.load_identity()?.id().as_str())?).await?;
         network::receive_live(world, &reply);
         let Reply::Digest { digest, requests, no_copy, mark, .. } = reply else {
-            return Err(AppError(UNAVAILABLE.into()));
+            return Err(AppError(match reply {
+                // Taken out: the world leaves the list, and may be asked for again.
+                Reply::NotMember | Reply::NotOffered => {
+                    if let Some(base) = profile::store_now().filter(|b| !b.holds_token(world)) {
+                        network::drop_online(&base, world)?;
+                    }
+                    "You are no longer a member of this world."
+                }
+                Reply::Requested => "Asked to join again. The GM lets you in.",
+                _ => UNAVAILABLE,
+            }.into()));
         };
         self.copies = !no_copy;
         let mut remote = digest;

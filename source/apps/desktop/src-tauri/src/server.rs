@@ -466,9 +466,11 @@ impl Keeper {
         // world on the list; one that is not is as if it were not here — its
         // GM adds a new player by their id.
         if !store.has_grant(world, &id)? {
-            let listed = store.on_the_list(world)?;
-            let may_ask = listed || store.expects(world, &id)?;
-            return Ok(if may_ask && matches!(ask, Ask::Join) {
+            let expected = store.expects(world, &id)?;
+            let may_ask = expected || store.on_the_list(world)?;
+            // Let in ahead of time by their id: whatever they ask, they ask
+            // to join — a device that still takes them for a member, too.
+            return Ok(if may_ask && (expected || matches!(ask, Ask::Join)) {
                 let mut requests = store.load_requests(world)?;
                 if who.is_genuine() && !requests.iter().any(|r| r.identity.id == who.id) && requests.len() < MAX_REQUESTS {
                     requests.push(JoinRequest { identity: who.clone(), at: network::now() });
@@ -1183,6 +1185,45 @@ mod tests {
         swap(&keeper, &marla, &world);
         assert!(matches!(swap(&keeper, &bob, &world), Reply::Records { .. }));
         assert!(named(&eve).is_empty());
+    }
+
+    #[test]
+    fn a_player_taken_out_of_a_world_not_listed_loses_it_and_comes_back_by_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let (marla, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
+        let keeper = keeper(dir.path(), &marla);
+        let (world, _) = world(&marla, "Eldermere");
+        let named = |who: &Someone| {
+            let Reply::Worlds { worlds, .. } = keeper.answer("", &who.me.public(), Ask::Worlds) else { panic!() };
+            worlds.into_iter().map(|w| w.name).collect::<Vec<_>>()
+        };
+        let let_in = || {
+            let Reply::Digest { requests, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
+            crate::network::take_requests(&marla.store, &world, requests).unwrap();
+            swap(&keeper, &marla, &world);
+        };
+        crate::network::invite(&marla.store, &world, bob.me.id().as_str()).unwrap();
+        swap(&keeper, &marla, &world);
+        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::Requested);
+        let_in();
+        assert!(matches!(swap(&keeper, &bob, &world), Reply::Records { .. }));
+
+        // Taken out: the world is gone for him, and asking again goes nowhere.
+        marla.store.remove_member(&world, bob.me.id().as_str()).unwrap();
+        swap(&keeper, &marla, &world);
+        assert!(named(&bob).is_empty(), "{:?}", named(&bob));
+        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::NotOffered);
+        assert_eq!(swap(&keeper, &bob, &world), Reply::NotOffered);
+
+        // Let in by id again: he sees it, asks, and is in.
+        crate::network::invite(&marla.store, &world, bob.me.id().as_str()).unwrap();
+        swap(&keeper, &marla, &world);
+        assert_eq!(named(&bob), vec!["Eldermere"]);
+        // His device, still taking him for a member, asks for news: that asks to join.
+        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Requested);
+        let_in();
+        assert!(marla.store.load_world_meta(&world).unwrap().member(bob.me.id().as_str()).is_some());
+        assert!(matches!(swap(&keeper, &bob, &world), Reply::Records { .. }));
     }
 
     #[tokio::test]
