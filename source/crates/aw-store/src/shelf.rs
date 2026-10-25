@@ -797,7 +797,7 @@ mod tests {
     #[test]
     fn a_state_opens_from_a_path_with_any_letters() {
         let dir = tempfile::tempdir().unwrap();
-        let world = dir.path().join("Daniel ist 100% – #1 ?");
+        let world = dir.path().join("Eldermere 100% – #1 ?");
         let mut gm = Shelf::open(&world, &dir.path().join("gm"), Mode::Shared).unwrap();
         gm.put(&[record("one", 0)]).unwrap();
         gm.consolidate(&HashSet::new()).unwrap();
