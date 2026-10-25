@@ -126,9 +126,6 @@ pub enum Ask {
     Abort { transaction: String },
     /// Retires a receipt after the client has observed a successful commit.
     Release { transaction: String },
-    /// The world itself, game master's part included — when the host hands
-    /// it over to the asking side.
-    Handover,
     /// Parts of images: takes `give` (name, base64), answers with those in
     /// `want` it has.
     Parts { want: Vec<String>, give: Vec<(String, String)> },
@@ -221,16 +218,14 @@ pub struct ServerState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Reply {
-    /// Of everything the host would give, by name — where the others are
-    /// writing right now, and whether the host hands the world over to the
-    /// asking side.
+    /// Of everything the host would give, by name — and where the others
+    /// are writing right now.
     Digest {
         digest: String,
         presence: Vec<String>,
         /// The dice the others rolled lately.
         #[serde(default)]
         rolls: Vec<String>,
-        handover: bool,
         /// Who asked a server to join — told the GM, who decides.
         #[serde(default)]
         requests: Vec<IdentityPublic>,
@@ -241,8 +236,6 @@ pub enum Reply {
         #[serde(default)]
         mark: Option<Mark>,
     },
-    /// The world handed over, sealed for the asking side alone.
-    Handover { package: String },
     /// The records the asking side lacks, exactly as signed; the names of
     /// those the host lacks; and the digest after this swap.
     Records { records: Vec<String>, wanted: Vec<String>, digest: String },

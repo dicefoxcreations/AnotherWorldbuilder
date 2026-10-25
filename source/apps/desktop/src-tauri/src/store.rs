@@ -200,6 +200,9 @@ pub struct WorldMeta {
     /// Ids the game master let in ahead of time. Whoever proves one of them
     /// on the network becomes a member without asking.
     pub invited: Vec<String>,
+    /// The members the game master made supporters, by id — see
+    /// `Item::Supporters`.
+    pub supporters: Vec<String>,
 }
 
 /// What the profile keeps in `state.json`: private world state.
@@ -212,6 +215,28 @@ struct Local {
     #[serde(default)]
     members: Vec<Member>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    invited: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    supporters: Vec<String>,
+    /// The admins of the server the world lies on, as it told them — the
+    /// world's supporters too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    admins: Vec<IdentityPublic>,
+}
+
+impl Local {
+    fn new(public: WorldPublic) -> Self {
+        Local { version: STORE_VERSION, public, owner: String::new(), members: Vec::new(), invited: Vec::new(), supporters: Vec::new(), admins: Vec::new() }
+    }
+}
+
+/// What a supporter takes the game master's place with: the world token,
+/// the keyring and the members — sealed for them in `Item::Keys`.
+#[derive(Serialize, Deserialize)]
+struct GmKeys {
+    token: String,
+    keyring: String,
+    members: Vec<Member>,
     invited: Vec<String>,
 }
 
@@ -1007,8 +1032,7 @@ impl Store {
             }
             return Ok(local);
         }
-        Ok(Local { version: STORE_VERSION, public: descriptor.public,
-            owner: String::new(), members: Vec::new(), invited: Vec::new() })
+        Ok(Local::new(descriptor.public))
     }
 
     fn save_local(&self, local: &Local) -> Result<()> {
@@ -1031,6 +1055,7 @@ impl Store {
                 home: String::new(),
                 members: local.members.clone(),
                 invited: local.invited.clone(),
+                supporters: local.supporters.clone(),
             };
             if let Some((public, calendar, icon, home, _)) = journal.world_item() {
                 meta.public = public.clone();
@@ -1090,12 +1115,15 @@ impl Store {
     pub fn save_world_meta(&self, meta: &WorldMeta) -> Result<()> {
         let id = meta.public.world_id.to_string();
         self.require_online_access(&id)?;
+        let admins = self.load_local(&id).map(|l| l.admins).unwrap_or_default();
         self.save_local(&Local {
             version: STORE_VERSION,
             public: meta.public.clone(),
             owner: meta.owner.clone(),
             members: if self.is_gm(&id) { meta.members.clone() } else { Vec::new() },
             invited: meta.invited.clone(),
+            supporters: meta.supporters.clone(),
+            admins,
         })?;
         if !self.is_gm(&id) {
             return Ok(());
@@ -1465,7 +1493,187 @@ impl Store {
                 self.control(world_id, Item::Grant { member: member.identity.clone(), sealed }, "")?;
             }
         }
+        self.keep_supporters(world_id)
+    }
+
+    // --- Supporters ---------------------------------------------------
+
+    /// Who supports the world: the members the game master chose and the
+    /// admins of its server — not the game master.
+    pub fn supporter_ids(&self, world_id: &str) -> Result<Vec<String>> {
+        let local = self.load_local(world_id)?;
+        let gm = self.load_identity()?.id().to_string();
+        let mut ids: Vec<String> = local.supporters.iter().cloned().chain(local.admins.iter().map(|a| a.id.to_string())).filter(|id| *id != gm).collect();
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
+    /// The admins of the server a world lies on, as it told them.
+    pub fn set_server_admins(&self, world_id: &str, admins: Vec<IdentityPublic>) -> Result<()> {
+        let mut local = self.load_local(world_id)?;
+        if local.admins == admins {
+            return Ok(());
+        }
+        local.admins = admins;
+        self.save_local(&local)?;
+        if self.is_gm(world_id) {
+            self.keep_supporters(world_id)?;
+        }
         Ok(())
+    }
+
+    /// The world's supporters as the game master wants them, and the game
+    /// master's keys sealed for each — and for whom the world is being
+    /// handed to. Sealed anew whenever keys or members change; taken back
+    /// from whoever is no supporter any more.
+    fn keep_supporters(&self, world_id: &str) -> Result<()> {
+        if !self.is_gm(world_id) {
+            return Ok(());
+        }
+        let local = self.load_local(world_id)?;
+        let ids = self.supporter_ids(world_id)?;
+        let (named, handing, holders) = self.with_journal(world_id, |j| Ok((j.supporters(), j.handing_to(), j.key_holders())))?;
+        if named != ids {
+            self.control(world_id, Item::Supporters { ids: ids.clone() }, "")?;
+        }
+        let mut wanted = ids;
+        wanted.extend(handing);
+        let gm = self.load_identity()?;
+        let keys = GmKeys {
+            token: std::fs::read_to_string(self.private_world_dir(world_id).join("owner.key"))?,
+            keyring: self.load_keyring(world_id)?.to_json()?,
+            members: local.members.clone(),
+            invited: local.invited.clone(),
+        };
+        let plain = serde_json::to_vec(&keys)?;
+        let sum = blake3::hash(&plain).to_hex().to_string();
+        let path = self.private_world_dir(world_id).join(SEALED_FOR);
+        let mut sealed: BTreeMap<String, String> = std::fs::read(&path).ok().and_then(|raw| serde_json::from_slice(&raw).ok()).unwrap_or_default();
+        let before = sealed.clone();
+        for id in &wanted {
+            let identity = local.members.iter().map(|m| &m.identity).chain(local.admins.iter()).find(|i| i.id.as_str() == id);
+            let Some(identity) = identity else { continue };
+            if sealed.get(id) == Some(&sum) && holders.contains(id) {
+                continue;
+            }
+            let package = Sealed::new(&[identity, &gm.public()], &plain)?;
+            self.control(world_id, Item::Keys { to: id.clone(), sealed: Some(package) }, "")?;
+            sealed.insert(id.clone(), sum.clone());
+        }
+        for id in holders.iter().filter(|h| !wanted.contains(h)) {
+            self.control(world_id, Item::Keys { to: id.clone(), sealed: None }, "")?;
+            sealed.remove(id);
+        }
+        sealed.retain(|id, _| wanted.contains(id));
+        if sealed != before {
+            aw_store::durable::write(&path, &serde_json::to_vec(&sealed)?)?;
+        }
+        Ok(())
+    }
+
+    /// Takes the game master's place with the keys sealed for `me` — a
+    /// supporter's in an emergency, or whom the world is handed to. Everyone
+    /// sees it: the journal names the new game master; whoever was becomes
+    /// a player.
+    pub fn take_over(&self, world_id: &str, me: &Identity) -> Result<()> {
+        let sealed = self.with_journal(world_id, |j| Ok(j.keys_for(me.id().as_str()).cloned()))?;
+        let sealed = sealed.ok_or_else(|| StoreError::Journal("There are no game master's keys for you in this world.".into()))?;
+        let plain = sealed.open(me.seal_secret()).ok_or_else(|| StoreError::Journal("The game master's keys do not open for you.".into()))?;
+        let keys: GmKeys = serde_json::from_slice(&plain)?;
+        self.become_gm(world_id, &keys.token, &keys.keyring, keys.members, keys.invited, me)?;
+        if self.with_journal(world_id, |j| Ok(j.handing_to().is_some()))? {
+            self.control(world_id, Item::Handover { to: None }, "")?;
+        }
+        self.keep_supporters(world_id)
+    }
+
+    /// Hands the world to a member — their device takes it over with the
+    /// keys sealed for them — or no more (`None`).
+    pub fn hand_over(&self, world_id: &str, to: Option<&str>) -> Result<()> {
+        if !self.is_gm(world_id) {
+            return Err(StoreError::Journal("Only the game master can hand the world over.".into()));
+        }
+        if let Some(to) = to {
+            let member = self.load_local(world_id)?.members.into_iter().find(|m| m.identity.id.as_str() == to && m.role == Role::Player);
+            if member.is_none() {
+                return Err(StoreError::Journal("The world goes only to a player of it.".into()));
+            }
+        }
+        self.control(world_id, Item::Handover { to: to.map(str::to_string) }, "")?;
+        self.keep_supporters(world_id)
+    }
+
+    /// Makes these players the world's supporters — the game master's.
+    pub fn set_supporters(&self, world_id: &str, ids: Vec<String>) -> Result<WorldMeta> {
+        if !self.is_gm(world_id) {
+            return Err(StoreError::Journal("Only the game master names supporters.".into()));
+        }
+        let mut meta = self.load_world_meta(world_id)?;
+        if ids.iter().any(|id| !meta.members.iter().any(|m| m.identity.id.as_str() == id && m.role == Role::Player)) {
+            return Err(StoreError::Journal("Only a player of the world can be a supporter.".into()));
+        }
+        meta.supporters = ids;
+        self.save_world_meta(&meta)?;
+        Ok(meta)
+    }
+
+    /// Whether this device's member supports the world — lets players in,
+    /// and may take the game master's place.
+    pub fn supports(&self, world_id: &str) -> Result<bool> {
+        let me = self.load_identity()?;
+        self.with_journal(world_id, |j| Ok(j.supporters().iter().any(|s| s == me.id().as_str())))
+    }
+
+    /// Lets a player in as a supporter: with the keys this device holds for
+    /// everyone. The game master's device makes them a member for good.
+    pub fn admit_as_supporter(&self, world_id: &str, who: &IdentityPublic) -> Result<()> {
+        if !self.supports(world_id)? {
+            return Err(StoreError::Journal("Only a supporter of the world lets players in.".into()));
+        }
+        let me = self.load_identity()?;
+        let everyone = [aw_model::Attribute::Players, aw_model::Attribute::All];
+        let open = self.journal(world_id)?;
+        let mut guard = open.lock().map_err(poisoned)?;
+        let keys = if guard.journal.encrypted() { self.device_keys(world_id, &guard.journal)?.grant_to(who, &everyone)? } else { Vec::new() };
+        let content = GrantContent { attributes: everyone.iter().map(|a| a.to_string()).collect(), keys };
+        guard.journal.admit_player(&me, who, &content, now())?;
+        drop(guard);
+        let mut requests = self.load_requests(world_id)?;
+        requests.retain(|r| r.identity.id != who.id);
+        self.save_requests(world_id, &requests)
+    }
+
+    /// Makes those a supporter let in members for good — the game master's
+    /// device: their grant takes the admission's place. How many.
+    pub fn adopt_admissions(&self, world_id: &str) -> Result<usize> {
+        if !self.is_gm(world_id) {
+            return Ok(0);
+        }
+        let gm = self.load_identity()?;
+        let admitted = self.with_journal(world_id, |j| {
+            Ok(j.admitted().into_iter().map(|who| {
+                let attributes = j.grant_content(who.id.as_str(), gm.seal_secret()).map(|g| g.attributes).unwrap_or_default();
+                (who, attributes)
+            }).collect::<Vec<_>>())
+        })?;
+        let mut meta = self.load_world_meta(world_id)?;
+        let mut taken = 0;
+        for (who, attributes) in admitted {
+            if meta.member(who.id.as_str()).is_none() {
+                meta.members.push(Member { identity: who.clone(), role: Role::Player, attributes });
+                meta.invited.retain(|i| i != who.id.as_str());
+                taken += 1;
+            }
+        }
+        // The grants follow: written for every member the list names.
+        self.save_world_meta(&meta)?;
+        Ok(taken)
+    }
+
+    /// To whom the game master hands the world, if anyone.
+    pub fn handing_to(&self, world_id: &str) -> Result<Option<String>> {
+        self.with_journal(world_id, |j| Ok(j.handing_to()))
     }
 
     // --- Templates ----------------------------------------------------
@@ -2056,7 +2264,7 @@ impl Store {
                 }
                 self.save_descriptor(&public)?;
             } else {
-                self.save_local(&Local { version: STORE_VERSION, public, owner: String::new(), members: Vec::new(), invited: Vec::new() })?;
+                self.save_local(&Local::new(public))?;
             }
         }
         let open = self.journal(world_id)?;
@@ -2099,8 +2307,8 @@ impl Store {
                 self.set_takeover(world_id, &new, None)?;
             }
         }
-        if self.pending_handover(world_id)?.as_deref() == Some(id) {
-            self.set_handover(world_id, None)?;
+        if self.handing_to(world_id)?.as_deref() == Some(id) {
+            self.hand_over(world_id, None)?;
         }
         // Every device learns of it: the others' stop passing the world on.
         if self.has_grant(world_id, id)? {
@@ -2332,24 +2540,6 @@ impl Store {
     // --- Handing the world over ----------------------------------------
 
     /// To whom the game master hands the world over, once they show up.
-    pub fn pending_handover(&self, world_id: &str) -> Result<Option<String>> {
-        let path = self.private_world_dir(world_id).join("handover.json");
-        if !path.exists() {
-            return Ok(None);
-        }
-        Ok(serde_json::from_slice(&std::fs::read(path)?)?)
-    }
-
-    pub fn set_handover(&self, world_id: &str, to: Option<&str>) -> Result<()> {
-        let path = self.private_world_dir(world_id).join("handover.json");
-        match to {
-            Some(to) => aw_store::durable::write(&path, &serde_json::to_vec(to)?)?,
-            None if path.exists() => std::fs::remove_file(path)?,
-            None => {}
-        }
-        Ok(())
-    }
-
     /// The whole world — token, keyring, members, every record — sealed for
     /// `to` alone. Whatever carries it sees nothing but ciphertext.
     pub fn handover_pack(&self, world_id: &str, to: &IdentityPublic) -> Result<HandoverPackage> {
@@ -2399,19 +2589,27 @@ impl Store {
         let world = package.world.as_str();
 
         self.receive(world, &handover.records)?;
+        self.save_requests(world, &handover.requests)?;
+        self.become_gm(world, &handover.token, &handover.keyring, handover.members, handover.invited, me)?;
+        Ok(world.to_string())
+    }
+
+    /// This device becomes the world's game master: token, keyring and
+    /// members are kept here; the journal names it; whoever was game master
+    /// becomes a player, and every key they no longer need turns over.
+    fn become_gm(&self, world: &str, token: &str, keyring: &str, members: Vec<Member>, invited: Vec<String>, me: &Identity) -> Result<()> {
         let public = self.load_local(world)?.public;
-        let token = WorldToken::from_json(handover.token.as_bytes())?;
+        let token = WorldToken::from_json(token.as_bytes())?;
         if token.public().owner_key != public.owner_key || token.world_id() != &public.world_id {
             return Err(StoreError::Journal("The world token does not belong to this world.".into()));
         }
-        let ring = Keyring::from_json(&handover.keyring)?;
+        let ring = Keyring::from_json(keyring)?;
         let dir = self.private_world_dir(world);
         aw_store::durable::write(&dir.join("keyring.json"), ring.to_json()?.as_bytes())?;
         self.save_token(&token)?;
 
         let mut former = Vec::new();
-        let mut members: Vec<Member> = handover
-            .members
+        let mut members: Vec<Member> = members
             .into_iter()
             .filter(|m| m.identity.id != *me.id())
             .map(|mut m| {
@@ -2428,9 +2626,10 @@ impl Store {
             role: Role::Gm,
             attributes: vec!["gm".into(), "players".into(), "all".into()],
         });
-        let owner = self.load_local(world)?.owner;
-        self.save_local(&Local { version: STORE_VERSION, public, owner, members, invited: handover.invited })?;
-        self.save_requests(world, &handover.requests)?;
+        let before = self.load_local(world)?;
+        // Who supported the world before goes on doing so; oneself is game master now.
+        let supporters = before.supporters.into_iter().filter(|s| s != me.id().as_str()).collect();
+        self.save_local(&Local { version: STORE_VERSION, public, owner: before.owner, members, invited, supporters, admins: before.admins })?;
 
         // The journal names the new game master; the members get their keys from them.
         let meta = self.load_world_meta(world)?;
@@ -2443,7 +2642,7 @@ impl Store {
         }
         self.save_keyring(world, &ring)?;
         self.reseal(world)?;
-        Ok(world.to_string())
+        Ok(())
     }
 
     /// Whether the world went to someone else: this device holds the token,
@@ -2463,7 +2662,7 @@ impl Store {
     /// with the keys the new game master grants.
     pub fn step_down(&self, world_id: &str) -> Result<()> {
         let dir = self.private_world_dir(world_id);
-        for file in ["owner.key", "keyring.json", "requests.json", "handover.json"] {
+        for file in ["owner.key", "keyring.json", "requests.json", SEALED_FOR] {
             if dir.join(file).exists() {
                 std::fs::remove_file(dir.join(file))?;
             }
@@ -2572,6 +2771,9 @@ impl Store {
 
 /// See [`Store::takeovers`].
 pub const TAKEOVERS: &str = "takeovers.json";
+/// In a world's private folder: for whom the game master's keys were last
+/// sealed, and as what — so they are sealed anew only when they change.
+pub const SEALED_FOR: &str = "sealed-for.json";
 
 /// An article as it lies on disk: each layer sealed with its data key — as
 /// far as this device can open it.

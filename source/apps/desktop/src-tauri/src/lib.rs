@@ -474,7 +474,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         invited: if is_gm { meta.invited.clone() } else { Vec::new() },
         takeovers: if is_gm { store.takeovers(&id)? } else { Default::default() },
         colours: store.colours(&id)?,
-        handover: if is_gm { store.pending_handover(&id)? } else { None },
+        handover: if is_gm { store.handing_to(&id)? } else { None },
         moderated: store.moderated(&id)?,
         version_limit: store.version_limit(&id)?,
         encrypted: store.is_encrypted(&id)?,
@@ -816,6 +816,7 @@ fn new_world(store: &Store, identity: &Identity, name: String) -> Answer<WorldMe
         home: String::new(),
         members: vec![gm],
         invited: Vec::new(),
+        supporters: Vec::new(),
     };
 
     store.save_token(&token)?;
@@ -1226,8 +1227,9 @@ fn member_trust_set(app: tauri::AppHandle, world: String, member: String, truste
 }
 
 #[cfg(feature = "gui")]
-/// Hands the world over to a member as soon as they show up on the network
-/// — or, without `member`, takes that back.
+/// Hands the world over to a member — their device takes it over with the
+/// keys sealed for them, as soon as it reads the world — or, without
+/// `member`, takes that back.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn gm_handover(app: tauri::AppHandle, world: String, member: Option<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
@@ -1241,8 +1243,8 @@ fn gm_handover(app: tauri::AppHandle, world: String, member: Option<String>) -> 
             return Err(AppError("The world goes only to another member.".into()));
         }
     }
-    store.set_handover(&world, member.as_deref())?;
-    world_info(&store, &meta, me.id().as_str())
+    store.hand_over(&world, member.as_deref())?;
+    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
 }
 
 #[cfg(feature = "gui")]
@@ -1731,6 +1733,8 @@ pub(crate) fn answer_proposals(store: &Store, world: &str) -> Answer<usize> {
     if !store.is_gm(world) {
         return Ok(0);
     }
+    // Whom supporters let in become members for good.
+    store.adopt_admissions(world)?;
     let me = store.load_identity()?;
     let asked = store.proposals(world, &me)?;
     if asked.is_empty() {

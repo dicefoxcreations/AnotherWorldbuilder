@@ -55,6 +55,7 @@ fn gm_world(store: &Store, gm: &Identity, members: Vec<Member>, attributes: &[&s
             home: String::new(),
             members: all,
             invited: Vec::new(),
+            supporters: Vec::new(),
         })
         .unwrap();
     id
@@ -442,7 +443,7 @@ fn old_world_formats_are_left_untouched_and_not_migrated() {
     let id = token.world_id().as_str();
     let world = store.world_dir(id);
     token.save(&world.join("owner.key")).unwrap();
-    let raw = serde_json::to_vec(&Local { version: 1, public: token.public(), owner: String::new(), members: vec![], invited: vec![] }).unwrap();
+    let raw = serde_json::to_vec(&Local { version: 1, public: token.public(), owner: String::new(), members: vec![], invited: vec![], supporters: vec![], admins: vec![] }).unwrap();
     std::fs::write(world.join("world.json"), &raw).unwrap();
     assert!(store.list_worlds().unwrap().is_empty());
     assert!(store.load_world_meta(id).is_err());

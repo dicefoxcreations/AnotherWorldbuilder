@@ -1977,6 +1977,16 @@ impl Journal {
         }
     }
 
+    /// Who holds the game master's keys sealed for them.
+    pub fn key_holders(&self) -> Vec<String> {
+        self.latest
+            .keys()
+            .filter_map(|k| k.strip_prefix("keys "))
+            .filter(|id| self.keys_for(id).is_some())
+            .map(str::to_string)
+            .collect()
+    }
+
     /// To whom the game master hands the world, if to anyone.
     pub fn handing_to(&self) -> Option<String> {
         match self.item("handover").map(|c| &c.item) {

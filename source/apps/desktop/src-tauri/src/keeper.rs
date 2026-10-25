@@ -404,7 +404,6 @@ impl Keeper {
                 digest: aw_store::journal::Journal::digest(&[]),
                 presence: Vec::new(),
                 rolls: Vec::new(),
-                handover: false,
                 requests: Vec::new(),
                 no_copy: false,
                 mark: None,

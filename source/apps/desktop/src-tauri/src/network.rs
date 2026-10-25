@@ -737,7 +737,6 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
                 digest: store.digest(world)?,
                 presence,
                 rolls,
-                handover: store.pending_handover(world)?.as_deref() == Some(id.as_str()),
                 requests: Vec::new(),
                 no_copy: false,
                 mark: store.arrival_mark(world)?.map(|(epoch, at)| Mark { epoch, at }),
@@ -769,15 +768,6 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
             store.take_parts(world, &decode_parts(give))?;
             Reply::Parts { parts: encode_parts(store.parts(world, &want)), want: store.missing_parts(world)? }
         }
-        Ask::Handover => match store.pending_handover(world)? {
-            Some(to) if to == id => match store.load_world_meta(world)?.member(&id) {
-                Some(m) => Reply::Handover {
-                    package: serde_json::to_string(&store.handover_pack(world, &m.identity)?).map_err(AppError::from)?,
-                },
-                None => Reply::NotOffered,
-            },
-            _ => Reply::NotOffered,
-        },
         // A device lists no worlds and has no admin; a server does.
         Ask::Worlds | Ask::Manage { .. } | Ask::HostWorlds | Ask::Backups { .. } | Ask::Commit { .. } | Ask::Abort { .. } | Ask::Release { .. } => Reply::NotOffered,
         Ask::Give { records } => {
@@ -1484,7 +1474,7 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
     let me_id = me.id().to_string();
     let rolls = recent_rolls(world, |r| r.member == me_id).iter().filter_map(|r| serde_json::to_string(r).ok()).collect();
     let theirs = match ask(net, via, world, me, Ask::Digest { presence, rolls }).await? {
-        Reply::Digest { digest, presence, rolls, handover, requests, no_copy, .. } => {
+        Reply::Digest { digest, presence, rolls, requests, no_copy, .. } => {
             // Held only while online, or kept — as the world says now.
             if !store.is_gm(world) {
                 store.hold_fleeting(world, no_copy)?;
@@ -1497,9 +1487,6 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
             }
             for r in rolls.iter().filter_map(|r| serde_json::from_str::<Roll>(r).ok()) {
                 note_roll(world, r);
-            }
-            if handover {
-                take_over(store, net, via, me, world).await?;
             }
             digest
         }
@@ -1544,6 +1531,8 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
             None => return Ok(if !held { "joined" } else { "updated" }.into()),
         }
     }
+    // Handed to us: ours now — the next swap tells the host.
+    take_what_is_handed(store, world, me)?;
     // We handed the world over, and the other side has taken it.
     if store.handed_over(world)? {
         store.step_down(world)?;
@@ -1604,15 +1593,16 @@ async fn swap_parts(store: &Store, net: &WorldNet, via: &Via, me: &Identity, wor
     Ok(new)
 }
 
-/// Takes over the world the host hands to us. The swap that follows brings
-/// the host the record naming us game master — and with it, it steps down.
-async fn take_over(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &str) -> Answer<()> {
-    let Reply::Handover { package } = ask(net, via, world, me, Ask::Handover).await? else {
-        return Ok(());
-    };
-    let package: store::HandoverPackage = serde_json::from_str(&package).map_err(AppError::from)?;
-    store.handover_take(&package, me)?;
-    offer_taken_over(store, world)
+/// Takes over a world handed to this device's member — with the keys the
+/// game master sealed for them. The next swap brings the host the record
+/// naming the new game master; with it, the old one steps down.
+pub(crate) fn take_what_is_handed(store: &Store, world: &str, me: &Identity) -> Answer<bool> {
+    if store.is_gm(world) || store.handing_to(world)?.as_deref() != Some(me.id().as_str()) {
+        return Ok(false);
+    }
+    store.take_over(world, me)?;
+    offer_taken_over(store, world)?;
+    Ok(true)
 }
 
 /// A world taken over stays where its players find it: offered on the
@@ -2761,6 +2751,45 @@ mod tests {
         assert!(!player_store.world_dir("world:0000000000000000").exists());
     }
     #[test]
+    fn a_supporter_lets_a_player_in_and_takes_the_gms_place_when_needed() {
+        let (dir, gm_store, gm, player_store, bob) = stores();
+        let meta = new_world(&gm_store, &gm, "Eldermere".into()).unwrap();
+        let world = meta.public.world_id.to_string();
+        let code = document::code_of(&gm_store, &gm, &world, &meta.home).unwrap();
+        let open = code.code.replace("<block>\n", "<block view=all>\nThe inn.\n");
+        document::save(&gm_store, &gm, &world, &meta.home, &open, &code.base, "s-gm").unwrap();
+        admit(&gm_store, &world, bob.public(), Vec::new()).unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+        assert!(player_store.admit_as_supporter(&world, &Identity::create("Eve").unwrap().public()).is_err(), "no supporter yet");
+
+        // Bob supports the world: he holds the GM's keys sealed for him.
+        gm_store.set_supporters(&world, vec![bob.id().to_string()]).unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+        assert!(player_store.supports(&world).unwrap());
+
+        // He lets Carla in — she reads what every player reads.
+        let carla = Identity::create("Carla").unwrap();
+        let carla_store = Store::new(dir.path().join("carla"));
+        carla_store.save_identity(&carla).unwrap();
+        player_store.admit_as_supporter(&world, &carla.public()).unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+        swap_here(&gm_store, &carla_store, &carla, &world);
+        assert!(text(&carla_store, &carla, &world, &meta.home).contains("The inn."));
+        // The GM's device makes her a member for good.
+        crate::answer_proposals(&gm_store, &world).unwrap();
+        assert!(gm_store.load_world_meta(&world).unwrap().member(carla.id().as_str()).is_some());
+        assert!(gm_store.with_journal(&world, |j| Ok(j.admitted().is_empty())).unwrap(), "her grant took over");
+
+        // Marla is gone: Bob takes her place, and everyone sees it.
+        player_store.take_over(&world, &bob).unwrap();
+        assert!(player_store.is_gm(&world));
+        swap_here(&gm_store, &player_store, &bob, &world);
+        assert!(!gm_store.is_gm(&world), "Marla steps down once she hears of it");
+        let info = world_info(&player_store, &player_store.load_world_meta(&world).unwrap(), bob.id().as_str()).unwrap();
+        assert_eq!(info.members.iter().find(|m| m.id == gm.id().as_str()).map(|m| m.role.as_str()), Some("player"));
+    }
+
+    #[test]
     fn the_gm_hands_the_world_over_and_becomes_a_player() {
         let (_dir, gm_store, gm, player_store, bob) = stores();
         let meta = new_world(&gm_store, &gm, "Eldermere".into()).unwrap();
@@ -2771,23 +2800,17 @@ mod tests {
         admit(&gm_store, &world, bob.public(), Vec::new()).unwrap();
         swap_here(&gm_store, &player_store, &bob, &world);
 
-        // Nothing happens until Bob shows up.
-        gm_store.set_handover(&world, Some(bob.id().as_str())).unwrap();
-        let Reply::Digest { handover, .. } = answer(&gm_store, &world, &bob.public(), Ask::Digest { presence: None, rolls: Vec::new() }).unwrap() else {
-            panic!("a member gets a digest")
-        };
-        assert!(handover, "Bob learns the world is his");
-        assert!(gm_store.is_gm(&world));
-
-        let Reply::Handover { package } = answer(&gm_store, &world, &bob.public(), Ask::Handover).unwrap() else {
-            panic!("the package goes to Bob")
-        };
-        let package: store::HandoverPackage = serde_json::from_str(&package).unwrap();
+        // The GM hands it to Bob: the keys go to him sealed, in the world itself.
+        gm_store.hand_over(&world, Some(bob.id().as_str())).unwrap();
+        assert!(gm_store.is_gm(&world), "until Bob takes it");
+        swap_here(&gm_store, &player_store, &bob, &world);
+        assert_eq!(player_store.handing_to(&world).unwrap().as_deref(), Some(bob.id().as_str()));
         // Sealed for Bob: nobody else opens it.
         let eve = Identity::create("Eve").unwrap();
-        assert!(Store::new(_dir.path().join("eve")).handover_take(&package, &eve).is_err());
-        player_store.handover_take(&package, &bob).unwrap();
+        assert!(player_store.take_over(&world, &eve).is_err());
+        assert!(take_what_is_handed(&player_store, &world, &bob).unwrap());
         assert!(player_store.is_gm(&world));
+        assert_eq!(player_store.handing_to(&world).unwrap(), None, "done");
 
         // The swap brings Marla the record naming Bob — and she steps down.
         swap_here(&gm_store, &player_store, &bob, &world);
