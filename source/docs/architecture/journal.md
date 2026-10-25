@@ -128,4 +128,4 @@ For an unencrypted world the GM's device always keeps it in the world folder; th
 - A GM with several devices is not provided for (one counter).
 - After an attribute rotation, new members get only the new keys; older sections are not re-encrypted automatically (as before).
 - Waiting proposals are sealed for the GM who was GM at the time of writing. If the world is handed over, the new GM cannot read them – decide before.
-- On the LAN players do not sync with each other; only the GM's device offers the world there. Through a [shared folder](../testing/folder-sync.md) and the [direct connection](../testing/internet-direct.md) they do: since everything goes to everyone, every reachable member carries the others.
+- Players do not sync with each other directly; only the GM's device answers for a world, on the LAN and over the [direct connection](../testing/internet-direct.md), under the same rules as a server. Through a [shared folder](../testing/folder-sync.md) their changes meet in the folder's files.

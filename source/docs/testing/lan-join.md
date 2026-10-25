@@ -56,6 +56,7 @@ tools/testbench/firewall-lan.sh closed   # the host ignores the knock: "does not
 - Exchange happens only with members, and only what they may have: GM-only sections never leave the GM's devices, a grant goes only to its member.
 - Every entry is checked on every device: structure against the world token, contents against author and write key. A new world arises only from entries signed by the key of the world asked for.
 - The host accepts large requests (entries) only after the identity proof; before it at most 16 KB are allowed.
+- The GM's device answers under the same rules as a [server](server.md) — the same code (`server::here`). A world the GM offers on the network is named to everyone there, and anyone may ask to join; one not offered is not there for anyone but its members. An id let in ahead of time is let in at its first ask, since the GM's device holds the keys.
 
 ## Limits
 

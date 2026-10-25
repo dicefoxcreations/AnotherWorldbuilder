@@ -442,7 +442,8 @@ pub(crate) fn running() -> Option<Arc<WorldNet>> {
     NET.get_or_init(|| Mutex::new(None)).lock().ok()?.clone()
 }
 
-/// The host side — answers from what lies on disk, wherever it lies now.
+/// The host side: the app's own keeper — see `server::here` — for whichever
+/// profile is in use now.
 struct DesktopHost;
 
 impl Host for DesktopHost {
@@ -451,28 +452,32 @@ impl Host for DesktopHost {
     }
     fn serves(&self, world: &str) -> bool {
         // No world in particular: the list of those hosted here.
-        world.is_empty()
-            || profile::store_now().is_some_and(|store| {
-                offers(&store).is_ok_and(|o| o.iter().any(|o| o.world == world)) || on_the_internet(&store, world)
-            })
+        world.is_empty() || profile::store_now().is_some_and(|store| answered_here(&store, world))
     }
     fn answer(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Reply {
         let Some(store) = profile::store_now() else { return Reply::NotOffered };
-        // Asked by a host code, as a server is: the worlds offered here.
-        if let Ask::Worlds = ask {
-            return Reply::Worlds { worlds: offers(&store).unwrap_or_default(), host: None, admin: false, may_bring: false, asked: false };
-        }
-        // On its way to another folder: asked again shortly.
-        if store::moving(world) {
-            return Reply::Busy;
+        // Reached here only where the GM offers it.
+        if !world.is_empty() && !answered_here(&store, world) {
+            return Reply::NotOffered;
         }
         answer(&store, world, who, ask).unwrap_or(Reply::NotOffered)
     }
 }
 
+/// Whether the GM offers a world on the network from this device.
+pub(crate) fn offered(store: &Store, world: &str) -> bool {
+    offers(store).is_ok_and(|o| o.iter().any(|o| o.world == world))
+}
+
+/// Whether this device answers for a world: the GM's, offered on the
+/// network or lying in a shared folder its members meet through. A member's
+/// device answers for nobody — the GM's is the one place to ask.
+pub(crate) fn answered_here(store: &Store, world: &str) -> bool {
+    store.is_gm(world) && !crate::online::requires_online(store, world) && (offered(store, world) || on_the_internet(store, world))
+}
+
 /// A world answered for over the internet: one held here in a shared folder
-/// — whose members meet there. The game master's device, and any member's:
-/// whoever can be reached carries the others.
+/// — whose members meet there, and find the game master's device.
 fn on_the_internet(store: &Store, world: &str) -> bool {
     store.load_network().is_ok_and(|s| s.folders) && in_shared_folder(store, world)
 }
@@ -592,10 +597,8 @@ static PUNCHED: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock:
 ///
 /// Whoever can be reached from outside connects towards every member who
 /// left a note — that lets their talk through the firewall here. Every
-/// device asks one other for the world: the game master's, or — where that
-/// does not answer — any member's that can be reached; their records are
-/// signed one by one, whoever passes them on. Only the game master's device,
-/// reachable itself, asks no one: the others come to it.
+/// member's device asks the game master's for the world, the one place that
+/// answers for it; the game master's asks no one: the others come to it.
 fn meet_through_folder(store: &Store, net: &WorldNet, me: &Identity) -> Answer<()> {
     if !store.load_network()?.folders {
         return Ok(());
@@ -630,10 +633,13 @@ fn meet_through_folder(store: &Store, net: &WorldNet, me: &Identity) -> Answer<(
         if gm_here && reachable {
             continue;
         }
-        // Whom to ask: the game master's device first, then the others, the newest first.
+        // Whom to ask: the game master's device, by its newest note.
         let failed = FAILED.get_or_init(Default::default).lock().map_err(AppError::from)?.clone();
-        let mut candidates: Vec<_> = notes.iter().filter(|n| !n.addrs.is_empty() && !failed.get(&n.endpoint).is_some_and(|t| t.elapsed() < RETRY)).collect();
-        candidates.sort_by_key(|n| (gm.as_deref() != Some(n.identity.id.as_str()), std::cmp::Reverse(n.at)));
+        let mut candidates: Vec<_> = notes
+            .iter()
+            .filter(|n| gm.as_deref() == Some(n.identity.id.as_str()) && !n.addrs.is_empty() && !failed.get(&n.endpoint).is_some_and(|t| t.elapsed() < RETRY))
+            .collect();
+        candidates.sort_by_key(|n| std::cmp::Reverse(n.at));
         match candidates.first() {
             Some(n) => {
                 let offer = Offer { world: world.clone(), name: meta.public.name.clone(), icon: meta.icon.clone(), gm: n.identity.name.clone() };
@@ -674,44 +680,10 @@ fn offers(store: &Store) -> Answer<Vec<Offer>> {
         .collect())
 }
 
-/// Answers someone whose identity is proven.
+/// Answers someone whose identity is proven: the GM's device, under a
+/// server's rules (`server::here`).
 pub(crate) fn answer(store: &Store, world: &str, who: &IdentityPublic, ask: Ask) -> Answer<Reply> {
-    if crate::online::requires_online(store, world) { return Ok(Reply::NotOffered) }
-    let id = who.id.to_string();
-    if !store.holds(world) {
-        return Ok(Reply::NotOffered);
-    }
-    // A member's device answers the others too — over the internet, where
-    // the game master's cannot be reached. It knows them by their grant; who
-    // asks to join, asks the game master.
-    if !store.is_gm(world) {
-        if !store.has_grant(world, &id)? {
-            return Ok(Reply::NotMember);
-        }
-        return answer_member(store, world, &id, ask);
-    }
-    let meta = store.load_world_meta(world)?;
-    // Let in ahead of time: now the keys are here that belong to the id.
-    if meta.member(&id).is_none() && meta.invited.contains(&id) {
-        admit(store, world, who.clone(), Vec::new())?;
-    }
-    if store.load_world_meta(world)?.member(&id).is_none() {
-        return Ok(match ask {
-            Ask::Join => {
-                let mut requests = store.load_requests(world)?;
-                requests.retain(|r| r.identity.id != who.id);
-                requests.push(JoinRequest { identity: who.clone(), at: now() });
-                store.save_requests(world, &requests)?;
-                Reply::Requested
-            }
-            _ => Reply::NotMember,
-        });
-    }
-    // A world that stays here: its players work on it online.
-    if crate::host::online_only(store, world) {
-        return Ok(online(store, world, who, ask));
-    }
-    answer_member(store, world, &id, ask)
+    crate::server::here(store)?.answer_to(world, who, ask)
 }
 
 /// Answers a member of a world that stays with its host: a call, done in
@@ -2350,6 +2322,14 @@ pub(crate) fn invite(store: &Store, world: &str, id: &str) -> Answer<WorldMeta> 
 mod tests {
     use super::*;
 
+    /// The GM offers a world on the network: anyone may learn of it and ask.
+    fn offer(store: &Store, world: &str) {
+        let mut settings = store.load_network().unwrap();
+        settings.enabled = true;
+        settings.shared.push(world.to_string());
+        store.save_network(&settings).unwrap();
+    }
+
     fn stores() -> (tempfile::TempDir, Store, Identity, Store, Identity) {
         let dir = tempfile::tempdir().unwrap();
         let gm_store = Store::new(dir.path().join("gm"));
@@ -2466,6 +2446,9 @@ mod tests {
         let (_dir, gm_store, gm, player_store, bob) = stores();
         let meta = new_world(&gm_store, &gm, "Eldermere".into()).unwrap();
         let world = meta.public.world_id.to_string();
+        // Not offered: to a stranger it is not there at all.
+        assert_eq!(answer(&gm_store, &world, &bob.public(), Ask::Join).unwrap(), Reply::NotOffered);
+        offer(&gm_store, &world);
 
         assert_eq!(answer(&gm_store, &world, &bob.public(), Ask::Digest { presence: None, rolls: Vec::new() }).unwrap(), Reply::NotMember);
         assert_eq!(swap_here(&gm_store, &player_store, &bob, &world), Reply::NotMember, "no records for strangers");
@@ -2512,6 +2495,7 @@ mod tests {
         let (_dir, gm_store, gm, _player_store, bob) = stores();
         let meta = new_world(&gm_store, &gm, "Eldermere".into()).unwrap();
         let world = meta.public.world_id.to_string();
+        offer(&gm_store, &world);
         answer(&gm_store, &world, &bob.public(), Ask::Join).unwrap();
         let requests = gm_store.load_requests(&world).unwrap();
         admit(&gm_store, &world, requests[0].identity.clone(), Vec::new()).unwrap();
@@ -2706,7 +2690,10 @@ mod tests {
         let mut meta = other_gm.load_world_meta(&other).unwrap();
         meta.invited.push(bob.id().to_string());
         other_gm.save_world_meta(&meta).unwrap();
-        assert!(answer(&other_gm, &other, &forged, Ask::Digest { presence: None, rolls: Vec::new() }).is_err());
+        let reply = answer(&other_gm, &other, &forged, Ask::Digest { presence: None, rolls: Vec::new() }).unwrap();
+        assert!(matches!(reply, Reply::Requested | Reply::NotMember), "{reply:?}");
+        assert!(other_gm.load_requests(&other).unwrap().is_empty(), "no request in a forged name");
+        assert!(other_gm.load_world_meta(&other).unwrap().member(bob.id().as_str()).is_none(), "not let in");
     }
 
     #[test]
@@ -2875,7 +2862,9 @@ mod tests {
         gm_store.remove_member(&world, bob.id().as_str()).unwrap();
         assert!(gm_store.load_world_meta(&world).unwrap().member(bob.id().as_str()).is_none());
         assert_ne!(gm_store.load_keyring(&world).unwrap().current_epoch(&aw_model::Attribute::Players), before, "his keys turned over");
-        assert_eq!(swap_here(&gm_store, &player_store, &bob, &world), Reply::NotMember);
+        assert_eq!(swap_here(&gm_store, &player_store, &bob, &world), Reply::NotOffered, "and the world is not there for him");
+        offer(&gm_store, &world);
+        assert_eq!(swap_here(&gm_store, &player_store, &bob, &world), Reply::NotMember, "offered: he may ask again");
         assert!(gm_store.remove_member(&world, gm.id().as_str()).is_err(), "the GM stays");
     }
     #[test]
@@ -3123,7 +3112,7 @@ mod tests {
     }
 
     #[test]
-    fn a_members_device_carries_the_others_but_lets_no_stranger_in() {
+    fn a_members_device_answers_for_nobody() {
         let (_dir, gm_store, gm, player_store, bob) = stores();
         let meta = new_world(&gm_store, &gm, "Eldermere".into()).unwrap();
         let world = meta.public.world_id.to_string();
@@ -3131,28 +3120,11 @@ mod tests {
         admit(&gm_store, &world, bob.public(), Vec::new()).unwrap();
         admit(&gm_store, &world, carla.public(), Vec::new()).unwrap();
         swap_here(&gm_store, &player_store, &bob, &world);
-
-        // Carla asks Bob's device — the game master's cannot be reached.
-        let Reply::Records { records, .. } = answer(&player_store, &world, &carla.public(), Ask::Swap { have: Vec::new(), give: Vec::new() }).unwrap() else { panic!("no records") };
-        assert!(!records.is_empty(), "Bob's device passes the world on");
-        let digest = answer(&player_store, &world, &carla.public(), Ask::Digest { presence: None, rolls: Vec::new() }).unwrap();
-        assert!(matches!(digest, Reply::Digest { handover: false, .. }));
-
-        // A stranger gets nothing — and asking to join is the game master's to hear.
-        let eve = Identity::create("Eve").unwrap();
-        assert_eq!(answer(&player_store, &world, &eve.public(), Ask::Swap { have: Vec::new(), give: Vec::new() }).unwrap(), Reply::NotMember);
-        assert_eq!(answer(&player_store, &world, &eve.public(), Ask::Join).unwrap(), Reply::NotMember);
-        assert!(player_store.load_requests(&world).unwrap_or_default().is_empty());
-
-        // The game master takes Carla out: once Bob's device has heard, it passes nothing on to her.
-        gm_store.remove_member(&world, carla.id().as_str()).unwrap();
-        swap_here(&gm_store, &player_store, &bob, &world);
-        assert_eq!(answer(&player_store, &world, &carla.public(), Ask::Swap { have: Vec::new(), give: Vec::new() }).unwrap(), Reply::NotMember);
-        assert_eq!(answer(&gm_store, &world, &carla.public(), Ask::Swap { have: Vec::new(), give: Vec::new() }).unwrap(), Reply::NotMember);
-        // Let in again: carried again.
-        admit(&gm_store, &world, carla.public(), Vec::new()).unwrap();
-        swap_here(&gm_store, &player_store, &bob, &world);
-        assert!(matches!(answer(&player_store, &world, &carla.public(), Ask::Swap { have: Vec::new(), give: Vec::new() }).unwrap(), Reply::Records { .. }));
+        // The GM's device is the one place to ask: Bob's passes nothing on.
+        assert_eq!(answer(&player_store, &world, &carla.public(), Ask::Swap { have: Vec::new(), give: Vec::new() }).unwrap(), Reply::NotOffered);
+        assert_eq!(answer(&player_store, &world, &carla.public(), Ask::Join).unwrap(), Reply::NotOffered);
+        assert!(!answered_here(&player_store, &world));
+        assert!(matches!(answer(&gm_store, &world, &carla.public(), Ask::Swap { have: Vec::new(), give: Vec::new() }).unwrap(), Reply::Records { .. }));
     }
 
     #[test]
