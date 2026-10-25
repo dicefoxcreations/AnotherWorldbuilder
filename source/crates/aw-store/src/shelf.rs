@@ -168,6 +168,23 @@ fn pack(raw: &[u8]) -> Result<Vec<u8>> {
     Ok(zstd::bulk::compress(raw, 3)?)
 }
 
+/// Records packed, many on every core.
+fn pack_all(records: &[Stored]) -> Result<Vec<Vec<u8>>> {
+    let one = |r: &Stored| pack(r.raw.as_deref().ok_or("a record without its bytes")?);
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    if records.len() < 64 || threads < 2 {
+        return records.iter().map(one).collect();
+    }
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = records.chunks(records.len().div_ceil(threads)).map(|some| scope.spawn(move || some.iter().map(one).collect::<Result<Vec<_>>>())).collect();
+        let mut out = Vec::with_capacity(records.len());
+        for worker in workers {
+            out.extend(worker.join().map_err(|_| "a worker failed")??);
+        }
+        Ok(out)
+    })
+}
+
 fn unpack(blob: &[u8]) -> Option<Vec<u8>> {
     zstd::stream::decode_all(blob).ok()
 }
@@ -463,11 +480,12 @@ impl Shelf {
         }
         match self.mode {
             Mode::Alone => {
+                let packed = pack_all(records)?;
                 let tx = self.db.transaction()?;
                 {
                     let mut q = tx.prepare("INSERT OR IGNORE INTO records(id, kind, article, at, raw) VALUES (?1, ?2, ?3, ?4, ?5)")?;
-                    for r in records {
-                        q.execute(params![hex::decode(&r.id)?, r.kind, r.article, r.at as i64, pack(r.raw.as_deref().ok_or("a record without its bytes")?)?])?;
+                    for (r, raw) in records.iter().zip(packed) {
+                        q.execute(params![hex::decode(&r.id)?, r.kind, r.article, r.at as i64, raw])?;
                     }
                 }
                 tx.commit()?;

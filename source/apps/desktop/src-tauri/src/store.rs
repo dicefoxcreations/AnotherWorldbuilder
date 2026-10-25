@@ -472,7 +472,7 @@ struct Projection {
 /// A journal kept open between commands, with the articles as last read.
 struct Open {
     journal: Journal,
-    projection: Option<(u64, Vec<StoredArticle>)>,
+    projection: Option<(u64, Arc<Vec<StoredArticle>>)>,
 }
 
 /// For each attribute no key is held for — in an unencrypted world, where
@@ -1873,9 +1873,9 @@ impl Store {
 
     /// The articles as they stand, each layer encrypted with its data key —
     /// so whatever opens them decides what can be read, exactly as before.
-    pub fn load_articles(&self, world_id: &str) -> Result<Vec<StoredArticle>> {
+    pub fn load_articles(&self, world_id: &str) -> Result<Arc<Vec<StoredArticle>>> {
         if !self.holds(world_id) {
-            return Ok(Vec::new());
+            return Ok(Arc::default());
         }
         let open = self.journal(world_id)?;
         let mut guard = open.lock().map_err(poisoned)?;
@@ -1889,7 +1889,7 @@ impl Store {
         // ten thousand documents, one edit should not cost all of them.
         let changed = guard.projection.as_ref().and_then(|(v, _)| guard.journal.changed_since(*v));
         let before: HashMap<ArticleId, StoredArticle> = match (&changed, guard.projection.take()) {
-            (Some(_), Some((_, articles))) => articles.into_iter().map(|a| (a.id, a)).collect(),
+            (Some(_), Some((_, articles))) => Arc::unwrap_or_clone(articles).into_iter().map(|a| (a.id, a)).collect(),
             _ => HashMap::new(),
         };
         let mut before = before;
@@ -1903,29 +1903,34 @@ impl Store {
             guard.journal.open_many(&parts);
         }
         let mut out = Vec::new();
-        let mut built = 0;
+        let mut states = Vec::new();
         let mut prints = BTreeMap::new();
         for (article, article_type, slug) in guard.journal.article_list() {
             let kept = changed.as_ref().filter(|c| !c.contains(&article)).and_then(|_| before.remove(&article));
             match kept {
-                Some(same) if same.article_type == article_type && same.slug == slug => out.push(same),
+                Some(same) if same.article_type == article_type && same.slug == slug => out.push(Some(same)),
                 _ => {
                     let print = guard.journal.article_fingerprint(article, &article_type, &slug);
                     match earlier.remove(&article.to_string()) {
-                        Some((p, same)) if p == print => out.push(same),
+                        Some((p, same)) if p == print => out.push(Some(same)),
                         _ => {
-                            out.push(stored(guard.journal.article_state(article, article_type, slug))?);
-                            built += 1;
+                            states.push((out.len(), guard.journal.article_state(article, article_type, slug)));
+                            out.push(None);
                         }
                     }
                     prints.insert(article.to_string(), print);
                 }
             }
         }
+        let built = states.len();
+        for (at, article) in stored_all(states)? {
+            out[at] = Some(article);
+        }
+        let out = Arc::new(out.into_iter().flatten().collect::<Vec<_>>());
         guard.projection = Some((version, out.clone()));
         // Kept for the next start — in the background: thousands of
         // documents take a moment to write.
-        if changed.is_none() && built > 0 {
+        if changed.is_none() && built > 0 && !self.online_cache {
             let (store, world, articles) = (self.clone(), world_id.to_string(), out.clone());
             std::thread::spawn(move || store.write_projection(&world, prints, &articles));
         }
@@ -1957,14 +1962,14 @@ impl Store {
 
     /// The articles as they stand — with one of them as it stood with a
     /// version. So everything that reads articles shows that version too.
-    pub fn load_articles_at(&self, world_id: &str, article: ArticleId, session: &str, time: u64) -> Result<Vec<StoredArticle>> {
-        let mut all = self.load_articles(world_id)?;
+    pub fn load_articles_at(&self, world_id: &str, article: ArticleId, session: &str, time: u64) -> Result<Arc<Vec<StoredArticle>>> {
+        let mut all = Arc::unwrap_or_clone(self.load_articles(world_id)?);
         let then = self.with_journal(world_id, |journal| stored(journal.article_at(article, session, time)?))?;
         match all.iter_mut().find(|a| a.id == article) {
             Some(slot) => *slot = then,
             None => all.push(then),
         }
-        Ok(all)
+        Ok(Arc::new(all))
     }
 
     /// A new article, with its parts — the game master's.
@@ -2258,10 +2263,6 @@ impl Store {
         Ok(new)
     }
 
-    // --- Members -------------------------------------------------------
-
-    /// Takes a member out — or an id let in ahead of time. What they had they
-    /// keep; every key they held turns over, so nothing new reaches them.
     // --- Review ---------------------------------------------------------
 
     /// Whether players' writing waits for the game master.
@@ -2714,6 +2715,30 @@ pub const SEALED_FOR: &str = "sealed-for.json";
 
 /// An article as it lies on disk: each layer sealed with its data key — as
 /// far as this device can open it.
+/// `stored`, for many, on every core.
+fn stored_all(states: Vec<(usize, journal::ArticleState)>) -> Result<Vec<(usize, StoredArticle)>> {
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    if states.len() < 64 || threads < 2 {
+        return states.into_iter().map(|(at, s)| Ok((at, stored(s)?))).collect();
+    }
+    let chunk = states.len().div_ceil(threads);
+    let mut pieces = Vec::new();
+    let mut rest = states;
+    while !rest.is_empty() {
+        let tail = rest.split_off(chunk.min(rest.len()));
+        pieces.push(rest);
+        rest = tail;
+    }
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = pieces.into_iter().map(|some| scope.spawn(move || some.into_iter().map(|(at, s)| Ok((at, stored(s)?))).collect::<Result<Vec<_>>>())).collect();
+        let mut out = Vec::new();
+        for worker in workers {
+            out.extend(worker.join().map_err(|_| StoreError::Journal("A worker failed.".into()))??);
+        }
+        Ok(out)
+    })
+}
+
 fn stored(article: journal::ArticleState) -> Result<StoredArticle> {
     let mut layers = Vec::new();
     for layer in article.layers {

@@ -195,7 +195,7 @@ pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: 
 
     // The documents, then the types they and the choice need.
     let mut documents: BTreeSet<String> = choice.documents.iter().cloned().collect();
-    for a in &stored {
+    for a in stored.iter() {
         if choice.documents_of.iter().any(|t| is_a(&a.article_type, t)) {
             documents.insert(a.id.to_string());
         }

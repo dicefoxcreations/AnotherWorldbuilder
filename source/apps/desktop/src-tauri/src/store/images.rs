@@ -332,7 +332,7 @@ impl Store {
         }
         let mut uses: UsesOf = BTreeMap::new();
         let mut names = BTreeMap::new();
-        for article in &articles {
+        for article in articles.iter() {
             for layer in article.layers.iter().filter(|l| !l.sealed.is_empty()) {
                 let Some(content) = layer.content(&held) else { continue };
                 if layer.is_base {

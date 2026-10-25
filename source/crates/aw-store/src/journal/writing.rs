@@ -452,6 +452,7 @@ impl Journal {
             .cloned()
             .collect();
         let prefix = layer::author_prefix(author.id().as_str());
+        let genesis = self.genesis_of(key.0, key.1);
         let opened = self.opened.get_mut(&key).ok_or("not open")?;
         let state = opened.doc.save_at(&shown)?;
         let inside = opened.doc.ancestry(&shown);
@@ -459,7 +460,7 @@ impl Journal {
             .iter()
             .filter_map(|p| opened.applied.get(p))
             .flatten()
-            .chain(opened.genesis.iter())
+            .chain(genesis.iter())
             .copied()
             .collect();
         let foreign: HashSet<ChangeHash> = inside

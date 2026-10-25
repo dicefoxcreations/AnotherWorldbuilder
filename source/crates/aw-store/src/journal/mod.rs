@@ -933,8 +933,9 @@ struct Opened {
     doc: LayerDoc,
     dek: DataKey,
     access: Access,
-    /// The changes of the generation's start.
-    genesis: HashSet<ChangeHash>,
+    /// The changes of the generation's start — worked out only where they
+    /// are needed: reading them all out costs as much as the opening.
+    genesis: Option<HashSet<ChangeHash>>,
     /// Drafts and versions already in the document, with the changes they
     /// brought.
     applied: HashMap<String, Vec<ChangeHash>>,
@@ -1395,24 +1396,70 @@ impl Journal {
     }
 
     fn take_all(&mut self, raws: &[&[u8]]) -> Result<usize> {
-        let mut new = 0;
-        for raw in raws {
-            if raw.len() > MAX_RECORD {
-                continue;
-            }
-            let Ok(record) = serde_json::from_slice::<Record>(raw) else { continue };
-            let deletes = matches!(&record, Record::Control(Control { item: Item::Deleted { .. }, .. }));
-            if let Ok(Added::New(_)) = self.take(raw.to_vec(), record, true) {
-                new += 1;
-                // Something is gone for good: read everything anew without it.
-                if deletes {
-                    self.write_batch()?;
-                    self.reload()?;
-                    self.batch = Some(Vec::new());
+        let parsed = self.parse_and_check(raws);
+        // What the batch deletes is not taken in; what is here of it already
+        // goes when everything is read anew, once, at the end.
+        let mut gone = false;
+        for (raw, record) in &parsed {
+            if let Record::Control(Control { item: Item::Deleted { records }, .. }) = record {
+                let id = record_id(raw);
+                if self.checked.contains(&id_key(&id).unwrap_or_default()) && !self.deleted.contains(&id) {
+                    gone |= records.iter().any(|r| self.raw.contains_key(r) || self.versions.contains_key(r));
+                    self.deleted.extend(records.iter().cloned());
                 }
             }
         }
+        let mut new = 0;
+        for (raw, record) in parsed {
+            if let Ok(Added::New(_)) = self.take(raw.to_vec(), record, true) {
+                new += 1;
+            }
+        }
+        if gone {
+            self.write_batch()?;
+            self.reload()?;
+            self.batch = Some(Vec::new());
+        }
         Ok(new)
+    }
+
+    /// Reads records and checks the signatures of the control records among
+    /// them — on every core: the most of what taking a world in costs. Those
+    /// that check out count as checked; the others are checked again, and
+    /// refused, as they are taken.
+    fn parse_and_check<'a>(&mut self, raws: &[&'a [u8]]) -> Vec<(&'a [u8], Record)> {
+        let world = &self.world;
+        let checked = &self.checked;
+        // Each with the key it counts as checked by, where it checked out.
+        let one = |raw: &&'a [u8]| {
+            if raw.len() > MAX_RECORD {
+                return None;
+            }
+            let record = serde_json::from_slice::<Record>(raw).ok()?;
+            let good: Option<[u8; 32]> = match &record {
+                Record::Control(c) => id_key(&record_id(raw)).filter(|k| !checked.contains(k) && c.verify(world).is_ok()),
+                _ => None,
+            };
+            Some((*raw, record, good))
+        };
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let all: Vec<_> = if raws.len() < 64 || threads < 2 {
+            raws.iter().filter_map(one).collect()
+        } else {
+            std::thread::scope(|scope| {
+                let workers: Vec<_> = raws.chunks(raws.len().div_ceil(threads)).map(|some| scope.spawn(move || some.iter().filter_map(one).collect::<Vec<_>>())).collect();
+                workers.into_iter().flat_map(|w| w.join().unwrap_or_default()).collect()
+            })
+        };
+        all.into_iter()
+            .map(|(raw, record, good)| {
+                if let Some(k) = good {
+                    self.checked.insert(k);
+                    self.newly_checked += 1;
+                }
+                (raw, record)
+            })
+            .collect()
     }
 
     /// Records of one's own, many at once — an import: kept back and written
@@ -2407,6 +2454,18 @@ impl Journal {
         }
     }
 
+    /// The changes an open layer's generation started with — worked out the
+    /// first time they are asked for.
+    fn genesis_of(&mut self, layer: LayerId, generation: u32) -> HashSet<ChangeHash> {
+        let start = self.head_of(layer, generation).map(|h| h.genesis.clone());
+        let Some(opened) = self.opened.get_mut(&(layer, generation)) else { return HashSet::new() };
+        if opened.genesis.is_none() {
+            let doc = start.and_then(|s| opened.dek.open(&s).ok()).and_then(|g| LayerDoc::load(&g).ok());
+            opened.genesis = Some(doc.map(|mut d| d.doc.get_changes(&[]).iter().map(|c| c.hash()).collect()).unwrap_or_default());
+        }
+        opened.genesis.clone().unwrap_or_default()
+    }
+
     fn open_layer(&mut self, layer: LayerId, generation: u32) -> Option<&mut Opened> {
         let key = (layer, generation);
         if !self.opened.contains_key(&key) {
@@ -2414,11 +2473,10 @@ impl Journal {
             let dek = head.data_key(self.keys.as_ref()?).ok()??;
             let access: Access = serde_json::from_slice(&dek.open(&head.access).ok()?).ok()?;
             let genesis = dek.open(&head.genesis).ok()?;
-            let mut doc = LayerDoc::load(&genesis).ok()?;
-            let genesis = doc.doc.get_changes(&[]).iter().map(|c| c.hash()).collect();
+            let doc = LayerDoc::load(&genesis).ok()?;
             self.opened.insert(
                 key,
-                Opened { doc, dek, access, genesis, applied: HashMap::new(), visible: None, index: None },
+                Opened { doc, dek, access, genesis: None, applied: HashMap::new(), visible: None, index: None },
             );
             for id in self.to_apply(key) {
                 self.apply_to_open(key, &id);
@@ -2438,17 +2496,15 @@ impl Journal {
             .filter(|key| !self.opened.contains_key(key))
             .filter_map(|&(layer, generation)| Some(((layer, generation), self.head_of(layer, generation)?.clone())))
             .collect();
-        let open = |head: &LayerHead| -> Option<(LayerDoc, DataKey, Access, HashSet<ChangeHash>)> {
+        let open = |head: &LayerHead| -> Option<(LayerDoc, DataKey, Access)> {
             let dek = head.data_key(&keys).ok()??;
             let access: Access = serde_json::from_slice(&dek.open(&head.access).ok()?).ok()?;
             let genesis = dek.open(&head.genesis).ok()?;
-            let mut doc = LayerDoc::load(&genesis).ok()?;
-            let genesis = doc.doc.get_changes(&[]).iter().map(|c| c.hash()).collect();
-            Some((doc, dek, access, genesis))
+            Some((LayerDoc::load(&genesis).ok()?, dek, access))
         };
         let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
         let chunk = heads.len().div_ceil(threads).max(1);
-        let made: Vec<((LayerId, u32), Option<(LayerDoc, DataKey, Access, HashSet<ChangeHash>)>)> = std::thread::scope(|scope| {
+        let made: Vec<_> = std::thread::scope(|scope| {
             let workers: Vec<_> = heads
                 .chunks(chunk)
                 .map(|some| scope.spawn(move || some.iter().map(|(key, head)| (*key, open(head))).collect::<Vec<_>>()))
@@ -2456,8 +2512,8 @@ impl Journal {
             workers.into_iter().flat_map(|w| w.join().unwrap_or_default()).collect()
         });
         for (key, opened) in made {
-            let Some((doc, dek, access, genesis)) = opened else { continue };
-            self.opened.insert(key, Opened { doc, dek, access, genesis, applied: HashMap::new(), visible: None, index: None });
+            let Some((doc, dek, access)) = opened else { continue };
+            self.opened.insert(key, Opened { doc, dek, access, genesis: None, applied: HashMap::new(), visible: None, index: None });
             for id in self.to_apply(key) {
                 self.apply_to_open(key, &id);
             }
@@ -2611,6 +2667,9 @@ impl Journal {
         }
         let ids: Vec<String> = self.by_layer.get(&(layer, generation)).cloned().unwrap_or_default();
         let (hidden, counted): (Vec<String>, Vec<String>) = ids.into_iter().partition(|id| self.hidden(id));
+        if !hidden.is_empty() {
+            self.genesis_of(layer, generation);
+        }
         let opened = self.opened.get_mut(&(layer, generation))?;
         let heads = if hidden.is_empty() {
             None
@@ -2621,7 +2680,7 @@ impl Journal {
                 .iter()
                 .filter_map(|id| opened.applied.get(id))
                 .flatten()
-                .chain(opened.genesis.iter())
+                .chain(opened.genesis.iter().flatten())
                 .copied()
                 .collect();
             let out: HashSet<ChangeHash> = hidden

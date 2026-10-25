@@ -1346,6 +1346,52 @@ mod tests {
         me: Identity,
     }
 
+    /// Opening a big world from a server, measured: `AW_BENCH` names a data
+    /// folder with `profile/` (its GM's) and `worlds/` (the world, in the
+    /// shared format). Run alone: `cargo test -p aw-desktop --release
+    /// bench_open -- --ignored --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn bench_open_a_big_server_world() {
+        let Ok(data) = std::env::var("AW_BENCH") else { return };
+        let data = PathBuf::from(data);
+        let folder = std::fs::read_dir(data.join("worlds")).unwrap().flatten().find(|e| e.path().join("world.json").exists()).unwrap().path();
+        let name = folder.file_name().unwrap().to_string_lossy().to_string();
+        let world = name.replacen('-', ":", 1);
+        let dir = tempfile::tempdir_in(data.parent().unwrap()).unwrap();
+        // The server holds it as a server does: one state, written in place.
+        let there = dir.path().join("server").join("worlds").join(&name);
+        std::fs::create_dir_all(&there).unwrap();
+        std::fs::copy(folder.join("world.json"), there.join("world.json")).unwrap();
+        let mut states: Vec<PathBuf> = std::fs::read_dir(&folder).unwrap().flatten().map(|e| e.path()).filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("state-")).collect();
+        states.sort();
+        std::fs::copy(states.last().unwrap(), there.join("state.sqlite")).unwrap();
+        std::os::unix::fs::symlink(folder.join("media"), there.join("media")).unwrap();
+        // The GM: identity and keys, no world.
+        let gm_dir = dir.path().join("gm");
+        let private = gm_dir.join("profile").join("worlds").join(&name);
+        std::fs::create_dir_all(&private).unwrap();
+        for file in ["owner.key", "keyring.json", "state.json"] {
+            let _ = std::fs::copy(data.join("profile").join("worlds").join(&name).join(file), private.join(file));
+        }
+        std::fs::copy(data.join("profile").join("identity.json"), gm_dir.join("profile").join("identity.json")).unwrap();
+        let gm = Someone { store: Store::new(gm_dir), me: Identity::load(&data.join("profile").join("identity.json")).unwrap() };
+        store::keep_worlds_alone();
+        let keeper = keeper(dir.path(), &gm);
+        let server = on_server(&gm, &world);
+        let wire = online_wire(&keeper, &gm.me);
+
+        let start = std::time::Instant::now();
+        let (count, home) = run_online(&gm.store, &world, &server, &wire, |cache| {
+            Ok((cache.load_articles(&world)?.len(), cache.load_world_meta(&world)?.home))
+        }).await.unwrap();
+        let opened = start.elapsed();
+        let start = std::time::Instant::now();
+        let code = run_online(&gm.store, &world, &server, &wire, |cache| Ok(document::code_of(&cache, &gm.me, &world, &home)?.code)).await.unwrap();
+        println!("{count} documents; opened in {opened:?}; the start document ({} bytes) in {:?}; {} asks", code.len(), start.elapsed(), wire.asks.load(Ordering::SeqCst));
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+    }
+
     fn someone(dir: &Path, name: &str) -> Someone {
         let store = Store::new(dir.join(name));
         let me = Identity::create(name).unwrap();

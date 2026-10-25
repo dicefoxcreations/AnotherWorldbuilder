@@ -94,7 +94,24 @@ pub(crate) struct Known {
 }
 
 pub(crate) fn known(articles: &[StoredArticle], held: &HeldKeys, templates: Vec<Template>) -> Known {
-    known_from(build_view(articles, held), templates)
+    known_of(names_of(articles, held), templates)
+}
+
+/// Id, name and type of each document this reader may see: only its base
+/// opened, on every core — the rest of it is not needed for its name.
+fn names_of(articles: &[StoredArticle], held: &HeldKeys) -> Vec<(String, String, String)> {
+    let one = |a: &StoredArticle| {
+        let content = a.layers.iter().find(|l| l.is_base)?.content(held)?;
+        Some((a.id.to_string(), content.title, a.article_type.clone()))
+    };
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    if articles.len() < 256 || threads < 2 {
+        return articles.iter().filter_map(one).collect();
+    }
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = articles.chunks(articles.len().div_ceil(threads)).map(|some| scope.spawn(move || some.iter().filter_map(one).collect::<Vec<_>>())).collect();
+        workers.into_iter().flat_map(|w| w.join().unwrap_or_default()).collect()
+    })
 }
 
 /// The same, kept per world and keys held, and brought up to date by what
@@ -247,7 +264,7 @@ fn open(
 /// for each of them.
 pub(crate) struct Shared {
     held: HeldKeys,
-    articles: Vec<StoredArticle>,
+    articles: std::sync::Arc<Vec<StoredArticle>>,
     templates: Vec<Template>,
     gm: bool,
     calendar: aw_model::WorldCalendar,
@@ -903,7 +920,7 @@ fn fields_from(opened: &Opened, properties: &[Property]) -> Result<serde_json::V
     Ok(serde_json::Value::Object(fields))
 }
 
-fn with_keys_in(store: &Store, world: &str) -> Result<(Store, HeldKeys, Vec<StoredArticle>), AppError> {
+fn with_keys_in(store: &Store, world: &str) -> Result<(Store, HeldKeys, std::sync::Arc<Vec<StoredArticle>>), AppError> {
     let store = store.clone();
     let identity = store.load_identity()?;
     let held = store.view_keys(world, &identity)?;

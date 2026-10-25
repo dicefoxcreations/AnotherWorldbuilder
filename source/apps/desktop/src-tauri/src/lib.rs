@@ -709,7 +709,7 @@ async fn world_copy(app: tauri::AppHandle, world: String, destination: Destinati
             name: meta.public.name.clone(),
             types: types.clone(),
             documents_of: types,
-            documents: store.load_articles(&world)?.into_iter().map(|a| a.id.to_string()).collect(),
+            documents: store.load_articles(&world)?.iter().map(|a| a.id.to_string()).collect(),
         };
         let path = target.private_world_dir(&id).join("copying.awpack");
         let packing = |what: &str, done: usize, total: usize| {

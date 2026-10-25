@@ -365,6 +365,7 @@ impl Journal {
         let Some(generation) = generation else { return Ok(None) };
         let shown = self.shown_heads(layer, generation).ok_or("this part cannot be opened here")?;
         let made = self.made(layer, generation);
+        let genesis = self.genesis_of(layer, generation);
         let opened = self.opened.get_mut(&(layer, generation)).ok_or("not open")?;
         let visible = opened.doc.ancestry(&shown);
         let then: Vec<ChangeHash> =
@@ -372,7 +373,7 @@ impl Journal {
         let mut reach = opened.doc.ancestry(&then);
         if reach.is_empty() {
             // Only the start: the generation's first change.
-            reach = opened.genesis.clone();
+            reach = genesis;
         }
         Ok(Some((generation, opened.doc.tips(&reach))))
     }
