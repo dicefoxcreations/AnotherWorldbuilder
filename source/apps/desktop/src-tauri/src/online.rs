@@ -791,7 +791,7 @@ pub(crate) fn remember_offer(base: &Store, world: &str, server: &Server, offer: 
         "attributes": [], "members": [], "article_count": 0, "home": "", "requests": 0, "invited": [],
         "takeovers": {}, "colours": {}, "moderated": false, "waiting": 0, "version_limit": 50,
         "encrypted": true, "readable": "", "readable_in_world": false, "offered": false, "dice": [],
-        "supporters": [], "chosen": [], "admins": [], "supporter": false, "can_take_over": false, "roles": [],
+        "supporters": [], "chosen": [], "admins": [], "supporter": false, "can_take_over": false, "roles": [], "conflicts": 0,
         "calendar": WorldCalendar::default(),
     }));
     info["name"] = offer.name.clone().into();

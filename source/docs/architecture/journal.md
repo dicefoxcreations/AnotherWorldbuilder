@@ -130,3 +130,12 @@ For an unencrypted world the GM's device always keeps it in the world folder; th
 - After an attribute rotation, new members get only the new keys; older sections are not re-encrypted automatically (as before).
 - Waiting proposals are sealed for the GM who was GM at the time of writing. If the world is handed over, the new GM cannot read them – decide before.
 - Players do not sync with each other directly; only the GM's device answers for a world, on the LAN and over the [direct connection](../testing/internet-direct.md), under the same rules as a server. Through a [shared folder](../testing/folder-sync.md) their changes meet in the folder's files.
+
+## Conflicts
+
+What can merge, merges: concurrent writing in the same part meets in its Automerge document. What reaches no one is a **conflict** (`Journal::conflicts`), listed by editing session under *Options → World → Conflicts*, with a count at *World*:
+
+- **Written to a document removed meanwhile** — a version that came after the removal (offline, say, on a device that had not heard of it yet). It shows the document as its author saw it: a version that wrote in a document saw it standing. *Save as new document* makes a document of the same type from it — the GM's at once, a player's as a proposal for the GM.
+- **Waiting** longer than ten minutes for what it builds on — a part's head or a version before it that never came.
+
+The GM sees all of them and can let them go for good (`Item::Deleted`); everyone else sees their own.

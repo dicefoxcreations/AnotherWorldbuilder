@@ -58,6 +58,8 @@ export type WorldInfo = {
   moderated: boolean;
   /** Versions waiting: for the GM, what players wrote; for a player, their own. */
   waiting: number;
+  /** Changes that reach no one: for the GM all, for a player their own. */
+  conflicts: number;
   /** How many versions of each document stay. */
   versionLimit: number;
   /** Encrypted: the keys keep views and rights. Without, the host keeps them for players online; whoever has the folder reads all of it. */
@@ -536,6 +538,7 @@ const toWorld = (r: Raw): WorldInfo => ({
   handover: r.handover ?? null,
   moderated: !!r.moderated,
   waiting: r.waiting ?? 0,
+  conflicts: r.conflicts ?? 0,
   versionLimit: r.version_limit ?? 50,
   encrypted: r.encrypted !== false,
   readable: (r.readable as string | undefined) ?? "",
@@ -1010,6 +1013,12 @@ export type GalleryImage = {
 /** A version waiting for review, and where. */
 export type WaitingVersion = { article: string; name: string; session: string; author: string; to: number };
 
+/**
+ * Changes of an editing session that reach no one: written to a document
+ * removed meanwhile, or waiting for what they build on. `at` in ms.
+ */
+export type Conflict = { article: string; name: string; session: string; author: string; mine: boolean; at: number; why: "removed" | "waiting" };
+
 /** Stretches of text, in UTF-16 units — as the browser counts. */
 export type TextRange = { start: number; end: number };
 
@@ -1369,6 +1378,12 @@ export const api = {
     invoke<void>("version_verdict", { world, article, session, accepted }),
   /** The versions waiting: for the GM, what players wrote; for a player, their own. */
   waitingVersions: (world: string) => invoke<WaitingVersion[]>("waiting_versions", { world }),
+  /** Changes that reach no one: for the GM all, for a player their own. */
+  worldConflicts: (world: string) => invoke<Conflict[]>("world_conflicts", { world }),
+  /** Lets them go, for good — the GM's. */
+  conflictDismiss: (world: string, article: string, session: string) => invoke<void>("conflict_dismiss", { world, article, session }),
+  /** Saves them as a new document — the GM's at once, a player's as a proposal. */
+  conflictRescue: (world: string, article: string, session: string) => invoke<string>("conflict_rescue", { world, article, session }),
   /** Uploads an image under a name — its metadata is taken out first. Returns its id. */
   imageUpload: (world: string, path: string, name: string, folder = "") =>
     invoke<string>("image_upload", { world, path, name, folder }),

@@ -437,9 +437,12 @@ impl Journal {
                 }
             }
         }
+        // Written in by the version: it stood for its author — removed
+        // meanwhile on another device, not yet on theirs.
+        let all_gone = all_gone && touched.is_empty();
         let mut layers = Vec::new();
         for (layer, generation) in then {
-            if all_gone || gone.contains(&layer) {
+            if all_gone || (gone.contains(&layer) && !touched.contains(&layer)) {
                 continue;
             }
             let Some(head) = self.head_of(layer, generation).cloned() else { continue };

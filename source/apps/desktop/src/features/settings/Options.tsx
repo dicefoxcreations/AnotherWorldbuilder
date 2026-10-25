@@ -9,6 +9,7 @@ import {
   type JoinRequest,
   type MemberInfo,
   type WaitingVersion,
+  type Conflict,
   type NetworkView,
   type HeldWorld,
   type Person,
@@ -135,6 +136,7 @@ export function Options({
                 <span className="nav-icon">{b.icon}</span>
                 {b.name}
                 {b.id === "players" && due > 0 && <span className="badge">{due}</span>}
+                {b.id === "world" && world && world.conflicts > 0 && <span className="badge">{world.conflicts}</span>}
                 {b.id === "updates" && update.kind === "ready" && <span className="badge">1</span>}
               </button>
             </Fragment>
@@ -187,6 +189,7 @@ export function Options({
           )}
           {world && area === "world" && (
             <>
+              {world.conflicts > 0 && <Conflicts world={world} onChanged={onWorldChanged} onError={onError} />}
               <InfoArea world={world} onChanged={onWorldChanged} onError={onError} />
               <PlaceArea world={world} onChanged={onWorldChanged} onError={onError} />
               <BackupArea world={world} onError={onError} />
@@ -773,6 +776,52 @@ function InfoArea({
             : "The world token is stored in your profile. Back up both your profile and your worlds — no server can replace lost keys."}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Changes that reach no one — written offline to a document removed
+ * meanwhile, or waiting for what they build on. Saved as a new document, or
+ * let go (the GM).
+ */
+function Conflicts({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
+  const [all, setAll] = useState<Conflict[]>([]);
+  useEffect(() => {
+    api.worldConflicts(world.id).then(setAll).catch(onError);
+  }, [world.id, world.conflicts]);
+  const run = async (step: Promise<unknown>) => {
+    try {
+      await step;
+      onChanged();
+    } catch (e) {
+      onError(e);
+    }
+  };
+  if (all.length === 0) return null;
+  return (
+    <div className="type-page">
+      <h2>Conflicts</h2>
+      <ul className="members large">
+        {all.map((c) => (
+          <li key={`${c.article}-${c.session}-${c.why}`}>
+            <div>
+              <strong>{c.name || "A document"}</strong>
+              <small className="small">
+                {c.author} · {when(c.at)} · {c.why === "removed" ? "the document was removed meanwhile" : "waits for changes that have not come"}
+              </small>
+            </div>
+            <div className="line">
+              {c.why === "removed" && (world.isGm || c.mine) && (
+                <button className="compact" onClick={() => run(api.conflictRescue(world.id, c.article, c.session))}>
+                  Save as new document
+                </button>
+              )}
+              {world.isGm && <DeleteButton what="these changes" onClick={() => run(api.conflictDismiss(world.id, c.article, c.session))} />}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

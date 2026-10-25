@@ -7,14 +7,14 @@ A world stays with the host – the GM's device or a [server](server.md) – and
 ## When
 
 - **Unencrypted and offered on the network:** always. Without encryption a copy would give everyone everything; this way the host enforces views and rights.
-- **Encrypted, hosted by a GM device:** by choice. *Copies for players* chooses whether players keep a copy or use host RPC. The GM device can decrypt for the player.
+- **Encrypted, hosted by a GM device:** by choice. *Allow offline editing* chooses whether players keep a copy (and work offline) or use host RPC. The GM device can decrypt for the player.
 - **Encrypted, on a server (0.1.56):** GM and players always work through an authenticated online session. No device keeps a copy of it. Decryption remains on each member's device; the server holds no world keys (see [server](server.md)).
 
 Explicit local worlds and copies remain separate from server worlds.
 
 ## Settings
 
-- *Options → World → Where it lives*: **Offered to players** (from this device, over the network) and **Copies for players** (switchable only for encrypted worlds; off and greyed out when unencrypted); further down **Encrypted** – what applies to the world.
+- *Options → World → Where it lives*: **Offered to players** (from this device, over the network) and **Allow offline editing** (switchable only for encrypted worlds; off and greyed out when unencrypted); further down **Encrypted** – what applies to the world.
 - *Options → Network*: how this device is reached (**Local network**, **From the internet** with a host code, **Peer to peer through shared folders**; with one of the first two on, the **Port** can be chosen – when chosen fixed, the device tells its code there on TCP like a server, and players then enter only `IP:port`), and which servers or hosts it works with (**Servers and hosts**: codes of `aw-server` and host codes of other devices).
 
 ## What the host does
@@ -38,4 +38,4 @@ Automatic: `cargo test -p aw-desktop the_host_shows` – encrypted and unencrypt
 
 **Through the host code** (2026-10-21): Marla turns on *From the internet* (port 7448), code `…@203.0.113.20:7448,192.168.0.50:7448` (STUN, home network). Tim, local network off, enters only the code → Marla's worlds in the list → joins "Plain Test" (unencrypted) → admitted → Tim reads it online.
 
-**Measured on 2026-10-21** with two fresh profiles on one computer (GM "Marla", player "Tim", LAN on): world "Host Test" (encrypted, *Copies for players* off) with "Rumours" (players see and write) and "Truth" (GM only). Tim finds the world and asks, Marla admits him → Tim is an online member, his world folder stays empty. Tim's interface shows "Rumours", "Truth" is missing ("1 of 2 closed"). Tim types a sentence in the editor → it appears in Marla's document.
+**Measured on 2026-10-21** with two fresh profiles on one computer (GM "Marla", player "Tim", LAN on): world "Host Test" (encrypted, *Allow offline editing* off) with "Rumours" (players see and write) and "Truth" (GM only). Tim finds the world and asks, Marla admits him → Tim is an online member, his world folder stays empty. Tim's interface shows "Rumours", "Truth" is missing ("1 of 2 closed"). Tim types a sentence in the editor → it appears in Marla's document.

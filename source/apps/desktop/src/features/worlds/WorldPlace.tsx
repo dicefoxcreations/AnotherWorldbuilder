@@ -242,9 +242,9 @@ function Copies({ world, onChanged, onError }: { world: WorldInfo; onChanged: ()
     <label className={world.encrypted ? "switch-row" : "switch-row off"}>
       <input type="checkbox" checked={world.encrypted && world.copies} disabled={busy || !world.encrypted} onChange={(e) => void turn(e.target.checked)} />
       <span>
-        <strong>Copies for players</strong>
+        <strong>Allow offline editing</strong>
         <small className="small">
-          {!world.encrypted ? "only for encrypted worlds · players work online" : world.copies ? "on · players keep a copy, offline too" : "off · players work online"}
+          {!world.encrypted ? "only for encrypted worlds · players work online" : world.copies ? "on · players keep a copy and work offline too" : "off · players work online"}
         </small>
       </span>
     </label>

@@ -638,6 +638,27 @@ impl Support {
     }
 }
 
+/// Why changes reach no one — see `Journal::conflicts`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Stuck {
+    /// Written to a document removed meanwhile.
+    Removed,
+    /// Waiting for what it builds on, which has not come.
+    Waiting,
+}
+
+/// Changes of one editing session that reach no one.
+#[derive(Clone, Debug, Serialize)]
+pub struct Conflict {
+    pub article: ArticleId,
+    pub session: String,
+    pub author: IdentityPublic,
+    /// Milliseconds since 1970, by the author's clock: the last of them.
+    pub at: u64,
+    pub why: Stuck,
+}
+
 /// How a member is shown in a world: their colour — on their name, and on
 /// the documents assigned to them they name (`of`, `doc:…`), which only
 /// they and the GM know otherwise. Signed by them; of each member the newest
@@ -2381,6 +2402,42 @@ impl Journal {
             .chain(self.drafts.values().filter(|d| mine(&d.author)).map(|d| d.session.clone()))
             .collect();
         set.into_iter().collect()
+    }
+
+    /// Changes that reach no one, one for each editing session: written to a
+    /// document removed meanwhile, or waiting longer than `after` for what
+    /// they build on. On the game master's device all of them, on another
+    /// one's its own. Each with the records it consists of.
+    pub fn conflicts(&self, now: u64, after: u64) -> Vec<(Conflict, Vec<String>)> {
+        let me = self.me_id();
+        let gm = self.is_gm();
+        let mine = |a: &IdentityPublic| gm || Some(a.id.as_str()) == me;
+        let mut by: BTreeMap<(ArticleId, String, Stuck), (Conflict, Vec<String>)> = BTreeMap::new();
+        let mut add = |id: &str, article: ArticleId, session: &str, author: &IdentityPublic, at: u64, why: Stuck| {
+            let entry = by.entry((article, session.to_string(), why)).or_insert_with(|| {
+                (Conflict { article, session: session.to_string(), author: author.clone(), at, why }, Vec::new())
+            });
+            entry.0.at = entry.0.at.max(at);
+            entry.1.push(id.to_string());
+        };
+        for (id, v) in &self.versions {
+            let removed = self.item(&format!("removed {}", v.article)).filter(|c| matches!(c.item, Item::Removed { layer: None, .. }));
+            if mine(&v.author) && removed.is_some_and(|c| v.until > c.time) {
+                add(id, v.article, &v.session, &v.author, v.until, Stuck::Removed);
+            }
+        }
+        for (id, pending) in &self.waiting {
+            let Pending::Record(_, record, _) = pending else { continue };
+            let (article, session, author, at) = match record.as_ref() {
+                Record::Version(v) => (v.article, &v.session, &v.author, v.until),
+                Record::Draft(d) => (d.article, &d.session, &d.author, d.time),
+                _ => continue,
+            };
+            if mine(author) && now.saturating_sub(at) > after {
+                add(id, article, session, author, at, Stuck::Waiting);
+            }
+        }
+        by.into_values().collect()
     }
 
     /// The versions that wait, by article: on the game master's device all

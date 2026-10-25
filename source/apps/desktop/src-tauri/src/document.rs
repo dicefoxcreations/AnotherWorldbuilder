@@ -2084,12 +2084,8 @@ pub struct VersionDocument {
 /// A document as it stood with a version.
 pub(crate) fn document_at(store: &Store, identity: &Identity, world: &str, article: &str, session: &str) -> Answer<VersionDocument> {
     let held = store.view_keys(world, identity)?;
-    let id = store
-        .load_articles(world)?
-        .iter()
-        .find(|a| a.id.to_string() == article)
-        .map(|a| a.id)
-        .ok_or_else(|| AppError("There is no such article.".into()))?;
+    // A document removed since too: its versions stay.
+    let id: ArticleId = article.parse().map_err(|_| AppError("There is no such article.".into()))?;
     let version = store
         .sessions(world, id)?
         .into_iter()
@@ -2109,6 +2105,94 @@ pub(crate) fn document_at(store: &Store, identity: &Identity, world: &str, artic
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn version_document(app: tauri::AppHandle, world: String, article: String, session: String) -> Answer<VersionDocument> {
     version_document_in(&store(&app)?, world, article, session)
+}
+
+/// Changes of an editing session that reach no one — see
+/// `Journal::conflicts` — as the options list them.
+#[derive(Serialize)]
+pub struct ConflictView {
+    pub article: String,
+    /// The document's name as it stood then; empty where it cannot be read.
+    pub name: String,
+    pub session: String,
+    pub author: String,
+    pub mine: bool,
+    /// Milliseconds since 1970.
+    pub at: u64,
+    /// `removed` or `waiting`.
+    pub why: aw_store::journal::Stuck,
+}
+
+#[cfg(feature = "gui")]
+/// Changes that reach no one: the GM sees all of them, everyone else their own.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+pub fn world_conflicts(app: tauri::AppHandle, world: String) -> Answer<Vec<ConflictView>> {
+    let store = store(&app)?;
+    let me = store.load_identity()?;
+    Ok(store
+        .conflicts(&world)?
+        .into_iter()
+        .map(|(c, _)| {
+            let article = c.article.to_string();
+            let name = match c.why {
+                aw_store::journal::Stuck::Removed => document_at(&store, &me, &world, &article, &c.session).map(|d| d.view.name).unwrap_or_default(),
+                aw_store::journal::Stuck::Waiting => String::new(),
+            };
+            ConflictView { article, name, session: c.session, author: c.author.name.clone(), mine: c.author.id == *me.id(), at: c.at, why: c.why }
+        })
+        .collect())
+}
+
+#[cfg(feature = "gui")]
+/// Lets changes that reach no one go, for good — the GM's.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+pub fn conflict_dismiss(app: tauri::AppHandle, world: String, article: String, session: String) -> Answer<()> {
+    let store = store(&app)?;
+    if !store.is_gm(&world) {
+        return Err(AppError("Only the GM lets changes go.".into()));
+    }
+    let records: Vec<String> = store
+        .conflicts(&world)?
+        .into_iter()
+        .filter(|(c, _)| c.article.to_string() == article && c.session == session)
+        .flat_map(|(_, ids)| ids)
+        .collect();
+    if !records.is_empty() {
+        store.control(&world, aw_store::journal::Item::Deleted { records }, "")?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "gui")]
+/// Saves what was written to a document removed meanwhile as a new one of
+/// the same type — the GM's at once, a player's as a proposal for the GM.
+/// Its id.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+pub fn conflict_rescue(app: tauri::AppHandle, world: String, article: String, session: String) -> Answer<String> {
+    let store = store(&app)?;
+    let me = store.load_identity()?;
+    conflict_rescue_in(&store, &me, &world, &article, &session)
+}
+
+pub(crate) fn conflict_rescue_in(store: &Store, me: &Identity, world: &str, article: &str, session: &str) -> Answer<String> {
+    let then = document_at(store, me, world, article, session)?;
+    let view = then.view;
+    let layers: Vec<crate::NewLayer> = view
+        .layers
+        .iter()
+        .map(|l| crate::NewLayer { title: l.title.clone(), text: l.text.clone(), policy: l.policy.clone(), level: l.level.clone(), section: l.section.clone(), edit: l.edit.clone(), fields: l.fields.clone(), parent: None })
+        .collect();
+    let slug = aw_model::template_text::new_id();
+    if store.is_gm(world) {
+        let id = crate::create_document(store, world, view.article_type, slug, view.name, view.visibility, layers)?;
+        let records: Vec<String> = store.conflicts(world)?.into_iter().filter(|(c, _)| c.article.to_string() == article && c.session == session).flat_map(|(_, ids)| ids).collect();
+        if !records.is_empty() {
+            store.control(world, aw_store::journal::Item::Deleted { records }, "")?;
+        }
+        Ok(id)
+    } else {
+        crate::propose_document(store, me, world, None, view.article_type, slug, view.name, layers)
+    }
 }
 
 /// `version_document` for whom the store is given — the host, acting for a player.

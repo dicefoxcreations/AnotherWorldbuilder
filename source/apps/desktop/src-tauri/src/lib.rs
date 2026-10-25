@@ -115,6 +115,8 @@ pub struct WorldInfo {
     pub moderated: bool,
     /// Versions waiting: for the GM, what players wrote; for a player, their own.
     pub waiting: usize,
+    /// Changes that reach no one: for the GM all, for a player their own.
+    pub conflicts: usize,
     /// How many versions of each document stay.
     pub version_limit: u32,
     /// Encrypted: views and rights count. Without, whoever has the world
@@ -508,6 +510,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         dice: store.dice(&id)?,
         listed: store.on_the_list(&id)?,
         waiting: store.waiting(&id)?.len(),
+        conflicts: store.conflicts(&id)?.len(),
         calendar: meta.calendar.clone(),
         chosen: if is_gm { meta.supporters.clone() } else { Vec::new() },
         admins: if is_gm { store.server_admins(&id)?.into_iter().map(|a| a.name).collect() } else { Vec::new() },
@@ -2321,6 +2324,9 @@ pub fn run() {
             document::version_revert,
             document::version_document,
             document::version_carry,
+            document::world_conflicts,
+            document::conflict_dismiss,
+            document::conflict_rescue,
             network::network_settings,
             network::network_enable,
             network::network_internet,

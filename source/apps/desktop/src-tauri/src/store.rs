@@ -2346,6 +2346,14 @@ impl Store {
         self.with_journal(world_id, |journal| Ok(journal.waiting()))
     }
 
+    /// Changes that reach no one — see `Journal::conflicts`. What waits
+    /// counts once it waited ten minutes: what it builds on is usually on its
+    /// way.
+    pub fn conflicts(&self, world_id: &str) -> Result<Vec<(journal::Conflict, Vec<String>)>> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        self.with_journal(world_id, |journal| Ok(journal.conflicts(now, 10 * 60 * 1000)))
+    }
+
     /// Where a version and now differ in a layer's text, by the characters
     /// themselves — `None` where they cannot be compared that way, because
     /// the layer changed its generation in between.

@@ -2951,6 +2951,35 @@ mod tests {
     }
 
     #[test]
+    fn what_was_written_offline_to_a_document_removed_meanwhile_is_a_conflict_and_can_be_saved() {
+        let (_dir, gm_store, gm, player_store, bob) = stores();
+        let world = new_world(&gm_store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        admit(&gm_store, &world, bob.public(), Vec::new()).unwrap();
+        let layer = crate::NewLayer { title: String::new(), text: "The harbour.".into(), policy: "players".into(), level: "open".into(), section: "text".into(), edit: "players".into(), fields: serde_json::json!({}), parent: None };
+        let doc = crate::create_document(&gm_store, &world, String::new(), "notes".into(), "Harbour".into(), "all".into(), vec![layer]).unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+
+        // The GM removes it; Bob, not knowing, writes in it.
+        gm_store.remove(&world, doc.parse().unwrap(), None, "").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let code = document::code_of(&player_store, &bob, &world, &doc).unwrap();
+        document::save(&player_store, &bob, &world, &doc, &code.code.replace("The harbour.", "The harbour. Ships came."), &code.base, "s-bob").unwrap();
+        player_store.close_session(&world, "s-bob").unwrap();
+        swap_here(&gm_store, &player_store, &bob, &world);
+
+        // Both see it: the GM all, Bob his own.
+        let conflicts = gm_store.conflicts(&world).unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].0.why, aw_store::journal::Stuck::Removed);
+        assert_eq!(player_store.conflicts(&world).unwrap().len(), 1);
+
+        // The GM saves it as a new document: Bob's words are in it, and the conflict is gone.
+        let saved = document::conflict_rescue_in(&gm_store, &gm, &world, &doc, "s-bob").unwrap();
+        assert!(document::code_of(&gm_store, &gm, &world, &saved).unwrap().code.contains("Ships came."));
+        assert!(gm_store.conflicts(&world).unwrap().is_empty());
+    }
+
+    #[test]
     fn a_supporter_gives_roles_and_takes_players_out_and_the_gm_takes_it_in() {
         let (dir, gm_store, gm, player_store, bob) = stores();
         let meta = new_world(&gm_store, &gm, "Eldermere".into()).unwrap();
