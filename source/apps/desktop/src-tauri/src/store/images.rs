@@ -286,6 +286,15 @@ impl Store {
 
     /// An image's bytes — the original or its preview — if this device may
     /// open it.
+    /// The parts an image shows with that are not here — where a server
+    /// holds the world, they are asked for when it is shown.
+    pub fn image_parts_missing(&self, world_id: &str, image: &str, preview: bool) -> Result<Vec<String>> {
+        let Some(found) = self.with_journal(world_id, |journal| Ok(journal.image_ref(image)))? else { return Ok(Vec::new()) };
+        let names = if preview && !found.preview.is_empty() { &found.preview } else { &found.parts };
+        let dir = self.world_dir(world_id);
+        Ok(names.iter().filter(|p| !media::has_part(&dir, p)).cloned().collect())
+    }
+
     pub fn image_bytes(&self, world_id: &str, image: &str, preview: bool) -> Result<(Vec<u8>, &'static str)> {
         // In a member's name: only an image a part they may read shows.
         if crate::host::acting().is_some() && !self.image_uses(world_id)?.0.contains_key(image) {

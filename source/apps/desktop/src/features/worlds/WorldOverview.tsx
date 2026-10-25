@@ -15,6 +15,7 @@ export function WorldOverview({
   world,
   templates,
   articles,
+  loading,
   place,
   onPlace,
   onNew,
@@ -24,6 +25,8 @@ export function WorldOverview({
   world: WorldInfo;
   templates: Template[];
   articles: ArticleView[];
+  /** The documents are still being read. */
+  loading: boolean;
   place: Place;
   onPlace: (o: Place) => void;
   onNew: (articleType: string) => void;
@@ -37,6 +40,7 @@ export function WorldOverview({
         ? findType(templates, place.articleType)?.page
         : world.home;
   const article = id ? articles.find((a) => a.id === id) : undefined;
+  if (!article && loading) return <p className="note">Loading …</p>;
   if (!article) {
     return (
       <p className="note">

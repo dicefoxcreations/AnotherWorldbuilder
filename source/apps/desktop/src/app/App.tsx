@@ -112,6 +112,8 @@ export default function App() {
   const [openWorld, setOpenWorld] = useState<string | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [articles, setArticles] = useState<ArticleView[]>([]);
+  /** The world `articles` were read for — none: being read. */
+  const [viewed, setViewed] = useState<string | null>(null);
   const [preview, setPreview] = useState<string[] | null>(null);
   const [options, setOptions] = useState(false);
   const [network, setNetwork] = useState<NetworkView | null>(null);
@@ -151,6 +153,7 @@ export default function App() {
       setError(null);
       if (currentWorld.current !== id) {
         setArticles([]);
+        setViewed(null);
         setTemplates([]);
       }
       setOpenWorld(id);
@@ -332,16 +335,22 @@ export default function App() {
   const asked = useRef(0);
   const previewNow = useRef(preview);
   previewNow.current = preview;
+  // The document shown: where a server holds the world, it is read whole
+  // first; the others follow in the background.
+  const focus = where.kind === "article" ? where.id : where.kind === "list" ? findType(templates, where.articleType)?.page : world?.home;
   const loadView = useCallback(async () => {
     if (!openWorld) return;
     const mine = ++asked.current;
     try {
-      const view = await api.view(openWorld, previewNow.current ?? undefined);
-      if (mine === asked.current) setArticles(view);
+      const view = await api.view(openWorld, previewNow.current ?? undefined, focus);
+      if (mine === asked.current) {
+        setArticles(view);
+        setViewed(openWorld);
+      }
     } catch (e) {
       if (mine === asked.current) report(e);
     }
-  }, [openWorld, preview, report]);
+  }, [openWorld, preview, report, focus]);
 
   useEffect(() => {
     void loadView();
@@ -425,6 +434,7 @@ export default function App() {
     setPreview(null);
     setOptions(false);
     setArticles([]);
+    setViewed(null);
     setTemplates([]);
     setPlace({ kind: "types" });
     setTrail([]);
@@ -592,6 +602,7 @@ export default function App() {
               world={world}
               templates={templates}
               articles={articles}
+              loading={viewed !== world.id}
               place={place}
               onPlace={go}
               onNew={setNewType}

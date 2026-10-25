@@ -1833,7 +1833,8 @@ impl Journal {
         match record {
             Record::Control(_) | Record::Image(_) => true,
             Record::Draft(d) => self.head_of(d.layer, d.generation).is_some(),
-            Record::Version(v) => matches!(self.check_version(v), Ok(Some(_))),
+            // What it builds on first — cheap — before its signatures.
+            Record::Version(v) => self.builds_on_what_is_here(v) && matches!(self.check_version(v), Ok(Some(_))),
             Record::Proposal(p) => self.is_member(&p.author),
             Record::Badge(b) => self.is_member(&b.author),
             Record::Support(a) => self.supports(&a.by),
@@ -1861,6 +1862,12 @@ impl Journal {
     /// Checks a version: the author's signature, each block's write key and
     /// each draft inside it. `None` while a layer head or a version it builds
     /// on is not here yet. Returns the drafts inside, by id.
+    /// Whether the versions and parts a version builds on are here.
+    fn builds_on_what_is_here(&self, version: &Version) -> bool {
+        version.parents.iter().all(|p| self.versions.contains_key(p) || self.deleted.contains(p))
+            && version.blocks.iter().all(|b| self.head_of(b.layer, b.generation).is_some())
+    }
+
     fn check_version(&self, version: &Version) -> Result<Option<Vec<(String, Draft)>>> {
         if version.world != self.world.world_id.as_str() {
             return Err("a record of another world".into());

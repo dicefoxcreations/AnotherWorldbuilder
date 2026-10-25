@@ -82,11 +82,10 @@ const MISSES: u32 = 3;
 /// Image parts asked for in one go.
 const PARTS_AT_ONCE: usize = 16;
 /// Documents asked for in one go, where they are read in the background.
-const ARTICLES_AT_ONCE: usize = 500;
-/// How long a poll goes on reading the documents not read yet.
-const ARTICLES_PER_POLL: std::time::Duration = std::time::Duration::from_millis(1500);
-/// How long a poll goes on fetching pictures.
-const PICTURES_PER_POLL: std::time::Duration = std::time::Duration::from_millis(1500);
+const ARTICLES_AT_ONCE: usize = 200;
+/// How long a poll goes on reading what is not here yet — documents, then
+/// pictures — a little at a time, the session free between for commands.
+const IN_THE_BACKGROUND: std::time::Duration = std::time::Duration::from_millis(3000);
 /// How often fetched pictures and documents redraw the open world.
 const SHOWN_EVERY: std::time::Duration = std::time::Duration::from_secs(8);
 
@@ -95,6 +94,8 @@ const SHOWN_EVERY: std::time::Duration = std::time::Duration::from_secs(8);
 pub(crate) enum Needs {
     Frame,
     Articles(Vec<String>),
+    /// An image shown — its preview, or itself.
+    Image(String, bool),
     Everything,
 }
 
@@ -106,6 +107,10 @@ impl Needs {
             "template_save", "template_delete", "image_delete", "backup_now", "gm_handover_file", "world_share"];
         if WHOLE.contains(&command) {
             return Needs::Everything;
+        }
+        if command == "image_data" {
+            let image = args.get("image").and_then(|i| i.as_str()).unwrap_or_default().to_string();
+            return Needs::Image(image, args.get("preview").and_then(|p| p.as_bool()).unwrap_or(false));
         }
         fn ids(value: &serde_json::Value, out: &mut Vec<String>) {
             match value {
@@ -431,22 +436,55 @@ impl Session {
         Ok(came)
     }
 
-    /// The documents not read yet, a batch at a time, for as long as given —
-    /// none: until all are here. So lists and search fill while the world is
-    /// open.
-    async fn read_rest(&mut self, world: &str, transport: &impl Transport, time: Option<std::time::Duration>) -> Answer<bool> {
-        let until = time.map(|t| std::time::Instant::now() + t);
-        let total = self.store.article_count(world)?.max(self.pending.len());
-        let mut came = false;
-        while !self.pending.is_empty() && until.is_none_or(|u| std::time::Instant::now() < u) {
-            let batch: Vec<String> = self.pending.iter().take(ARTICLES_AT_ONCE).cloned().collect();
-            came |= self.read_articles(world, transport, &batch).await?;
-            progress(world, "loading", total - self.pending.len(), total.max(1));
+    /// The parts of an image about to be shown — before all the others.
+    async fn read_image(&mut self, world: &str, transport: &impl Transport, image: &str, preview: bool) -> Answer<bool> {
+        let want = self.store.image_parts_missing(world, image, preview)?;
+        if want.is_empty() {
+            return Ok(false);
         }
+        let Reply::Parts { parts, .. } = transport.ask(world, Ask::Parts { want, give: Vec::new() }).await? else {
+            return Err(AppError(UNAVAILABLE.into()));
+        };
+        let decoded: Vec<_> = parts.into_iter().map(|(name, encoded)| Ok((name, STANDARD.decode(encoded)?))).collect::<Answer<_>>()?;
+        self.store.take_parts(world, &decoded)?;
+        Ok(false)
+    }
+
+    /// All documents not read yet — for what looks at all of them.
+    async fn read_rest(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
+        let mut came = false;
+        while !self.pending.is_empty() {
+            came |= self.read_a_batch(world, transport).await?;
+        }
+        Ok(came)
+    }
+
+    /// A batch of the documents not read yet; whether any came.
+    async fn read_a_batch(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
+        let total = self.store.article_count(world)?.max(self.pending.len());
+        let batch: Vec<String> = self.pending.iter().take(ARTICLES_AT_ONCE).cloned().collect();
+        let came = self.read_articles(world, transport, &batch).await?;
+        progress(world, "loading", total - self.pending.len(), total.max(1));
         if self.pending.is_empty() {
             progress(world, "loading", 0, 0);
         }
         Ok(came)
+    }
+
+    /// A little of what is not here yet, in the background: a batch of
+    /// documents, else a handful of pictures. So lists, search and pictures
+    /// fill while the world is open. Whether there was any.
+    async fn read_a_little(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
+        if !self.pending.is_empty() {
+            if self.read_a_batch(world, transport).await? {
+                self.unshown += 1;
+                self.confirmed = self.store.inventory(world)?.into_iter().collect();
+                // Built here, not when the open world asks next.
+                self.store.load_articles(world)?;
+            }
+            return Ok(true);
+        }
+        Ok(!self.fetch_parts(world, transport, std::time::Duration::from_millis(1)).await?)
     }
 
     /// Image contents follow their signed references, from the server only —
@@ -454,14 +492,17 @@ impl Session {
     /// its pictures are here. True once none is missing.
     async fn fetch_parts(&mut self, world: &str, transport: &impl Transport, time: std::time::Duration) -> Answer<bool> {
         let until = std::time::Instant::now() + time;
+        let mut once = false;
         loop {
             let want = self.store.missing_parts(world)?;
             if want.is_empty() {
                 return Ok(true);
             }
-            if std::time::Instant::now() >= until {
+            // None asked for: no time at all; asked for, at least a handful.
+            if time.is_zero() || (once && std::time::Instant::now() >= until) {
                 return Ok(false);
             }
+            once = true;
             let want: Vec<String> = want.into_iter().take(PARTS_AT_ONCE).collect();
             let Reply::Parts { parts, .. } = transport.ask(world, Ask::Parts { want, give: Vec::new() }).await? else {
                 return Err(AppError(UNAVAILABLE.into()));
@@ -573,7 +614,7 @@ pub(crate) async fn materialize_for_move(base: &Store, world: &str, server: &Ser
     if held.is_none() { *held = Some(Session::new(base, world, &server.endpoint)?) }
     let session = held.as_mut().unwrap();
     session.synchronize(world, transport).await?;
-    session.read_rest(world, transport, None).await?;
+    session.read_rest(world, transport).await?;
     session.persist_metadata(base, world)?;
     let stage = base.worlds_dir().join(format!(".moving-from-server-{}", store::dir_name(world)));
     if stage.exists() { std::fs::remove_dir_all(&stage)? }
@@ -611,12 +652,7 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
             if session.endpoint != server.endpoint { return Err(AppError(UNAVAILABLE.into())) }
             let transport = Connection { net, server: &server, me };
             // One digest when nothing changed — it carries who is here and the dice too.
-            let brought = session.synchronize_with(&world, &transport, PICTURES_PER_POLL).await?;
-            // Documents not read yet, a batch or so — they show with the pictures.
-            if !session.pending.is_empty() && session.read_rest(&world, &transport, Some(ARTICLES_PER_POLL)).await? {
-                session.unshown += 1;
-                session.confirmed = session.store.inventory(&world)?.into_iter().collect();
-            }
+            let brought = session.synchronize(&world, &transport).await?;
             if std::mem::take(&mut session.untold) && !brought {
                 return Ok(true);
             }
@@ -660,7 +696,7 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
                     let _ = app.emit("online-available", serde_json::json!({ "world": world }));
                 }
                 session.misses = 0;
-                if brought { changed.push(world) }
+                if brought { changed.push(world.clone()) }
             }
             Err(error) => {
                 // What was answered here but not acknowledged is not kept.
@@ -679,6 +715,19 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
                     let message = if error.0.starts_with("[online]") { error.0 } else { format!("{UNAVAILABLE} {}", error.0) };
                     let _ = app.emit("online-unavailable", serde_json::json!({ "world": world, "error": message }));
                 }
+            }
+        }
+        drop(held);
+        // What is not here yet, a little at a time — the session free
+        // between for whatever command waits.
+        let Ok(server) = server_for(base, &world) else { continue };
+        let transport = Connection { net, server: &server, me };
+        let until = std::time::Instant::now() + IN_THE_BACKGROUND;
+        while std::time::Instant::now() < until {
+            let mut held = handle.lock().await;
+            let Some(session) = held.as_mut().filter(|s| s.endpoint == server.endpoint && s.misses == 0 && s.synced.is_some()) else { break };
+            if !matches!(session.read_a_little(&world, &transport).await, Ok(true)) {
+                break;
             }
         }
     }
@@ -982,7 +1031,8 @@ where T: Transport, F: FnOnce(Store) -> Fut, Fut: Future<Output = Answer<R>> {
     let fetched = match needs {
         Needs::Frame => Ok(false),
         Needs::Articles(ids) => session.read_articles(world, transport, &ids).await,
-        Needs::Everything => session.read_rest(world, transport, None).await,
+        Needs::Image(image, preview) => session.read_image(world, transport, &image, preview).await,
+        Needs::Everything => session.read_rest(world, transport).await,
     };
     match fetched {
         Ok(true) => {

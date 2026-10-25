@@ -1233,8 +1233,9 @@ export const api = {
   articleDelete: (world: string, article: string, confirmation: string) =>
     invoke<void>("article_delete", { world, article, confirmation }),
 
-  view: async (world: string, previewAs?: string[]) =>
-    (await invoke<Raw[]>("view", { world, previewAs: previewAs ?? null })).map(toArticle),
+  /** `focus`: the document shown — on a server, read whole before the rest. */
+  view: async (world: string, previewAs?: string[], focus?: string) =>
+    (await invoke<Raw[]>("view", { world, previewAs: previewAs ?? null, focus: focus ?? null })).map(toArticle),
   todayInWorld: (world: string, day: number) =>
     invoke<string>("today_in_world", { world, day }),
 

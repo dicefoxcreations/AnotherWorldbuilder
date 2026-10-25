@@ -2011,7 +2011,9 @@ pub(crate) async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, w
         let mut worlds: Vec<String> = store.list_worlds()?.into_iter().map(|m| m.public.world_id.to_string()).collect();
         // Asked for, and held only while online — let go when the app last ended.
         let remembered = online_worlds(store).into_iter().filter(|w| w.server.as_deref().is_some_and(|c| c.split('@').next() == Some(server.endpoint.as_str()))).map(|w| w.world);
-        for world in waiting.iter().cloned().chain(store.fleeting_worlds()).chain(remembered) {
+        // One's own there, its keys here — on a device set up anew, say.
+        let own: Vec<String> = there.iter().filter(|w| store.holds_token(w)).map(|w| w.to_string()).collect();
+        for world in waiting.iter().cloned().chain(store.fleeting_worlds()).chain(remembered).chain(own) {
             if there.contains(world.as_str()) && !worlds.contains(&world) {
                 worlds.push(world);
             }
