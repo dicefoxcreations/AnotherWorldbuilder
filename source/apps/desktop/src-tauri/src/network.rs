@@ -2828,6 +2828,45 @@ mod tests {
         assert!(other_gm.load_world_meta(&other).unwrap().member(bob.id().as_str()).is_none(), "not let in");
     }
 
+    /// Every document as the GM reads it, and the view of a player — to
+    /// compare a world before and after its conversion. `AW_DUMP` names a
+    /// data folder (`profile/`, `worlds/`), `AW_DUMP_OUT` the file to write,
+    /// `AW_DUMP_AS` the player's attributes, comma-separated.
+    #[test]
+    #[ignore]
+    fn dump_a_world() {
+        let Ok(data) = std::env::var("AW_DUMP") else { return };
+        let store = Store::new(std::path::PathBuf::from(data));
+        let gm = store.load_identity().unwrap();
+        let world = store.held_worlds().unwrap().into_iter().next().unwrap();
+        let articles = store.load_articles(&world).unwrap();
+        let mut code = std::collections::BTreeMap::new();
+        let shared = document::Shared::load(&store, &world, &gm).unwrap();
+        for a in articles.iter() {
+            let id = a.id.to_string();
+            let text = document::code_in(&store, &world, &id, &shared).map(|d| d.code).unwrap_or_else(|e| format!("ERROR {}", e.0));
+            code.insert(id, text);
+        }
+        let attrs: Vec<aw_model::Attribute> = std::env::var("AW_DUMP_AS").unwrap_or_default().split(',').filter(|s| !s.is_empty()).map(|s| s.parse().unwrap()).collect();
+        let held = store.load_keyring(&world).unwrap().restrict_to(&attrs);
+        let player: std::collections::BTreeMap<String, (String, Vec<(String, String)>)> = build_view(&articles, &held)
+            .into_iter()
+            .map(|v| (v.id, (v.name, v.layers.into_iter().map(|l| (l.title, l.text)).collect())))
+            .collect();
+        let meta = store.load_world_meta(&world).unwrap();
+        let out = serde_json::json!({
+            "documents": code.len(),
+            "code": code,
+            "player": player,
+            "templates": serde_json::to_value(store.load_templates(&world).unwrap()).unwrap(),
+            "navigation": serde_json::to_value(store.navigation(&world).unwrap()).unwrap(),
+            "gallery": store.gallery(&world, &gm).map(|g| g.len()).unwrap_or(0),
+            "members": meta.members.iter().map(|m| (m.identity.name.clone(), m.attributes.clone())).collect::<Vec<_>>(),
+            "name": meta.public.name,
+        });
+        std::fs::write(std::env::var("AW_DUMP_OUT").unwrap(), serde_json::to_vec_pretty(&out).unwrap()).unwrap();
+    }
+
     #[test]
     fn records_of_another_world_are_refused() {
         let (_dir, gm_store, gm, player_store, bob) = stores();
