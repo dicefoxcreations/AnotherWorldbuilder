@@ -45,6 +45,7 @@ import { PlaceArea, Reach, serverName } from "../worlds/WorldPlace";
 const AREAS = [
   { id: "world", icon: "🌍", name: "World", group: "world" },
   { id: "players", icon: "👥", name: "Players", group: "world" },
+  { id: "conflicts", icon: "⚠", name: "Conflicts", group: "world" },
   { id: "types", icon: "📄", name: "Types", group: "world" },
   { id: "images", icon: "🖼", name: "Images", group: "world" },
   { id: "calendar", icon: "◷", name: "Calendar", group: "world" },
@@ -104,7 +105,7 @@ export function Options({
   // The world's basics are the GM's to set.
   // Outside a world: what belongs to the device — the dice's look among it.
   const areas = world
-    ? AREAS.filter((b) => b.id !== "transfer" || world.isGm)
+    ? AREAS.filter((b) => b.id !== "transfer" || world.isGm).filter((b) => b.id !== "conflicts" || world.conflicts > 0 || area === "conflicts")
     : AREAS.filter((b) => b.group !== "world" || b.id === "dice").filter((b) => b.id !== "keys");
   const groupOf = (b: (typeof AREAS)[number]) => (world || b.group !== "world" ? GROUPS[b.group] : GROUPS.device);
 
@@ -136,7 +137,7 @@ export function Options({
                 <span className="nav-icon">{b.icon}</span>
                 {b.name}
                 {b.id === "players" && due > 0 && <span className="badge">{due}</span>}
-                {b.id === "world" && world && world.conflicts > 0 && <span className="badge">{world.conflicts}</span>}
+                {b.id === "conflicts" && world && world.conflicts > 0 && <span className="badge">{world.conflicts}</span>}
                 {b.id === "updates" && update.kind === "ready" && <span className="badge">1</span>}
               </button>
             </Fragment>
@@ -189,7 +190,6 @@ export function Options({
           )}
           {world && area === "world" && (
             <>
-              {world.conflicts > 0 && <Conflicts world={world} onChanged={onWorldChanged} onError={onError} />}
               <InfoArea world={world} onChanged={onWorldChanged} onError={onError} />
               <PlaceArea world={world} onChanged={onWorldChanged} onError={onError} />
               <BackupArea world={world} onError={onError} />
@@ -197,6 +197,7 @@ export function Options({
               <ReadableCopy world={world} onChanged={onWorldChanged} onError={onError} />
             </>
           )}
+          {world && area === "conflicts" && <Conflicts world={world} onChanged={onWorldChanged} onError={onError} />}
           {world && area === "images" && <GalleryArea world={world} onOpen={onOpen} onError={onError} />}
           {world && area === "keys" && <ShortcutsArea world={world} templates={templates} />}
           {world && area === "calendar" && <CalendarArea world={world} onChanged={onWorldChanged} onError={onError} />}
@@ -782,11 +783,12 @@ function InfoArea({
 
 /**
  * Changes that reach no one — written offline to a document removed
- * meanwhile, or waiting for what they build on. Saved as a new document, or
- * let go (the GM).
+ * meanwhile, or waiting for what they build on. Kept as a new document, or
+ * discarded (the GM): only the changes go, never a document.
  */
 function Conflicts({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
   const [all, setAll] = useState<Conflict[]>([]);
+  const [discarding, setDiscarding] = useState<string | null>(null);
   useEffect(() => {
     api.worldConflicts(world.id).then(setAll).catch(onError);
   }, [world.id, world.conflicts]);
@@ -798,29 +800,44 @@ function Conflicts({ world, onChanged, onError }: { world: WorldInfo; onChanged:
       onError(e);
     }
   };
-  if (all.length === 0) return null;
   return (
     <div className="type-page">
       <h2>Conflicts</h2>
+      {all.length === 0 && <p className="small muted">None.</p>}
       <ul className="members large">
-        {all.map((c) => (
-          <li key={`${c.article}-${c.session}-${c.why}`}>
-            <div>
-              <strong>{c.name || "A document"}</strong>
-              <small className="small">
-                {c.author} · {when(c.at)} · {c.why === "removed" ? "the document was removed meanwhile" : "waits for changes that have not come"}
-              </small>
-            </div>
-            <div className="line">
-              {c.why === "removed" && (world.isGm || c.mine) && (
-                <button className="compact" onClick={() => run(api.conflictRescue(world.id, c.article, c.session))}>
-                  Save as new document
-                </button>
-              )}
-              {world.isGm && <DeleteButton what="these changes" onClick={() => run(api.conflictDismiss(world.id, c.article, c.session))} />}
-            </div>
-          </li>
-        ))}
+        {all.map((c) => {
+          const key = `${c.article}-${c.session}-${c.why}`;
+          return (
+            <li key={key}>
+              <div>
+                <strong>{c.name || "A document"}</strong>
+                <small className="small">
+                  {c.author} · {when(c.at)} · {c.why === "removed" ? "written after the document was removed" : "waits for changes that have not come"}
+                </small>
+                {discarding === key && <small className="small">Only these changes go; no document is deleted.</small>}
+              </div>
+              <div className="line">
+                {discarding === key ? (
+                  <>
+                    <button className="danger compact" onClick={() => run(api.conflictDismiss(world.id, c.article, c.session).then(() => setDiscarding(null)))}>
+                      Discard
+                    </button>
+                    <button className="compact" onClick={() => setDiscarding(null)}>Cancel</button>
+                  </>
+                ) : (
+                  <>
+                    {c.why === "removed" && (world.isGm || c.mine) && (
+                      <button className="primary compact" onClick={() => run(api.conflictRescue(world.id, c.article, c.session))}>
+                        Keep as new document
+                      </button>
+                    )}
+                    {world.isGm && <button className="compact" onClick={() => setDiscarding(key)}>Discard changes</button>}
+                  </>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -1546,10 +1563,8 @@ function bytes(n: number): string {
 function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown) => void }) {
   const [state, setState] = useState<ServerState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"users" | "worlds">("users");
   const [deleting, setDeleting] = useState<HeldWorld | null>(null);
-  const [players, setPlayers] = useState<string | null>(null);
-  const [gm, setGm] = useState("");
-  const [admin, setAdmin] = useState("");
   const order = async (o: ServerOrder | null) => {
     setBusy(true);
     try {
@@ -1564,127 +1579,20 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
     void order(null);
   }, [server]);
   if (!state) return <p className="small muted">Asking the server …</p>;
-  const seen = (p: Person) => (p.last ? `seen ${when(p.last * 1000)}` : "not seen yet");
   return (
     <div className="server-admin">
-      <h4>Worlds</h4>
-      {state.worlds.length === 0 && <p className="small muted">None yet.</p>}
-      {state.worlds.map((w) => (
-        <div key={w.world} className="server-row">
-          <span className="grow">
-            <strong>{w.name}</strong>
-            <small className="small muted">
-              {[w.gm, w.bytes ? bytes(w.bytes) : "deleted", w.encrypted ? "encrypted" : "unencrypted", w.closed && "closed"].filter(Boolean).join(" · ")}
-            </small>
-          </span>
-          {w.members.length > 0 && (
-            <button className={players === w.world ? "on" : ""} onClick={() => setPlayers(players === w.world ? null : w.world)}>
-              Players
-            </button>
-          )}
-          {w.closed ? (
-            <>
-              <button disabled={busy} onClick={() => void order({ kind: "open", world: w.world })}>Open</button>
-              {w.bytes > 0 && <DeleteButton what={w.name} onClick={() => setDeleting(w)} />}
-            </>
-          ) : (
-            <button disabled={busy} onClick={() => void order({ kind: "close", world: w.world })}>Close</button>
-          )}
-        </div>
-      ))}
-      {state.worlds
-        .filter((w) => w.world === players)
-        .flatMap((w) =>
-          w.members.map((p) => (
-            <div key={`${w.world}-${p.id}`} className="server-row">
-              <span className="grow">
-                <strong>{p.name || p.id}</strong>
-                <small className="small muted">plays in {w.name}</small>
-              </span>
-              <button disabled={busy} onClick={() => void order({ kind: "remove", world: w.world, id: p.id })}>Take out</button>
-            </div>
-          )),
-        )}
-      {state.worlds.flatMap((w) =>
-        w.requests.map((p) => (
-          <div key={`${w.world}-${p.id}`} className="server-row">
-            <span className="grow">
-              <strong>{p.name || p.id}</strong>
-              <small className="small muted">asks to join {w.name}</small>
-            </span>
-            <button disabled={busy} onClick={() => void order({ kind: "approve", world: w.world, id: p.id })}>Let in</button>
-          </div>
-        )),
+      <div className="server-tabs">
+        <button className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>Users</button>
+        <button className={tab === "worlds" ? "on" : ""} onClick={() => setTab("worlds")}>
+          Worlds
+          {state.worlds.some((w) => w.requests.length > 0) && <span className="badge">{state.worlds.reduce((n, w) => n + w.requests.length, 0)}</span>}
+        </button>
+      </div>
+      {tab === "users" ? (
+        <ServerUsers state={state} busy={busy} order={order} />
+      ) : (
+        <ServerWorlds state={state} busy={busy} order={order} onDelete={setDeleting} />
       )}
-      <h4>Admins</h4>
-      {state.admins.map((p, i) => (
-        <div key={p.id} className="server-row">
-          <span className="grow">
-            <strong>{p.name || p.id}</strong>
-            <small className="small muted">{i === 0 ? "first admin" : seen(p)}</small>
-          </span>
-          {i > 0 && <button disabled={busy} onClick={() => void order({ kind: "admin", id: p.id, on: false })}>Remove</button>}
-        </div>
-      ))}
-      <input
-        value={admin}
-        disabled={busy}
-        placeholder="Add an admin by id"
-        onChange={(e) => setAdmin(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && admin.trim()) {
-            void order({ kind: "admin", id: admin.trim(), on: true });
-            setAdmin("");
-          }
-        }}
-      />
-      <h4>Worldbuilders</h4>
-      {state.worldbuilders.map((p) => (
-        <div key={p.id} className="server-row">
-          <span className="grow">
-            <strong>{p.name || p.id}</strong>
-            <small className="small muted">{seen(p)}</small>
-          </span>
-          <button disabled={busy} onClick={() => void order({ kind: "refuse", id: p.id })}>Remove</button>
-        </div>
-      ))}
-      {state.asking.map((p) => (
-        <div key={p.id} className="server-row">
-          <span className="grow">
-            <strong>{p.name || p.id}</strong>
-            <small className="small muted">would bring a world</small>
-          </span>
-          <button disabled={busy} onClick={() => void order({ kind: "allow", id: p.id })}>Allow</button>
-          <button disabled={busy} onClick={() => void order({ kind: "refuse", id: p.id })}>Refuse</button>
-        </div>
-      ))}
-      <input
-        value={gm}
-        disabled={busy}
-        placeholder="Add a worldbuilder by id"
-        onChange={(e) => setGm(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && gm.trim()) {
-            void order({ kind: "allow", id: gm.trim() });
-            setGm("");
-          }
-        }}
-      />
-      <h4>Users</h4>
-      {state.users.map((p) => (
-        <div key={p.id} className="server-row">
-          <span className="grow">
-            <strong>{p.name}</strong>
-            <small className="small muted">{p.blocked ? "turned away" : seen(p)}</small>
-          </span>
-          {!state.admins.some((a) => a.id === p.id) &&
-            (p.blocked ? (
-              <button disabled={busy} onClick={() => void order({ kind: "unblock", id: p.id })}>Let in</button>
-            ) : (
-              <button disabled={busy} onClick={() => void order({ kind: "block", id: p.id })}>Block</button>
-            ))}
-        </div>
-      ))}
       {deleting && (
         <DeleteDialog
           title={`Delete ${deleting.name}`}
@@ -1698,6 +1606,162 @@ function ServerAdmin({ server, onError }: { server: string; onError: (e: unknown
         />
       )}
     </div>
+  );
+}
+
+const seen = (p: Person) => (p.last ? `seen ${when(p.last * 1000)}` : "not seen yet");
+
+/**
+ * Everyone who came to a server, with their roles there: admin (the first
+ * one stays), worldbuilder. Kicked, someone is out of every world here they
+ * play in and turned away — until let back.
+ */
+function ServerUsers({ state, busy, order }: { state: ServerState; busy: boolean; order: (o: ServerOrder) => Promise<void> }) {
+  const [adding, setAdding] = useState<string | null>(null);
+  const [kicking, setKicking] = useState<string | null>(null);
+  const [id, setId] = useState("");
+  const first = state.admins[0]?.id;
+  const everyone = new Map<string, Person>();
+  for (const p of [...state.admins, ...state.worldbuilders, ...state.asking, ...state.users]) {
+    const known = everyone.get(p.id);
+    everyone.set(p.id, { ...p, name: p.name || known?.name || "", last: Math.max(p.last, known?.last ?? 0), blocked: p.blocked || !!known?.blocked });
+  }
+  const isAdmin = (who: string) => state.admins.some((a) => a.id === who);
+  const builds = (who: string) => state.worldbuilders.some((a) => a.id === who);
+  const asks = (who: string) => state.asking.some((a) => a.id === who);
+  const people = [...everyone.values()].sort((a, b) => Number(isAdmin(b.id)) - Number(isAdmin(a.id)) || b.last - a.last);
+  const add = (role: "admin" | "worldbuilder", who: string) =>
+    order(role === "admin" ? { kind: "admin", id: who, on: true } : { kind: "allow", id: who });
+  return (
+    <>
+      {people.map((p) => (
+        <div key={p.id} className="server-row">
+          <span className="grow">
+            <span className="server-who">
+            <strong>{p.name || p.id}</strong>
+            {isAdmin(p.id) && (
+              <span className="role-badge role-chip">
+                Admin
+                {p.id !== first && <button disabled={busy} title="No more admin" onClick={() => void order({ kind: "admin", id: p.id, on: false })}>×</button>}
+              </span>
+            )}
+            {builds(p.id) && (
+              <span className="role-badge role-chip">
+                Worldbuilder
+                <button disabled={busy} title="May bring worlds no more" onClick={() => void order({ kind: "refuse", id: p.id })}>×</button>
+              </span>
+            )}
+            {asks(p.id) && (
+              <span className="role-badge role-chip accent">
+                Would bring a world
+                <button disabled={busy} title="Allow" onClick={() => void order({ kind: "allow", id: p.id })}>✓</button>
+                <button disabled={busy} title="Refuse" onClick={() => void order({ kind: "refuse", id: p.id })}>×</button>
+              </span>
+            )}
+            </span>
+            <small className="small muted">{p.blocked ? "kicked" : p.id === first ? "first admin" : seen(p)}</small>
+          </span>
+          {kicking === p.id ? (
+            <>
+              <small className="small">Out of every world here, and turned away.</small>
+              <button className="danger compact" disabled={busy} onClick={() => void order({ kind: "kick", id: p.id }).then(() => setKicking(null))}>Kick</button>
+              <button className="compact" onClick={() => setKicking(null)}>Cancel</button>
+            </>
+          ) : adding === p.id ? (
+            <>
+              {!isAdmin(p.id) && <button className="compact" disabled={busy} onClick={() => void add("admin", p.id).then(() => setAdding(null))}>Admin</button>}
+              {!isAdmin(p.id) && !builds(p.id) && <button className="compact" disabled={busy} onClick={() => void add("worldbuilder", p.id).then(() => setAdding(null))}>Worldbuilder</button>}
+              <button className="compact" onClick={() => setAdding(null)}>Cancel</button>
+            </>
+          ) : p.blocked ? (
+            <button className="compact" disabled={busy} onClick={() => void order({ kind: "unblock", id: p.id })}>Let back</button>
+          ) : (
+            !isAdmin(p.id) && (
+              <>
+                <button className="compact" disabled={busy} title="Give a role" onClick={() => setAdding(p.id)}>+</button>
+                <button className="compact" disabled={busy} onClick={() => setKicking(p.id)}>Kick</button>
+              </>
+            )
+          )}
+        </div>
+      ))}
+      <div className="line">
+        <input className="grow" value={id} disabled={busy} placeholder="Someone not here yet, by id" onChange={(e) => setId(e.target.value)} />
+        <button className="compact" disabled={busy || !id.trim()} onClick={() => void add("worldbuilder", id.trim()).then(() => setId(""))}>Worldbuilder</button>
+        <button className="compact" disabled={busy || !id.trim()} onClick={() => void add("admin", id.trim()).then(() => setId(""))}>Admin</button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The worlds on a server, each opened to its people: the GM first, then
+ * the supporters, then the players — whom an admin takes out — and who
+ * asks to join.
+ */
+function ServerWorlds({ state, busy, order, onDelete }: { state: ServerState; busy: boolean; order: (o: ServerOrder) => Promise<void>; onDelete: (w: HeldWorld) => void }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (state.worlds.length === 0) return <p className="small muted">None yet.</p>;
+  return (
+    <>
+      {state.worlds.map((w) => {
+        // A server before 0.1.62 names no supporters.
+        const named = w.supporters ?? [];
+        const supporters = w.members.filter((m) => named.includes(m.id));
+        const players = w.members.filter((m) => !named.includes(m.id));
+        return (
+          <Fragment key={w.world}>
+            <div className="server-row">
+              <button className="ghost compact" aria-label={open === w.world ? "Fold" : "Unfold"} onClick={() => setOpen(open === w.world ? null : w.world)}>
+                {open === w.world ? "▾" : "▸"}
+              </button>
+              <span className="grow" onClick={() => setOpen(open === w.world ? null : w.world)}>
+                <strong>{w.name}</strong>{" "}
+                {w.requests.length > 0 && <span className="badge">{w.requests.length}</span>}
+                <small className="small muted">
+                  {[w.bytes ? bytes(w.bytes) : "deleted", w.encrypted ? "encrypted" : "unencrypted", w.closed && "closed"].filter(Boolean).join(" · ")}
+                </small>
+              </span>
+              {w.closed ? (
+                <>
+                  <button disabled={busy} onClick={() => void order({ kind: "open", world: w.world })}>Open</button>
+                  {w.bytes > 0 && <DeleteButton what={w.name} onClick={() => onDelete(w)} />}
+                </>
+              ) : (
+                <button disabled={busy} onClick={() => void order({ kind: "close", world: w.world })}>Close</button>
+              )}
+            </div>
+            {open === w.world && (
+              <ul className="server-people">
+                {w.gm && (
+                  <li>
+                    <strong>{w.gm}</strong> <span className="role-badge gm">GM</span>
+                  </li>
+                )}
+                {supporters.map((p) => (
+                  <li key={p.id}>
+                    <strong>{p.name || p.id}</strong> <span className="role-badge">Supporter</span>
+                  </li>
+                ))}
+                {players.map((p) => (
+                  <li key={p.id}>
+                    <strong>{p.name || p.id}</strong> <span className="role-badge player">Player</span>
+                    <button className="compact" disabled={busy} onClick={() => void order({ kind: "remove", world: w.world, id: p.id })}>Take out</button>
+                  </li>
+                ))}
+                {w.requests.map((p) => (
+                  <li key={p.id}>
+                    <strong>{p.name || p.id}</strong> <span className="role-badge">Asks to join</span>
+                    <button className="compact primary" disabled={busy} onClick={() => void order({ kind: "approve", world: w.world, id: p.id })}>Let in</button>
+                  </li>
+                ))}
+                {supporters.length + players.length + w.requests.length === 0 && <li className="small muted">No players yet.</li>}
+              </ul>
+            )}
+          </Fragment>
+        );
+      })}
+    </>
   );
 }
 

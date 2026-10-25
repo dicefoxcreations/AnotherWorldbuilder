@@ -133,9 +133,9 @@ For an unencrypted world the GM's device always keeps it in the world folder; th
 
 ## Conflicts
 
-What can merge, merges: concurrent writing in the same part meets in its Automerge document. What reaches no one is a **conflict** (`Journal::conflicts`), listed by editing session under *Options → World → Conflicts*, with a count at *World*:
+What can merge, merges: concurrent writing in the same part meets in its Automerge document. What reaches no one is a **conflict** (`Journal::conflicts`), listed by editing session under *Options → Conflicts* (there while there are any, with a count):
 
-- **Written to a document removed meanwhile** — a version that came after the removal (offline, say, on a device that had not heard of it yet). It shows the document as its author saw it: a version that wrote in a document saw it standing. *Save as new document* makes a document of the same type from it — the GM's at once, a player's as a proposal for the GM.
+- **Written to a document removed meanwhile** — a version that came after the removal (offline, say, on a device that had not heard of it yet). It shows the document as its author saw it: a version that wrote in a document saw it standing. *Keep as new document* makes a document of the same type from it — the GM's at once, a player's as a proposal for the GM.
 - **Waiting** longer than ten minutes for what it builds on — a part's head or a version before it that never came.
 
-The GM sees all of them and can let them go for good (`Item::Deleted`); everyone else sees their own.
+The GM sees all of them and can discard the changes for good (`Item::Deleted`) — never a document; everyone else sees their own. A world read from its server a piece at a time shows no waiting ones: there they wait only for the rest of their document.

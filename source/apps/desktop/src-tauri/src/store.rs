@@ -2351,7 +2351,10 @@ impl Store {
     /// way.
     pub fn conflicts(&self, world_id: &str) -> Result<Vec<(journal::Conflict, Vec<String>)>> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-        self.with_journal(world_id, |journal| Ok(journal.conflicts(now, 10 * 60 * 1000)))
+        let all = self.with_journal(world_id, |journal| Ok(journal.conflicts(now, 10 * 60 * 1000)))?;
+        // Read from its server a piece at a time, what waits waits for the
+        // rest of its document: on the server it is whole.
+        Ok(all.into_iter().filter(|(c, _)| !self.online_cache || c.why != journal::Stuck::Waiting).collect())
     }
 
     /// Where a version and now differ in a layer's text, by the characters

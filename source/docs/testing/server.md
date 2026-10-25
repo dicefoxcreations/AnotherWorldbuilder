@@ -55,10 +55,8 @@ Whoever brings or creates a world is its GM. Handing the world over (*Players �
 
 At start one admin is named (`AW_ADMIN`, her ID under *Profile* in the app); she can name more. Admins manage the server in the app under *Options → Network → Servers and hosts → Manage*:
 
-- **Worlds:** every world with name, GM, size on disk and whether encrypted – no more than the server itself can read. **Close** closes a world for everyone, its GM too; **Open** opens it again; a closed world can be deleted (type its name) and stays closed, so that it is not brought straight back. Who asks to join a world stands below it, with **Let in**.
-- **Admins:** the first, and those added by ID (**Remove** again; the first one stays).
-- **Worldbuilders:** who may bring worlds besides the admins. If someone else brings a world, it waits ("would bring a world") until an admin says **Allow**; meanwhile their app shows "A world of yours waits for the server's admin." A worldbuilder can also be added directly by ID or removed again (their worlds stay).
-- **Users:** everyone who was there, with "last seen". **Block** turns someone away, whatever they ask; not an admin.
+- **Users:** everyone who was there, with "last seen" and their roles on the server as chips: **Admin** (the first one, from `AW_ADMIN`, always stays — more are optional), **Worldbuilder** (may bring worlds besides the admins). **×** takes a role, **+** gives one; someone not there yet is added by ID. If someone else brings a world, it waits ("would bring a world", **✓** allows, **×** refuses); meanwhile their app shows "A world of yours waits for the server's admin." **Kick** takes someone out of every world on the server they play in and turns them away, whatever they ask (`Order::Kick`; a world's GM or supporters only its GM takes out); **Let back** undoes it. Admins cannot be kicked.
+- **Worlds:** every world with size on disk and whether encrypted – no more than the server itself can read – unfolded to its people: the GM first, then the supporters, then the players with **Take out**, and who asks to join with **Let in**. **Close** closes a world for everyone, its GM too; **Open** opens it again; a closed world can be deleted (type its name) and stays closed, so that it is not brought straight back.
 
 A GM brings only her own worlds: the entries must name her as GM, otherwise the server does not take the world.
 

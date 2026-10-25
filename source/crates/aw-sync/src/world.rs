@@ -194,6 +194,9 @@ pub enum Order {
     Delete { world: String },
     /// Turned away, whatever they ask.
     Block { id: String },
+    /// Turned away, and taken out of every world here they play in — the
+    /// next device holding a world's keys takes them out for good.
+    Kick { id: String },
     Unblock { id: String },
 }
 
@@ -214,6 +217,9 @@ pub struct HeldWorld {
     /// Its players, as their grants name them — for an admin to take out.
     #[serde(default)]
     pub members: Vec<Person>,
+    /// Of them, and of the admins, who supports the world, by id.
+    #[serde(default)]
+    pub supporters: Vec<String>,
 }
 
 /// Someone a server knows.

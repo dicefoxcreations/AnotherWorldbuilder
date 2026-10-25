@@ -158,14 +158,14 @@ export type ServerEntry = {
 };
 
 /** A world on a server, as its admin sees it — nothing of its content. */
-export type HeldWorld = { world: string; name: string; gm: string; gm_id: string; bytes: number; encrypted: boolean; closed: boolean; requests: Person[]; members: Person[] };
+export type HeldWorld = { world: string; name: string; gm: string; gm_id: string; bytes: number; encrypted: boolean; closed: boolean; requests: Person[]; members: Person[]; supporters: string[] };
 /** Someone a server knows; `last` in seconds since 1970, 0: not yet. */
 export type Person = { id: string; name: string; last: number; blocked: boolean };
 /** What a server's admin sees. */
 export type ServerState = { worlds: HeldWorld[]; admins: Person[]; worldbuilders: Person[]; asking: Person[]; users: Person[] };
 /** What a server's admin orders — see `aw_sync::world::Order`. */
 export type ServerOrder =
-  | { kind: "allow" | "refuse" | "block" | "unblock"; id: string }
+  | { kind: "allow" | "refuse" | "block" | "unblock" | "kick"; id: string }
   | { kind: "admin"; id: string; on: boolean }
   | { kind: "approve" | "remove"; world: string; id: string }
   | { kind: "close" | "open" | "delete"; world: string };

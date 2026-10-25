@@ -624,6 +624,27 @@ impl Keeper {
                 }
             }
             Order::Block { .. } => return Err(AppError("An admin cannot be turned away.".into())),
+            Order::Kick { id } if id != self.admin && !book.admins.contains(&id) => {
+                if !book.blocked.contains(&id) {
+                    book.blocked.push(id.clone());
+                }
+                book.worldbuilders.retain(|w| w != &id);
+                book.asking.retain(|a| a != &id);
+                // Out of every world they play in; a world's GM or supporter
+                // only its GM takes out — turned away, they get none of it.
+                for world in self.store.held_worlds()? {
+                    let (member, gm, supporter) = self.store.with_journal(&world, |j| {
+                        Ok((j.grant(&id).is_some(), j.world_item().is_some_and(|(.., g)| g.id.as_str() == id), j.supporters().contains(&id)))
+                    })?;
+                    if member && !gm && !supporter {
+                        let removing = book.removing.entry(world).or_default();
+                        if !removing.contains(&id) {
+                            removing.push(id.clone());
+                        }
+                    }
+                }
+            }
+            Order::Kick { .. } => return Err(AppError("An admin cannot be kicked.".into())),
             Order::Unblock { id } => book.blocked.retain(|b| b != &id),
         }
         self.save(&book)
@@ -641,6 +662,7 @@ impl Keeper {
             let known = self.known(&world)?;
             let requests = self.store.load_requests(&world).unwrap_or_default().into_iter().map(|r| person(r.identity.id.as_str())).collect();
             let removing = book.removing.get(&world).cloned().unwrap_or_default();
+            let supporters = self.store.with_journal(&world, |j| Ok(j.supporters())).unwrap_or_default();
             let members = self.store.with_journal(&world, |j| Ok(j.granted_members())).unwrap_or_default().into_iter()
                 .filter(|m| !removing.iter().any(|r| r == m.id.as_str()))
                 .map(|m| Person { name: m.name.clone(), ..person(m.id.as_str()) })
@@ -654,12 +676,13 @@ impl Keeper {
                 closed: book.closed.contains_key(&world),
                 requests,
                 members,
+                supporters,
                 world,
             });
         }
         // Closed and gone: by the name it had.
         for (world, name) in book.closed.iter().filter(|(w, _)| !self.store.holds(w)) {
-            worlds.push(HeldWorld { world: world.clone(), name: name.clone(), gm: String::new(), gm_id: String::new(), bytes: 0, encrypted: true, closed: true, requests: Vec::new(), members: Vec::new() });
+            worlds.push(HeldWorld { world: world.clone(), name: name.clone(), gm: String::new(), gm_id: String::new(), bytes: 0, encrypted: true, closed: true, requests: Vec::new(), members: Vec::new(), supporters: Vec::new() });
         }
         worlds.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         let mut users: Vec<Person> = book.users.keys().map(|id| person(id)).collect();
@@ -1254,6 +1277,18 @@ mod tests {
         swap(&keeper, &marla, &world);
         let Reply::Digest { removing, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
         assert!(removing.is_empty(), "done with");
+
+        // Olaf kicks Dan: turned away, and on his way out of Marla's world.
+        let dan = someone(dir.path(), "Dan");
+        admit(&marla.store, &world, dan.me.public(), Vec::new()).unwrap();
+        swap(&keeper, &marla, &world);
+        keeper.answer(&world, &dan.me.public(), Ask::Worlds);
+        let Reply::Managed { state } = manage(&keeper, &olaf, Some(Order::Kick { id: dan.me.id().to_string() })) else { panic!("Olaf manages") };
+        assert!(state.users.iter().any(|p| p.id == dan.me.id().as_str() && p.blocked));
+        assert_eq!(swap(&keeper, &dan, &world), Reply::NotOffered);
+        let Reply::Digest { removing, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
+        assert_eq!(removing, vec![dan.me.id().to_string()]);
+        assert!(matches!(manage(&keeper, &olaf, Some(Order::Kick { id: marla.me.id().to_string() })), Reply::NotOffered), "not an admin");
         // An admin cannot be turned away; the first one stays.
         assert!(matches!(manage(&keeper, &olaf, Some(Order::Block { id: marla.me.id().to_string() })), Reply::NotOffered));
         assert!(matches!(manage(&keeper, &olaf, Some(Order::Admin { id: marla.me.id().to_string(), on: false })), Reply::NotOffered));
