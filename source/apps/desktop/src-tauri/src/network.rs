@@ -442,7 +442,7 @@ pub(crate) fn running() -> Option<Arc<WorldNet>> {
     NET.get_or_init(|| Mutex::new(None)).lock().ok()?.clone()
 }
 
-/// The host side: the app's own keeper — see `server::here` — for whichever
+/// The host side: the app's own keeper — see `keeper::here` — for whichever
 /// profile is in use now.
 struct DesktopHost;
 
@@ -681,9 +681,9 @@ fn offers(store: &Store) -> Answer<Vec<Offer>> {
 }
 
 /// Answers someone whose identity is proven: the GM's device, under a
-/// server's rules (`server::here`).
+/// server's rules (`keeper::here`).
 pub(crate) fn answer(store: &Store, world: &str, who: &IdentityPublic, ask: Ask) -> Answer<Reply> {
-    crate::server::here(store)?.answer_to(world, who, ask)
+    crate::keeper::here(store)?.answer_to(world, who, ask)
 }
 
 /// Answers a member of a world that stays with its host: a call, done in

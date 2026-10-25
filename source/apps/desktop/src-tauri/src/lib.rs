@@ -25,6 +25,7 @@ mod online;
 mod browser;
 mod readable;
 pub mod server;
+mod keeper;
 
 use aw_crypto::{Identity, IdentityPublic};
 use aw_model::{

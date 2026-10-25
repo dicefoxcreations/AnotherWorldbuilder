@@ -1,6 +1,6 @@
 # Backups
 
-As of 23 October 2026. Code: `apps/desktop/src-tauri/src/backup.rs`, the server's in `server.rs`; interface: `features/worlds/Backups.tsx` (*Options → World → Backups*), *Restore a backup …* in the main menu (`app/MainMenu.tsx`).
+As of 23 October 2026. Code: `apps/desktop/src-tauri/src/backup.rs`, the server's in `keeper.rs`; interface: `features/worlds/Backups.tsx` (*Options → World → Backups*), *Restore a backup …* in the main menu (`app/MainMenu.tsx`).
 
 On this device the GM backs a world up by hand (*Back up now*); every backup stays until the GM deletes it. They go into `backups/` beside the worlds' folder, or a folder of one's choice, each world in a folder of its own: `<name> – world-<id>/2026-10-23 06-15-00 UTC/`.
 

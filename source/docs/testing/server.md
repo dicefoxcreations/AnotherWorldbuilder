@@ -1,6 +1,6 @@
 # Server: aw-server on a NAS
 
-As of October 2026. Code: `apps/desktop/src-tauri/src/server.rs` (start, door keeper `Keeper`, management), `src/bin/aw-server.rs`; protocol `crates/aw-sync/src/world.rs` (`Ask::Manage`, `Order`, `ServerState`); build `tools/build/server-image.py`; files for Docker in `apps/server/`.
+As of October 2026. Code: `apps/desktop/src-tauri/src/server.rs` (start), `keeper.rs` (door keeper `Keeper`, management — the same one the app answers with, `keeper::here`), `src/bin/aw-server.rs`; protocol `crates/aw-sync/src/world.rs` (`Ask::Manage`, `Order`, `ServerState`); build `tools/build/server-image.py`; files for Docker in `apps/server/`.
 
 `aw-server` is the door keeper of the worlds: always on, so that players can work even when the GM's device is off. It holds **no keys** of a world and is not the GM. Everyone identifies themselves when connecting (a signed challenge); the server lets them where the world itself says they belong:
 
