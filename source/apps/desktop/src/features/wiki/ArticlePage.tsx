@@ -392,7 +392,8 @@ export function BlockText({
   const folds: TopFolds[] | null = useMemo(() => {
     if (!trees) return null;
     const placed = sectioned(
-      trees.map((nodes) => nodes.map((n) => ({ heading: headingOf(n) }))),
+      // An embedded document heads a section of its own, as a third-level heading.
+      trees.map((nodes) => nodes.map((n) => ({ heading: headingOf(n), ends: n.kind === "embed" ? 3 : undefined }))),
       folded,
     );
     return placed.map((part) =>

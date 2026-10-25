@@ -1,5 +1,6 @@
 import { readImageLine, readTagLine, type ImageAttrs } from "./ImageTag";
 import type { GraphLine, GraphNode, LabelAt, MapAccess, MapNode } from "../api/client";
+import { tableAt } from "./TableText";
 
 /**
  * A graph as text — the same notation as `aw_model::markdown::Graph`:
@@ -51,7 +52,8 @@ export type Piece =
   | { kind: "abilities"; text: string; abilities: ImageAttrs }
   | { kind: "view"; text: string; view: ImageAttrs }
   | { kind: "embed"; text: string; embed: ImageAttrs }
-  | { kind: "map"; text: string; map: MapNode };
+  | { kind: "map"; text: string; map: MapNode }
+  | { kind: "table"; text: string };
 
 /** `name=value` and `name="value with spaces"`. */
 function attributes(tag: string): Map<string, string> {
@@ -217,6 +219,15 @@ export function pieces(text: string): Piece[] {
       const inside = close < 0 ? [] : lines.slice(i + 1, i + 1 + close);
       out.push({ kind: "map", text: lines.slice(i, end).join(""), map: readMap(lines[i], inside) });
       i = end;
+      continue;
+    }
+    // A table: its head, its rule and its rows.
+    const rows = tableAt(lines, i);
+    if (rows > 0) {
+      if (plain) out.push({ kind: "text", text: plain });
+      plain = "";
+      out.push({ kind: "table", text: lines.slice(i, i + rows).join("") });
+      i += rows;
       continue;
     }
     if (!opens(lines[i])) {

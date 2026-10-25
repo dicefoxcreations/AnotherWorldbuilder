@@ -7,8 +7,12 @@
  * reader sees one text.
  */
 
-/** What a section needs to know of a node at the top of a part. */
-export type Top = { heading?: { level: number; text: string } };
+/**
+ * What a section needs to know of a node at the top of a part. `ends`: a
+ * node that heads a section of its own, folded by itself — an embedded
+ * document, under its heading of that level.
+ */
+export type Top = { heading?: { level: number; text: string }; ends?: number };
 
 /** Where a node stands: hidden under a folded heading, or a heading itself. */
 export type Placed = { hidden: boolean; head?: string };
@@ -23,7 +27,8 @@ export function sectioned(parts: Top[][], folded: ReadonlySet<string>): Placed[]
   // The level of the folded heading whose section this is.
   let under: number | null = null;
   return parts.map((nodes) =>
-    nodes.map(({ heading }) => {
+    nodes.map(({ heading, ends }) => {
+      if (ends !== undefined && under !== null && ends <= under) under = null;
       if (!heading) return { hidden: under !== null };
       if (under !== null && heading.level > under) return { hidden: true };
       const base = `${heading.level}:${heading.text.trim().toLowerCase()}`;

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { anchoredParts } from "../../shared/Anchors";
+import { Unfolded } from "../../shared/ui/BlockFold";
 import { useWorldData } from "../worlds/WorldData";
 import { ArticlePage } from "./ArticlePage";
 
@@ -174,7 +175,8 @@ function PartOnly({ anchor, children }: { anchor: string; children: ReactNode })
     <>
       <div ref={shown} className="link-preview-part" />
       <div ref={hidden} className={missing ? "link-preview-page" : "link-preview-page out-of-sight"}>
-        {children}
+        {/* Looked for with nothing folded — a part under a folded heading is found too. */}
+        <Unfolded.Provider value={!missing}>{children}</Unfolded.Provider>
       </div>
     </>
   );

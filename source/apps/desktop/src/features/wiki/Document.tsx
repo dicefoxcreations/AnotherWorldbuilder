@@ -30,6 +30,7 @@ import { linkIcon } from "./DocLink";
 import { ArticleHead } from "./ArticleHead";
 import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
 import { withAccess } from "../../shared/Policies";
+import { TableCard } from "./TableCard";
 import { late, VersionsPanel } from "./Versions";
 import { linker, linkIn, linksIn, linkText, linkTo, MARK, scanLinks, typeNames, type Link } from "../../shared/Links";
 import { anchorName, anchorRange, anchorsIn, markSection, relinked, renameInText, withoutAnchor } from "../../shared/Anchors";
@@ -3293,6 +3294,8 @@ function PartEditor({
             <ViewCard attrs={piece.view} onChange={(next) => onPart({ text: withPiece(i, next) })} />
           ) : piece.kind === "embed" ? (
             <EmbedCard attrs={piece.embed} onChange={(next) => onPart({ text: withPiece(i, next) })} />
+          ) : piece.kind === "table" ? (
+            <TableCard text={piece.text} onChange={(next) => onPart({ text: withPiece(i, next) })} />
           ) : piece.kind === "map" ? (
             <MapCard world={world} map={piece.map} onChange={(next) => onPart({ text: withPiece(i, next ? mapText(next) : null) })} />
           ) : piece.kind === "image" ? (

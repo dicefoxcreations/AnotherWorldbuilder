@@ -591,6 +591,36 @@ pub fn split(markdown: &str) -> Vec<Node> {
     out
 }
 
+/// A table row's mark written after its last bar — `| Rare | 500 pp | ^prices`
+/// — goes into its last cell, where it counts: a cell beyond the head's
+/// would be dropped, and the mark with it.
+fn marks_into_cells(markdown: &str) -> std::borrow::Cow<'_, str> {
+    let moved = |line: &str| -> Option<String> {
+        let bare = line.trim_end();
+        if !bare.trim_start().starts_with('|') {
+            return None;
+        }
+        let (before, id) = trailing_mark(bare)?;
+        let row = before.trim_end();
+        row.ends_with('|').then(|| format!("{} ^{id} |", row[..row.len() - 1].trim_end()))
+    };
+    if !markdown.lines().any(|l| moved(l).is_some()) {
+        return std::borrow::Cow::Borrowed(markdown);
+    }
+    let mut out = String::with_capacity(markdown.len() + 8);
+    for line in markdown.split_inclusive('\n') {
+        let end = if line.ends_with('\n') { "\n" } else { "" };
+        match moved(line.trim_end_matches('\n')) {
+            Some(fixed) => {
+                out.push_str(&fixed);
+                out.push_str(end);
+            }
+            None => out.push_str(line),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 fn split_markdown(markdown: &str) -> Vec<Node> {
     if markdown.trim().is_empty() {
         return Vec::new();
@@ -598,7 +628,8 @@ fn split_markdown(markdown: &str) -> Vec<Node> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TABLES);
-    let raw: Vec<Event> = Parser::new_ext(markdown, options).collect();
+    let markdown = marks_into_cells(markdown);
+    let raw: Vec<Event> = Parser::new_ext(&markdown, options).collect();
 
     let mut stack: Vec<(Frame, Vec<Node>)> = vec![(Frame::Root, Vec::new())];
     let mut list_items: Vec<Vec<Vec<Node>>> = Vec::new();
@@ -1316,6 +1347,10 @@ mod tests {
         let tree = split("| a | b |\n|-|-|\n| Very rare | 5,000 gold ^dbbde3 |");
         let Node::Table { rows, .. } = &tree[0] else { panic!("{tree:?}") };
         assert_eq!(rows[0][1], vec![text("5,000 gold"), mark("dbbde3")]);
+        // Written after the row's last bar, it still counts — in its last cell.
+        let tree = split("| a | b |\n|-|-|\n| Very rare   | 5,000 pp   | ^magic-item-rewards \n\nAfter.");
+        let Node::Table { rows, .. } = &tree[0] else { panic!("{tree:?}") };
+        assert_eq!(rows[0][1], vec![text("5,000 pp"), mark("magic-item-rewards")]);
         // Mid-line, or not a plain name: text.
         assert_eq!(split("x^2 is ^big here"), vec![Node::Paragraph { children: vec![text("x^2 is ^big here")] }]);
         assert_eq!(split("2^10"), vec![Node::Paragraph { children: vec![text("2^10")] }]);

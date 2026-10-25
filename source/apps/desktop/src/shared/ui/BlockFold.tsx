@@ -1,9 +1,12 @@
-import { useState, type DragEvent, type ReactNode } from "react";
+import { createContext, useContext, useState, type DragEvent, type ReactNode } from "react";
 import type { TemplateBlock } from "../../api/client";
 import { CreateButton } from "../../features/wiki/CreateButton";
 
 /** What a block carries while it is dragged: its key. */
 const DRAGGED = "application/x-aw-block";
+
+/** Everything open, whatever the reader folded — where a part of a page is looked for. */
+export const Unfolded = createContext(false);
 
 /**
  * Whether a block of a document is folded — for this reader, on this
@@ -12,6 +15,7 @@ const DRAGGED = "application/x-aw-block";
  * says.
  */
 export function useFold(article: string, block: string, initial: boolean): [boolean, () => void] {
+  const open = useContext(Unfolded);
   // What the reader did counts until the type says otherwise.
   const key = `fold:${article}:${block}:${initial ? "folded" : "open"}`;
   const [folded, setFolded] = useState(() => {
@@ -31,7 +35,7 @@ export function useFold(article: string, block: string, initial: boolean): [bool
       }
       return !was;
     });
-  return [folded, toggle];
+  return [folded && !open, toggle];
 }
 
 /**
@@ -39,6 +43,7 @@ export function useFold(article: string, block: string, initial: boolean): [bool
  * device, as `useFold` remembers a block. A heading starts open.
  */
 export function useFoldedHeadings(article: string, block: string): [ReadonlySet<string>, (head: string) => void] {
+  const open = useContext(Unfolded);
   const key = `fold:${article}:${block}:headings`;
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => {
     try {
@@ -58,8 +63,10 @@ export function useFoldedHeadings(article: string, block: string): [ReadonlySet<
       }
       return now;
     });
-  return [folded, toggle];
+  return [open ? NONE : folded, toggle];
 }
+
+const NONE: ReadonlySet<string> = new Set();
 
 /**
  * The arrow before what folds — a block's title, a heading in the text. It

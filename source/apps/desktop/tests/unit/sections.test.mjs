@@ -25,3 +25,11 @@ test("the same heading twice gets a number", () => {
   const parts = [[h(2, "Notes"), p, h(2, "notes "), p]];
   assert.deepEqual(hidden(sectioned(parts, new Set(["2:notes~2"]))), [["2:notes", "p", "2:notes~2", "-"]]);
 });
+
+test("an embedded document ends the section above it", () => {
+  const embed = { ends: 3 };
+  const placed = sectioned([[h(3, "Waterdeep"), p, embed, p]], new Set(["3:waterdeep"]));
+  assert.deepEqual(placed[0].map((x) => x.hidden), [false, true, false, false]);
+  const deeper = sectioned([[h(2, "City"), p, embed]], new Set(["2:city"]));
+  assert.deepEqual(deeper[0].map((x) => x.hidden), [false, true, true], "under a higher heading it folds along");
+});
