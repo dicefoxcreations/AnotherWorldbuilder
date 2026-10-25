@@ -165,10 +165,15 @@ pub struct ServerBackups {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Order {
-    /// A GM may bring worlds — one who asked, or anyone by id.
+    /// A worldbuilder: may bring worlds — one who asked, or anyone by id.
     Allow { id: String },
     /// May bring no more — or the request is turned down.
     Refuse { id: String },
+    /// An admin besides the first, or no more.
+    Admin { id: String, on: bool },
+    /// Lets someone who asked into a world: the next device holding its
+    /// keys — its GM's, a supporter's — lets them in.
+    Approve { world: String, id: String },
     /// Nobody gets it any more, its GM neither; it stays as it is.
     Close { world: String },
     Open { world: String },
@@ -190,6 +195,9 @@ pub struct HeldWorld {
     pub bytes: u64,
     pub encrypted: bool,
     pub closed: bool,
+    /// Who asked to join it — for an admin to let in.
+    #[serde(default)]
+    pub requests: Vec<Person>,
 }
 
 /// Someone a server knows.
@@ -206,9 +214,13 @@ pub struct Person {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerState {
     pub worlds: Vec<HeldWorld>,
-    /// The GMs who may bring worlds, the admin first.
-    pub gms: Vec<Person>,
-    /// GMs who would bring a world.
+    /// Who manages the server, the first admin first.
+    #[serde(default)]
+    pub admins: Vec<Person>,
+    /// Who may bring worlds besides the admins.
+    #[serde(default)]
+    pub worldbuilders: Vec<Person>,
+    /// Who would bring a world.
     pub asking: Vec<Person>,
     /// Everyone who came.
     pub users: Vec<Person>,
@@ -226,9 +238,18 @@ pub enum Reply {
         /// The dice the others rolled lately.
         #[serde(default)]
         rolls: Vec<String>,
-        /// Who asked a server to join — told the GM, who decides.
+        /// Who asked a server to join — told the GM and the supporters, who
+        /// decide.
         #[serde(default)]
         requests: Vec<IdentityPublic>,
+        /// Of them, whom an admin let in: the device holding the keys lets
+        /// them in without asking.
+        #[serde(default)]
+        approved: Vec<String>,
+        /// The server's admins — the world's supporters too, for whom its GM
+        /// seals their keys.
+        #[serde(default)]
+        admins: Vec<IdentityPublic>,
         /// A member keeps no copy: the world is theirs while they are online.
         #[serde(default)]
         no_copy: bool,

@@ -738,6 +738,8 @@ pub(crate) fn answer_member(store: &Store, world: &str, id: &str, ask: Ask) -> A
                 presence,
                 rolls,
                 requests: Vec::new(),
+                approved: Vec::new(),
+                admins: Vec::new(),
                 no_copy: false,
                 mark: store.arrival_mark(world)?.map(|(epoch, at)| Mark { epoch, at }),
             }
@@ -1323,17 +1325,34 @@ fn within(records: Vec<String>, budget: usize) -> Vec<String> {
 }
 
 /// Who asked a server to join: kept as if they had asked here.
-pub(crate) fn take_requests(store: &Store, world: &str, asking: Vec<IdentityPublic>) -> Answer<()> {
+/// Who asked a server to join, as it told this device — the GM's, or a
+/// supporter's, which hold the keys: those let in ahead of time by their id
+/// and those an admin let in (`approved`) are in at once; the others wait
+/// for whoever decides.
+pub(crate) fn take_requests(store: &Store, world: &str, asking: Vec<IdentityPublic>, approved: &[String]) -> Answer<()> {
+    let gm = store.is_gm(world);
+    if !gm && !store.supports(world)? {
+        return Ok(());
+    }
     let meta = store.load_world_meta(world)?;
+    let expected = if gm { meta.invited.clone() } else { store.with_journal(world, |j| Ok(j.expected()))? };
     let mut requests = store.load_requests(world)?;
     let before = requests.len();
     for who in asking {
-        // Let in ahead of time by their id: in at once, as on the network.
-        if who.is_genuine() && meta.member(who.id.as_str()).is_none() && meta.invited.iter().any(|i| i == who.id.as_str()) {
-            crate::admit(store, world, who, Vec::new())?;
+        let id = who.id.to_string();
+        let member = if gm { meta.member(&id).is_some() } else { store.has_grant(world, &id)? };
+        if !who.is_genuine() || member {
             continue;
         }
-        if who.is_genuine() && meta.member(who.id.as_str()).is_none() && !requests.iter().any(|r| r.identity.id == who.id) {
+        if expected.contains(&id) || approved.contains(&id) {
+            if gm {
+                crate::admit(store, world, who, Vec::new())?;
+            } else {
+                store.admit_as_supporter(world, &who)?;
+            }
+            continue;
+        }
+        if !requests.iter().any(|r| r.identity.id == who.id) {
             requests.push(JoinRequest { identity: who, at: now() });
         }
     }
@@ -1474,13 +1493,17 @@ async fn swap(store: &Store, net: &WorldNet, via: &Via, me: &Identity, world: &s
     let me_id = me.id().to_string();
     let rolls = recent_rolls(world, |r| r.member == me_id).iter().filter_map(|r| serde_json::to_string(r).ok()).collect();
     let theirs = match ask(net, via, world, me, Ask::Digest { presence, rolls }).await? {
-        Reply::Digest { digest, presence, rolls, requests, no_copy, .. } => {
+        Reply::Digest { digest, presence, rolls, requests, approved, admins, no_copy, .. } => {
             // Held only while online, or kept — as the world says now.
             if !store.is_gm(world) {
                 store.hold_fleeting(world, no_copy)?;
             }
-            if !requests.is_empty() && store.is_gm(world) {
-                take_requests(store, world, requests)?;
+            if !requests.is_empty() {
+                take_requests(store, world, requests, &approved)?;
+            }
+            // The admins of the server: the world's supporters, too.
+            if store.is_gm(world) && matches!(via, Via::Server(_)) {
+                store.set_server_admins(world, admins)?;
             }
             for p in presence.iter().filter_map(|p| serde_json::from_str::<Presence>(p).ok()) {
                 note_presence(world, p);

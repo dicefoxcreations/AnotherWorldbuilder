@@ -105,9 +105,14 @@ struct Session {
     prepared: bool,
     /// Records a command brought that the open world has not been told of.
     untold: bool,
-    /// Who asked to join, as the server told the GM — taken in with the next
-    /// command or poll (`answer_asking`).
+    /// Who asked to join, as the server told the GM or a supporter — and
+    /// whom of them an admin let in — taken in with the next command or poll
+    /// (`answer_asking`).
     requests: Vec<aw_crypto::IdentityPublic>,
+    approved: Vec<String>,
+    /// The server's admins, where they changed — the GM seals its keys for
+    /// them.
+    admins: Option<Vec<aw_crypto::IdentityPublic>>,
     /// Pictures fetched since the open world last redrew for them, and when it did.
     pictures: usize,
     pictures_shown: std::time::Instant,
@@ -163,7 +168,7 @@ impl Session {
         std::fs::create_dir_all(store.worlds_dir())?;
         copy_private(base, &store, world)?;
         Ok(Self { world: world.into(), store, _temporary: temporary, endpoint: endpoint.into(), copies: false,
-                  synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false, untold: false, requests: Vec::new(),
+                  synced: None, confirmed: HashSet::new(), misses: 0, mark: None, prepared: false, untold: false, requests: Vec::new(), approved: Vec::new(), admins: None,
                   pictures: 0, pictures_shown: std::time::Instant::now() })
     }
 
@@ -219,7 +224,7 @@ impl Session {
     async fn read_server(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
         let reply = transport.ask(world, network::live_digest(world, self.store.load_identity()?.id().as_str())?).await?;
         network::receive_live(world, &reply);
-        let Reply::Digest { digest, requests, no_copy, mark, .. } = reply else {
+        let Reply::Digest { digest, requests, approved, admins, no_copy, mark, .. } = reply else {
             return Err(AppError(match reply {
                 // Taken out: the world leaves the list, and may be asked for again.
                 Reply::NotMember | Reply::NotOffered => {
@@ -293,8 +298,13 @@ impl Session {
             self.prepared = true;
         }
         // Taken with what follows, so what they bring is sent with it.
-        if !requests.is_empty() && self.store.is_gm(world) {
+        let gm = self.store.is_gm(world);
+        if !requests.is_empty() && (gm || self.store.supports(world)?) {
             self.requests = requests;
+            self.approved = approved;
+        }
+        if gm && self.store.server_admins(world)? != admins {
+            self.admins = Some(admins);
         }
         Ok(came)
     }
@@ -464,7 +474,7 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
             if std::mem::take(&mut session.untold) && !brought {
                 return Ok(true);
             }
-            if !brought && session.requests.is_empty() {
+            if !brought && session.requests.is_empty() && session.admins.is_none() {
                 // Pictures that came show now and then, and once all are here.
                 let all = session.store.missing_parts(&world)?.is_empty();
                 let due = session.pictures_shown.elapsed() >= PICTURES_SHOWN || all;
@@ -730,11 +740,15 @@ async fn publish(session: &Session, base: &Store, world: &str, transport: &impl 
 /// by their id, taken in at once; their grant goes to the server with what
 /// follows.
 fn answer_asking(session: &mut Session, world: &str) -> Answer<()> {
+    if let Some(admins) = session.admins.take() {
+        session.store.set_server_admins(world, admins)?;
+    }
+    let approved = std::mem::take(&mut session.approved);
     let asking = std::mem::take(&mut session.requests);
     if asking.is_empty() {
         return Ok(());
     }
-    network::take_requests(&session.store, world, asking)
+    network::take_requests(&session.store, world, asking, &approved)
 }
 
 /// What a session held before a command — to tell what the command wrote.

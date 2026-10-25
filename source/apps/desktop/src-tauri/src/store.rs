@@ -1509,6 +1509,11 @@ impl Store {
         Ok(ids)
     }
 
+    /// The admins of the server a world lies on, as it last told them.
+    pub fn server_admins(&self, world_id: &str) -> Result<Vec<IdentityPublic>> {
+        Ok(self.load_local(world_id)?.admins)
+    }
+
     /// The admins of the server a world lies on, as it told them.
     pub fn set_server_admins(&self, world_id: &str, admins: Vec<IdentityPublic>) -> Result<()> {
         let mut local = self.load_local(world_id)?;
