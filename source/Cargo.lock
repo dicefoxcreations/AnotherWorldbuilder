@@ -321,6 +321,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing-subscriber",
+ "zstd",
 ]
 
 [[package]]

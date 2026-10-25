@@ -1115,6 +1115,9 @@ pub struct Journal {
     epoch: String,
     /// The inventory's digest, as of (records, versions, arrivals).
     digest_cache: std::cell::RefCell<Option<((usize, usize, usize), String)>>,
+    /// The frame in order, as it stood at a version — asked for a piece at a
+    /// time, worked out once.
+    frame_cache: std::cell::RefCell<Option<(u64, std::sync::Arc<Vec<(String, String)>>)>>,
     /// Control records whose signature checked out on this device, by id —
     /// an id is the hash of the bytes, so the same id is the same record and
     /// need not be checked at every opening. Kept in the private folder.
@@ -1246,6 +1249,7 @@ impl Journal {
             arrivals: Vec::new(),
             epoch: epoch(),
             digest_cache: Default::default(),
+            frame_cache: Default::default(),
             checked: std::fs::read(private.join(CHECKED)).map(|raw| raw.chunks_exact(32).filter_map(|c| c.try_into().ok()).collect()).unwrap_or_default(),
             newly_checked: 0,
         };
@@ -3161,11 +3165,17 @@ impl Journal {
 
     /// Whether a record belongs to the world's frame: everything but the
     /// parts of documents besides their base — their heads, and what is
-    /// being written in them. With the frame, a world shows itself and the
-    /// names of its documents; the rest of a document comes when it is read.
+    /// being written in them — and earlier generations of the base. With the
+    /// frame, a world shows itself and the names of its documents; the rest
+    /// of a document comes when it is read. What a tidying deleted is left
+    /// out too: whoever reads a world from its server never gets it anyway.
     fn in_frame(&self, id: &str) -> bool {
         if let Some(c) = self.controls.get(id) {
-            return !matches!(&c.item, Item::Layer(h) if !h.is_base);
+            return match &c.item {
+                Item::Layer(h) => h.is_base && self.head(h.layer).is_none_or(|now| now.generation == h.generation),
+                Item::Deleted { .. } => false,
+                _ => true,
+            };
         }
         if let Some(d) = self.drafts.get(id) {
             return self.head(d.layer).is_some_and(|h| h.is_base);
@@ -3177,22 +3187,24 @@ impl Journal {
     /// each with where it stands, for the next piece to start from. And how
     /// many there are in all.
     pub fn frame_after(&self, after: Option<&str>) -> (usize, Vec<(String, String)>) {
-        let mut all: Vec<(String, String)> = self
-            .inventory()
-            .into_iter()
-            .filter(|id| self.in_frame(id))
-            .filter_map(|id| {
-                let (kind, n) = self.order_of(&id)?;
-                Some((format!("{kind}:{n:020}:{id}"), id))
-            })
-            .collect();
-        all.sort();
-        let total = all.len();
-        let rest = match after {
-            Some(after) => all.into_iter().filter(|(at, _)| at.as_str() > after).collect(),
-            None => all,
-        };
-        (total, rest)
+        let kept = self.frame_cache.borrow().as_ref().filter(|(v, _)| *v == self.version).map(|(_, all)| all.clone());
+        let all = kept.unwrap_or_else(|| {
+            let mut all: Vec<(String, String)> = self
+                .inventory()
+                .into_iter()
+                .filter(|id| self.in_frame(id))
+                .filter_map(|id| {
+                    let (kind, n) = self.order_of(&id)?;
+                    Some((format!("{kind}:{n:020}:{id}"), id))
+                })
+                .collect();
+            all.sort();
+            let all = std::sync::Arc::new(all);
+            *self.frame_cache.borrow_mut() = Some((self.version, all.clone()));
+            all
+        });
+        let start = after.map_or(0, |after| all.partition_point(|(at, _)| at.as_str() <= after));
+        (all.len(), all[start..].to_vec())
     }
 
     /// What the frame left out of these documents — the heads of their other
@@ -3203,7 +3215,7 @@ impl Journal {
         let mut by: HashMap<ArticleId, Vec<String>> = HashMap::new();
         for (id, c) in &self.controls {
             if let Item::Layer(h) = &c.item {
-                if !h.is_base && wanted.contains(&h.article) {
+                if wanted.contains(&h.article) && !self.in_frame(id) {
                     by.entry(h.article).or_default().push(id.clone());
                 }
             }

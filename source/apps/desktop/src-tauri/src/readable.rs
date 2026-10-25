@@ -375,6 +375,8 @@ pub(crate) fn set_own(store: &Store, world: &str, on: bool) -> Answer<()> {
         refresh_soon(store, world);
     } else {
         let _ = std::fs::remove_file(private.join(ON));
+        // A refresh still under way would write the files again.
+        wait_idle(world);
         let _ = std::fs::remove_dir_all(private.join(FOLDER));
         let _ = std::fs::remove_file(private.join(KEPT));
     }

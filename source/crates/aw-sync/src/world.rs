@@ -880,7 +880,7 @@ impl WorldNet {
     async fn ask_on(&self, conn: &Connection, world: &str, me: &Identity, ask: &Ask) -> Result<Reply> {
         let remote = conn.remote_id();
         let (mut send, mut recv) = tokio::time::timeout(STEP, conn.open_bi()).await??;
-        let hello = Hello { world: world.to_string(), identity: me.public() };
+        let hello = Hello { world: world.to_string(), identity: me.public(), packed: true };
         let challenge: Challenge = timed(exchange(&mut send, &mut recv, &hello, MAX_SMALL)).await?;
         let proof = Proof {
             signature: hex::encode(me.sign(&proof_bytes(world, self.endpoint.id(), remote, &challenge.nonce)?)),
@@ -888,7 +888,7 @@ impl WorldNet {
         write(&mut send, &proof).await?;
         // What is asked comes only after the proof — nobody unknown gets to
         // send more than a few bytes.
-        write(&mut send, ask).await?;
+        write_as(&mut send, ask, challenge.packed).await?;
         let _ = send.finish();
         let reply: Reply = tokio::time::timeout(Duration::from_secs(120), read(&mut recv, MAX_ANSWER)).await??;
         Ok(reply)
@@ -1122,11 +1122,17 @@ fn short(world: &str) -> &str {
 struct Hello {
     world: String,
     identity: IdentityPublic,
+    /// It reads and writes packed frames — see `write`.
+    #[serde(default)]
+    packed: bool,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Challenge {
     nonce: String,
+    /// So does the host.
+    #[serde(default)]
+    packed: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1223,7 +1229,7 @@ async fn serve_stream(conn: &Connection, mut send: SendStream, mut recv: RecvStr
     let remote = conn.remote_id();
     let hello: Hello = timed(read(&mut recv, MAX_SMALL)).await?;
     let nonce = hex::encode(aw_crypto::random_bytes::<32>()?);
-    write(&mut send, &Challenge { nonce: nonce.clone() }).await?;
+    write(&mut send, &Challenge { nonce: nonce.clone(), packed: true }).await?;
     let proof: Proof = timed(read(&mut recv, MAX_SMALL)).await?;
     let signature: [u8; 64] = hex::decode(&proof.signature)?.try_into().map_err(|_| "invalid proof")?;
     // The id has to belong to the keys, and the keys have to have signed.
@@ -1245,7 +1251,7 @@ async fn serve_stream(conn: &Connection, mut send: SendStream, mut recv: RecvStr
     } else {
         Reply::NotOffered
     };
-    write(&mut send, &reply).await?;
+    write_as(&mut send, &reply, hello.packed).await?;
     let _ = send.finish();
     // The connection stays; the stream is done once the other side has it.
     let _ = tokio::time::timeout(Duration::from_secs(120), send.stopped()).await;
@@ -1256,12 +1262,27 @@ async fn timed<T>(f: impl std::future::Future<Output = Result<T>>) -> Result<T> 
     tokio::time::timeout(STEP, f).await?
 }
 
+/// A frame: its length, then the value as JSON — packed with zstd where
+/// both sides said they can (`Hello.packed`, `Challenge.packed`), marked by
+/// the length's top bit. Records carry their ciphertext as hex: packed, a
+/// world goes over the wire in about half the bytes.
+const PACKED: u32 = 0x8000_0000;
+
 async fn write<T: Serialize>(send: &mut SendStream, value: &T) -> Result<()> {
-    let bytes = serde_json::to_vec(value)?;
+    write_as(send, value, false).await
+}
+
+async fn write_as<T: Serialize>(send: &mut SendStream, value: &T, packed: bool) -> Result<()> {
+    let mut bytes = serde_json::to_vec(value)?;
     if bytes.len() > MAX_ANSWER {
         return Err("frame too large".into());
     }
-    send.write_all(&(bytes.len() as u32).to_be_bytes()).await?;
+    let mut prefix = bytes.len() as u32;
+    if packed {
+        bytes = zstd::bulk::compress(&bytes, 1)?;
+        prefix = bytes.len() as u32 | PACKED;
+    }
+    send.write_all(&prefix.to_be_bytes()).await?;
     send.write_all(&bytes).await?;
     Ok(())
 }
@@ -1269,12 +1290,21 @@ async fn write<T: Serialize>(send: &mut SendStream, value: &T) -> Result<()> {
 async fn read<T: DeserializeOwned>(recv: &mut RecvStream, max: usize) -> Result<T> {
     let mut prefix = [0; 4];
     recv.read_exact(&mut prefix).await?;
-    let n = u32::from_be_bytes(prefix) as usize;
+    let prefix = u32::from_be_bytes(prefix);
+    let n = (prefix & !PACKED) as usize;
     if n > max {
         return Err("frame too large".into());
     }
     let mut bytes = vec![0; n];
     recv.read_exact(&mut bytes).await?;
+    if prefix & PACKED != 0 {
+        // The frame names its size: one too large is refused before it is unpacked.
+        let size = zstd::zstd_safe::get_frame_content_size(&bytes).ok().flatten().ok_or("a packed frame without its size")?;
+        if size as usize > max {
+            return Err("frame too large".into());
+        }
+        bytes = zstd::bulk::decompress(&bytes, size as usize)?;
+    }
     Ok(serde_json::from_slice(&bytes)?)
 }
 

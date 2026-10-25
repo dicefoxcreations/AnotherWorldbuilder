@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 serde.workspace = true
 serde_json.workspace = true
 hex = "0.4.3"
+zstd = "0.13"
 getrandom = "0.4.3"
 
 [dev-dependencies]

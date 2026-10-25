@@ -359,7 +359,7 @@ button.icon.more-button, .phone-only { display: none; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(5,10,12,.72); display: grid; place-items: center; padding: 16px; }
 .online-status { z-index: 100; background: var(--base); }
 /* Sending to or loading from a server, in a corner while it lasts. */
-.transfer-note { position: fixed; right: 16px; bottom: 16px; z-index: 90; padding: 6px 12px; border-radius: 999px; background: var(--surface, #18262c); border: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.transfer-note { position: fixed; right: 16px; bottom: 16px; z-index: 90; padding: 6px 12px; border-radius: 999px; background: var(--popover); border: 1px solid var(--border); font-size: 13px; color: var(--muted); }
 .options { display: grid; grid-template-columns: 210px 1fr; width: 100%; height: 100%; background: var(--base); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 /* One size for every area: as wide as a page of the world (--page-width),
    centred — the gallery and the forms in the same window, which does not
