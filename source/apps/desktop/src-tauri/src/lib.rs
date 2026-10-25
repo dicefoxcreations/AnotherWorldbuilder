@@ -141,6 +141,17 @@ pub struct WorldInfo {
     pub listed: bool,
     /// How the world counts its days.
     pub calendar: WorldCalendar,
+    /// Who supports the world, by id: the players the GM chose (`chosen`)
+    /// and the admins of its server.
+    pub supporters: Vec<String>,
+    /// The GM's choice among them.
+    pub chosen: Vec<String>,
+    /// The admins of its server, as the GM's device knows them, by name.
+    pub admins: Vec<String>,
+    /// This device's member supports it: lets players in, and may take the
+    /// GM's place — with the keys sealed for them (`can_take_over`).
+    pub supporter: bool,
+    pub can_take_over: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -433,6 +444,8 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
     // The game master is whoever is listed as such *and* holds the world
     // token. Without the token the entry is useless — the keys are missing.
     let is_gm = store.is_gm(&id) && meta.role_of(me) == Role::Gm;
+    let (supporters, sealed) = store.with_journal(&id, |j| Ok((j.supporters(), j.keys_for(me).is_some())))?;
+    let supporter = supporters.iter().any(|s| s == me);
     let attributes = if is_gm {
         store
             .load_keyring(&id)?
@@ -470,7 +483,7 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
             .collect::<Result<_, AppError>>()?,
         article_count: store.article_count(&id)?,
         home: meta.home.clone(),
-        requests: if is_gm { store.load_requests(&id)?.len() } else { 0 },
+        requests: if is_gm || supporter { store.load_requests(&id)?.len() } else { 0 },
         invited: if is_gm { meta.invited.clone() } else { Vec::new() },
         takeovers: if is_gm { store.takeovers(&id)? } else { Default::default() },
         colours: store.colours(&id)?,
@@ -489,6 +502,11 @@ fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, Ap
         listed: store.on_the_list(&id)?,
         waiting: store.waiting(&id)?.len(),
         calendar: meta.calendar.clone(),
+        chosen: if is_gm { meta.supporters.clone() } else { Vec::new() },
+        admins: if is_gm { store.server_admins(&id)?.into_iter().map(|a| a.name).collect() } else { Vec::new() },
+        can_take_over: supporter && sealed && !is_gm,
+        supporter,
+        supporters,
         id,
     })
 }
@@ -1224,6 +1242,30 @@ fn member_trust_set(app: tauri::AppHandle, world: String, member: String, truste
     }
     store.set_trust(&world, &member, trusted)?;
     world_info(&store, &meta, me.id().as_str())
+}
+
+#[cfg(feature = "gui")]
+/// Makes these players the world's supporters — the GM's.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+fn world_supporters_set(app: tauri::AppHandle, world: String, ids: Vec<String>) -> Answer<WorldInfo> {
+    let store = store(&app)?;
+    let me = store.load_identity()?;
+    let meta = store.set_supporters(&world, ids)?;
+    world_info(&store, &meta, me.id().as_str())
+}
+
+#[cfg(feature = "gui")]
+/// Takes the GM's place, as a supporter — with the keys the GM sealed for
+/// this device's member. Everyone sees it.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+fn world_take_over(app: tauri::AppHandle, world: String) -> Answer<WorldInfo> {
+    let store = store(&app)?;
+    let me = store.load_identity()?;
+    if !store.supports(&world)? {
+        return Err(AppError("Only a supporter of the world can take the GM's place.".into()));
+    }
+    store.take_over(&world, &me)?;
+    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
 }
 
 #[cfg(feature = "gui")]
@@ -2368,6 +2410,8 @@ pub fn run() {
             backup::backup_open,
             backup::backup_restore,
             gm_handover,
+            world_supporters_set,
+            world_take_over,
             gm_handover_file,
             world_moderation_set,
             member_trust_set,

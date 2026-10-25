@@ -40,6 +40,8 @@ pub(super) async fn run(app: tauri::AppHandle, store: Store, world: &str, comman
                     "navigation_load" => serde_json::to_value(crate::navigation_load(app.clone(), world.to_string())?)?,
                     "navigation_set" => serde_json::to_value(crate::navigation_set(app.clone(), world.to_string(), argument(args, "entries")?)?)?,
                     "member_trust_set" => serde_json::to_value(crate::member_trust_set(app.clone(), world.to_string(), argument(args, "member")?, argument(args, "trusted")?)?)?,
+                    "world_supporters_set" => serde_json::to_value(crate::world_supporters_set(app.clone(), world.to_string(), argument(args, "ids")?)?)?,
+                    "world_take_over" => serde_json::to_value(crate::world_take_over(app.clone(), world.to_string())?)?,
                     "gm_handover" => serde_json::to_value(crate::gm_handover(app.clone(), world.to_string(), argument(args, "member")?)?)?,
                     "gm_handover_file" => serde_json::to_value(crate::gm_handover_file(app.clone(), world.to_string(), argument(args, "member")?, argument(args, "path")?)?)?,
                     "world_icon_set" => serde_json::to_value(crate::world_icon_set(app.clone(), world.to_string(), argument(args, "icon")?)?)?,

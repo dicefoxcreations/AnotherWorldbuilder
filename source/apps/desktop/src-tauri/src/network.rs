@@ -2296,7 +2296,7 @@ pub struct RequestInfo {
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn join_requests(app: tauri::AppHandle, world: String) -> Answer<Vec<RequestInfo>> {
     let store = store(&app)?;
-    if !store.is_gm(&world) {
+    if !store.is_gm(&world) && !store.supports(&world)? {
         return Ok(Vec::new());
     }
     Ok(store
@@ -2317,8 +2317,9 @@ pub fn join_requests(app: tauri::AppHandle, world: String) -> Answer<Vec<Request
 pub fn join_answer(app: tauri::AppHandle, world: String, id: String, accept: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM can let someone in.".into()));
+    let gm = store.is_gm(&world);
+    if !gm && !store.supports(&world)? {
+        return Err(AppError("Only the GM or a supporter can let someone in.".into()));
     }
     let mut requests = store.load_requests(&world)?;
     let request = requests
@@ -2328,10 +2329,14 @@ pub fn join_answer(app: tauri::AppHandle, world: String, id: String, accept: boo
         .ok_or_else(|| AppError("There is no such request.".into()))?;
     requests.retain(|r| r.identity.id.as_str() != id);
     store.save_requests(&world, &requests)?;
-    let meta = if accept {
-        admit(&store, &world, request.identity, Vec::new())?
-    } else {
-        store.load_world_meta(&world)?
+    let meta = match (accept, gm) {
+        (true, true) => admit(&store, &world, request.identity, Vec::new())?,
+        // A supporter: with the keys they hold for everyone.
+        (true, false) => {
+            store.admit_as_supporter(&world, &request.identity)?;
+            store.load_world_meta(&world)?
+        }
+        (false, _) => store.load_world_meta(&world)?,
     };
     world_info(&store, &meta, me.id().as_str())
 }

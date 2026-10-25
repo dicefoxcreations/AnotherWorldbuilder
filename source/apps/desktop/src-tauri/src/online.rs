@@ -474,7 +474,9 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
             if std::mem::take(&mut session.untold) && !brought {
                 return Ok(true);
             }
-            if !brought && session.requests.is_empty() && session.admins.is_none() {
+            // Handed to this device's member: theirs now.
+            let handed = !session.store.is_gm(&world) && session.store.handing_to(&world)?.as_deref() == Some(me.id().as_str());
+            if !brought && session.requests.is_empty() && session.admins.is_none() && !handed {
                 // Pictures that came show now and then, and once all are here.
                 let all = session.store.missing_parts(&world)?.is_empty();
                 let due = session.pictures_shown.elapsed() >= PICTURES_SHOWN || all;
@@ -486,11 +488,20 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
                 return Ok(false);
             }
             let before = Before::take(&session.store, &world)?;
+            if handed {
+                network::take_what_is_handed(&session.store, &world, me)?;
+            }
             crate::answer_proposals(&session.store, &world)?;
             answer_asking(session, &world)?;
             if before.wrote(&session.store, &world)? {
                 let added = publish(session, base, &world, &transport, &before).await?;
                 session.confirmed.extend(added);
+            }
+            // Handed on from this device, or taken over by a supporter: the
+            // world names someone else — the keys leave here.
+            if session.store.handed_over(&world)? {
+                session.store.step_down(&world)?;
+                base.step_down(&world)?;
             }
             session.persist_metadata(base, &world)?;
             remember_info(base, &world, &server, session.info(base, &world, &server)?, session.store.journal_version(&world)?)?;
@@ -582,6 +593,7 @@ pub(crate) fn remember_offer(base: &Store, world: &str, server: &Server, offer: 
         "attributes": [], "members": [], "article_count": 0, "home": "", "requests": 0, "invited": [],
         "takeovers": {}, "colours": {}, "moderated": false, "waiting": 0, "version_limit": 50,
         "encrypted": true, "readable": "", "readable_in_world": false, "offered": false, "dice": [],
+        "supporters": [], "chosen": [], "admins": [], "supporter": false, "can_take_over": false,
         "calendar": WorldCalendar::default(),
     }));
     info["name"] = offer.name.clone().into();
