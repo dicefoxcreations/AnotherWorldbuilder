@@ -157,7 +157,8 @@ pub(crate) fn call(store: &Store, world: &str, member: &IdentityPublic, command:
                     "name": member.name,
                     "fingerprint": member.fingerprint(),
                     "role": "player",
-                    "attributes": listed,
+                    // Their roles — not their own name.
+                    "attributes": listed.iter().filter(|a| Some(*a) != Member::own_attribute(member).as_ref()).collect::<Vec<_>>(),
                     "trusted": store.trusted(world, member.id.as_str())?,
                 }]);
             }

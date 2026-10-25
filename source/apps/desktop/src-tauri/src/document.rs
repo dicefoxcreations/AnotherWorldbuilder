@@ -3124,6 +3124,34 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_who_misses_a_part_between_two_writes_both() {
+        let w = world("between");
+        let body = "<block title=Journal>\nFirst.\n<block view=gm edit=gm level=gm-only>\nSecret.\n</block>\nSecond.\n</block>\n";
+        let page = doc(&w, "", "Session", vec![]);
+        let code = format!("<article view=all edit=players>\n<name=Session>\n<body>\n{body}</body>\n</article>\n");
+        save_now(&w.store, &w.gm, &w.id, &page, &code).unwrap();
+        let bob = Identity::create("Bob").unwrap();
+        let mut meta = w.store.load_world_meta(&w.id).unwrap();
+        meta.members.push(Member { identity: bob.public(), role: Role::Player, attributes: vec!["players".into(), "all".into()] });
+        w.store.save_world_meta(&meta).unwrap();
+        let dir = std::env::temp_dir().join(format!("aw-doc-between-bob-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        let bobs = Store::new(dir.clone());
+        bobs.save_identity(&bob).unwrap();
+        bobs.receive(&w.id, &w.store.all_records(&w.id).unwrap()).unwrap();
+
+        // Bob sees two parts, apart, and changes the second.
+        let theirs = code_of(&bobs, &bob, &w.id, &page).unwrap().code;
+        assert!(!theirs.contains("Secret"), "{theirs}");
+        save_now(&bobs, &bob, &w.id, &page, &theirs.replace("Second.", "Second, _changed_.")).unwrap();
+        bobs.close_session(&w.id, "test").unwrap();
+        w.store.receive(&w.id, &bobs.all_records(&w.id).unwrap()).unwrap();
+        let back = code_of(&w.store, &w.gm, &w.id, &page).unwrap().code;
+        assert!(back.contains("First.\n\n<block view=gm edit=gm level=gm-only>\nSecret.\n</block>\n\nSecond, _changed_.\n</block>"), "{back}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_player_may_only_what_they_may() {
         let w = world("player");
         let story = TemplateBlock {

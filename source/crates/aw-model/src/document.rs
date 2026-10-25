@@ -187,7 +187,11 @@ fn write_parts(out: &mut String, block: &TemplateBlock, applies: &Access) {
         }
         let own = access_of(part);
         let text = part.text.trim_end();
-        if own == *applies {
+        // Two parts of the same access one after the other — a part between
+        // them this reader cannot open: the second stands apart, or they
+        // would read back as one.
+        let after_plain = i > 0 && access_of(&block.parts[i - 1]) == *applies;
+        if own == *applies && !after_plain {
             if !text.is_empty() {
                 out.push_str(text);
                 out.push('\n');

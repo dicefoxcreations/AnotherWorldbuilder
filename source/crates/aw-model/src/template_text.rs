@@ -1741,6 +1741,26 @@ pub fn assign_block_ids(fresh: &mut [TemplateBlock], previous: &[TemplateBlock])
             b.key = id;
         },
     );
+    // A block's parts keep the keys they had, in order — a reader may not
+    // see every part, so a place in what they see is no key. What comes
+    // after takes a key none had.
+    for block in fresh.iter_mut() {
+        let Some(before) = previous.iter().find(|p| p.key == block.key) else { continue };
+        let had: Vec<&str> = before.parts.iter().map(|p| p.key.as_str()).collect();
+        let mut next = had.len();
+        for (n, part) in block.parts.iter_mut().enumerate() {
+            part.key = match had.get(n) {
+                Some(key) => key.to_string(),
+                None => loop {
+                    let key = TemplateBlock::part_key(&block.key, next);
+                    next += 1;
+                    if !had.contains(&key.as_str()) {
+                        break key;
+                    }
+                },
+            };
+        }
+    }
 }
 
 /// And for the fields of the infobox.

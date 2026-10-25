@@ -1538,7 +1538,7 @@ function useBricks(gm: boolean, text: string, onText: (t: string) => void, links
       templates: links.templates,
       onLink: (a) => put(linkTo(links.templates, a, label(a.name))),
       types:
-        worldData && worldData.world.isGm && !worldData.previewing
+        worldData && !worldData.previewing
           ? links.templates.filter((t) => mayCreate(worldData.world, t)).sort((a, b) => a.name.localeCompare(b.name))
           : [],
       onNew: (t) => {
