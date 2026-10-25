@@ -75,6 +75,11 @@ pub(crate) struct Keeper {
     /// says it is busy instead of waiting — and lists them as last known.
     writing: Mutex<HashSet<String>>,
     known: Mutex<HashMap<String, Known>>,
+    /// Online commands on their way, by world, member and transaction —
+    /// see `transactions`.
+    staged: Mutex<HashMap<String, transactions::Staged>>,
+    /// Their answers, for a commit asked again after its answer got lost.
+    receipts: Mutex<HashMap<String, (Reply, std::time::Instant)>>,
 }
 
 /// What the server last read of a world: its GM, and whether encrypted.
@@ -128,8 +133,9 @@ impl Keeper {
             Err(_) => Book::default(),
         };
         let me = store.load_identity()?.public();
-        let keeper = Keeper { store, in_app: false, admin, backups: data.join("backups"), me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default() };
-        keeper.recover_online_commands()?;
+        let keeper = Keeper { store, in_app: false, admin, backups: data.join("backups"), me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default(), staged: Mutex::default(), receipts: Mutex::default() };
+        // Online commands were staged in files before world format 4.
+        let _ = std::fs::remove_dir_all(data.join("online-transactions"));
         Ok(keeper)
     }
 
@@ -528,7 +534,7 @@ impl Keeper {
     /// Backs up the worlds whose time has come — not one being written right
     /// now; it comes the next time round.
     pub(crate) fn due(&self) {
-        self.release_receipts(std::time::Duration::from_secs(10 * 60));
+        self.release_receipts();
         let Ok(worlds) = self.store.list_worlds() else { return };
         for meta in worlds {
             let world = meta.public.world_id.to_string();
@@ -793,7 +799,7 @@ mod tests {
         gm.store.control(world, aw_store::journal::Item::Copies { players: false }, "staged").unwrap();
         let added: Vec<_> = gm.store.inventory(world).unwrap().into_iter().filter(|id| !before.contains(id)).collect();
         Ask::Commit { transaction: transaction.into(), base: aw_store::journal::Journal::digest(&keeper.store.inventory(world).unwrap()),
-            records: gm.store.records(world, &added).unwrap(), parts: Vec::new(), finish: false }
+            records: gm.store.records(world, &added).unwrap(), parts: Vec::new(), finish: false, piece: 0 }
     }
 
     #[test]
@@ -806,7 +812,7 @@ mod tests {
         let original = keeper.store.inventory(&world).unwrap();
         let staged = staged_control(&keeper, &gm, &world, &"a".repeat(64));
         let Ask::Commit { transaction, base, .. } = &staged else { unreachable!() };
-        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true };
+        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true, piece: 1 };
         assert_eq!(keeper.answer(&world, &gm.me.public(), staged), Reply::Staged);
         assert_eq!(keeper.store.inventory(&world).unwrap(), original);
         assert!(keeper.store.copies(&world).unwrap());
@@ -820,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn a_durable_commit_intent_recovers_after_restart_and_its_receipt_is_idempotent() {
+    fn a_command_is_staged_in_memory_and_its_receipt_answers_it_again() {
         let dir = tempfile::tempdir().unwrap();
         let gm = someone(dir.path(), "Marla");
         let server = keeper(dir.path(), &gm);
@@ -828,18 +834,25 @@ mod tests {
         swap(&server, &gm, &world);
         let staged = staged_control(&server, &gm, &world, &"b".repeat(64));
         let Ask::Commit { transaction, base, .. } = &staged else { unreachable!() };
-        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true };
-        let scope = blake3::hash(format!("{world}\n{}", gm.me.id()).as_bytes()).to_hex().to_string();
-        let stage = dir.path().join("online-transactions").join(scope).join(transaction);
-        assert_eq!(server.answer(&world, &gm.me.public(), staged), Reply::Staged);
-        aw_store::durable::write(&stage.join("commit"), b"recover").unwrap();
-        drop(server);
-        let server = keeper(dir.path(), &gm);
-        assert!(!server.store.copies(&world).unwrap());
+        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true, piece: 1 };
+        assert_eq!(server.answer(&world, &gm.me.public(), staged.clone()), Reply::Staged);
+        assert!(!dir.path().join("online-transactions").exists(), "nothing of it in files");
         let reply = server.answer(&world, &gm.me.public(), finish.clone());
         assert!(matches!(reply, Reply::Committed { .. }));
-        assert_eq!(server.answer(&world, &gm.me.public(), finish), reply);
-        assert!(!stage.join("records").exists());
+        assert!(!server.store.copies(&world).unwrap(), "in the world");
+        assert_eq!(server.answer(&world, &gm.me.public(), finish), reply, "asked again: the same answer");
+
+        // A server started anew has nothing staged: the rest of the command is
+        // refused, not half written.
+        let again = staged_control(&server, &gm, &world, &"c".repeat(64));
+        let Ask::Commit { transaction, base, .. } = &again else { unreachable!() };
+        assert_eq!(server.answer(&world, &gm.me.public(), again.clone()), Reply::Staged);
+        drop(server);
+        let server = keeper(dir.path(), &gm);
+        let before = server.store.inventory(&world).unwrap().len();
+        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true, piece: 1 };
+        assert!(server.reply(&world, &gm.me.public(), finish).is_err());
+        assert_eq!(server.store.inventory(&world).unwrap().len(), before);
     }
 
     #[test]

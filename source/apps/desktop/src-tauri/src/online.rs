@@ -913,6 +913,7 @@ async fn publish(session: &mut Session, base: &Store, world: &str, transport: &i
         let records = session.store.in_order(world, &added)?;
         let total = records.len() + parts.len();
         let mut at = 0;
+        let mut piece = 0;
         while at < records.len() {
             let mut some = Vec::new();
             let mut size = 0;
@@ -925,9 +926,10 @@ async fn publish(session: &mut Session, base: &Store, world: &str, transport: &i
             at += some.len();
             // A usual edit fits in one piece: staged and committed in one ask.
             if at == records.len() && parts.is_empty() {
-                return finish(transport, world, &transaction, &revision, some).await;
+                return finish(transport, world, &transaction, &revision, some, piece).await;
             }
-            let reply = transport.ask(world, Ask::Commit { transaction: transaction.clone(), base: revision.clone(), records: some, parts: Vec::new(), finish: false }).await?;
+            let reply = transport.ask(world, Ask::Commit { transaction: transaction.clone(), base: revision.clone(), records: some, parts: Vec::new(), finish: false, piece }).await?;
+            piece += 1;
             if reply != Reply::Staged { return Err(AppError(format!("{UNAVAILABLE} The server needs an update for online commands."))) }
             progress(world, "sending", at, total);
         }
@@ -935,12 +937,14 @@ async fn publish(session: &mut Session, base: &Store, world: &str, transport: &i
         for (n, names) in parts.chunks(PARTS_AT_ONCE).enumerate() {
             let give: Vec<_> = session.store.parts(world, names).into_iter().map(|(name, bytes)| (name, STANDARD.encode(bytes))).collect();
             if give.len() != names.len() { return Err(AppError("An online image could not be read.".into())) }
-            if transport.ask(world, Ask::Commit { transaction: transaction.clone(), base: revision.clone(), records: Vec::new(), parts: give, finish: false }).await? != Reply::Staged {
+            let reply = transport.ask(world, Ask::Commit { transaction: transaction.clone(), base: revision.clone(), records: Vec::new(), parts: give, finish: false, piece }).await?;
+            piece += 1;
+            if reply != Reply::Staged {
                 return Err(AppError(UNAVAILABLE.into()));
             }
             progress(world, "sending", records.len() + (n + 1) * PARTS_AT_ONCE, total);
         }
-        finish(transport, world, &transaction, &revision, Vec::new()).await
+        finish(transport, world, &transaction, &revision, Vec::new(), piece).await
     }.await;
     progress(world, "sending", 0, 0);
     if result.is_err() {
@@ -994,8 +998,8 @@ impl Before {
 /// The last piece of a command, and the commit — the server's digest after
 /// it. The server keeps the receipt a while for a repeated ask, then lets
 /// it go by itself.
-async fn finish(transport: &impl Transport, world: &str, transaction: &str, revision: &str, records: Vec<String>) -> Answer<String> {
-    let ask = Ask::Commit { transaction: transaction.into(), base: revision.into(), records, parts: Vec::new(), finish: true };
+async fn finish(transport: &impl Transport, world: &str, transaction: &str, revision: &str, records: Vec<String>, piece: u32) -> Answer<String> {
+    let ask = Ask::Commit { transaction: transaction.into(), base: revision.into(), records, parts: Vec::new(), finish: true, piece };
     match transport.ask(world, ask).await? {
         Reply::Committed { digest } => Ok(digest),
         Reply::Conflict => Err(AppError("The server world changed meanwhile. This edit was not saved; please try again.".into())),

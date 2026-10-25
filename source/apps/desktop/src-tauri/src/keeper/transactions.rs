@@ -1,186 +1,132 @@
-//! An online edit is private staging until its final, authenticated commit.
-//! Only encrypted journal records and image parts pass through this module.
+//! An online edit is private staging until its final, authenticated commit:
+//! held in memory, never in files. The commit writes it into the world; a
+//! server that restarts before has none of it, and the app sends the command
+//! again or tells its user. Records are named by what they are, so one sent
+//! twice changes nothing. Only encrypted journal records and image parts pass
+//! through this module.
 
 use super::*;
-use aw_store::durable;
 use base64::{engine::general_purpose::STANDARD, Engine};
 
-#[derive(Serialize, Deserialize)]
-struct Transaction {
-    world: String,
-    member: String,
+/// The most a command may stage: a picture or a few, not a world.
+const MOST: usize = 256 * 1024 * 1024;
+/// How long a receipt answers a commit asked again; a command staged and
+/// never finished goes after a day.
+const RECEIPT_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+const STAGED_FOR: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// A command on its way, piece by piece.
+pub(super) struct Staged {
     base: String,
-    created: u64,
+    records: Vec<String>,
+    parts: Vec<(String, Vec<u8>)>,
+    control: bool,
+    size: usize,
+    /// The next piece it waits for.
+    pieces: u32,
+    at: std::time::Instant,
 }
 
 impl Keeper {
-    fn transactions(&self) -> PathBuf {
-        self.path.parent().unwrap_or(Path::new(".")).join("online-transactions")
-    }
-
-    fn transaction_path(&self, world: &str, member: &str, transaction: &str) -> Answer<PathBuf> {
+    fn transaction_key(world: &str, member: &str, transaction: &str) -> Answer<String> {
         if transaction.len() != 64 || !transaction.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(AppError("Invalid online transaction.".into()));
         }
-        let scope = blake3::hash(format!("{world}\n{member}").as_bytes()).to_hex().to_string();
-        Ok(self.transactions().join(scope).join(transaction))
+        Ok(format!("{world}\n{member}\n{transaction}"))
     }
 
     pub(super) fn online_command(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Answer<Reply> {
         let member = who.id.to_string();
         match ask {
             Ask::Release { transaction } => {
-                let path = self.transaction_path(world, &member, &transaction)?;
-                if path.join("receipt.json").is_file() { std::fs::remove_dir_all(path)? }
+                let key = Self::transaction_key(world, &member, &transaction)?;
+                self.receipts.lock().map_err(AppError::from)?.remove(&key);
                 Ok(Reply::Staged)
             }
             Ask::Abort { transaction } => {
-                let path = self.transaction_path(world, &member, &transaction)?;
-                // A published intent is completed, never undone by a disconnected client.
-                if path.exists() && !path.join("commit").exists() && !path.join("receipt.json").exists() {
-                    std::fs::remove_dir_all(path)?;
-                }
+                let key = Self::transaction_key(world, &member, &transaction)?;
+                self.staged.lock().map_err(AppError::from)?.remove(&key);
                 Ok(Reply::Staged)
             }
-            Ask::Commit { transaction, base, records, parts, finish } => {
-                let path = self.transaction_path(world, &member, &transaction)?;
-                if let Ok(raw) = std::fs::read(path.join("receipt.json")) {
-                    return Ok(serde_json::from_slice(&raw)?);
-                }
-                if path.join("commit").exists() {
-                    return self.finish_online_command(&path);
+            Ask::Commit { transaction, base, records, parts, finish, piece } => {
+                let key = Self::transaction_key(world, &member, &transaction)?;
+                if let Some((reply, _)) = self.receipts.lock().map_err(AppError::from)?.get(&key) {
+                    return Ok(reply.clone());
                 }
                 if base.len() != 64 || !base.bytes().all(|b| b.is_ascii_hexdigit()) {
                     return Err(AppError("Invalid world revision.".into()));
                 }
-                let meta = Transaction { world: world.into(), member, base, created: network::now() };
-                let mut bytes = Vec::new();
-                if let Ok(raw) = std::fs::read(path.join("transaction.json")) {
-                    let before: Transaction = serde_json::from_slice(&raw)?;
-                    if before.world != meta.world || before.member != meta.member || before.base != meta.base {
-                        return Err(AppError("The online transaction changed.".into()));
-                    }
-                } else {
-                    std::fs::create_dir_all(path.join("records"))?;
-                    std::fs::create_dir_all(path.join("parts"))?;
-                    bytes.push((path.join("transaction.json"), serde_json::to_vec(&meta)?));
-                }
                 let public = self.store.load_world_meta(world)?.public;
                 let gm = self.store.with_journal(world, |j| Ok(j.world_item().map(|(.., gm)| gm.clone())))?;
-                let mut control = path.join("has-control").exists();
+                // Checked before it is kept: what does not check out is not staged.
+                let mut checked = Vec::with_capacity(records.len());
+                let mut control = false;
                 for record in records {
                     let parsed = aw_store::journal::verify_record_envelope(&record, &public, gm.as_ref())?;
-                    if matches!(parsed, aw_store::journal::Record::Control(_)) && !control {
-                        control = true;
-                        bytes.push((path.join("has-control"), Vec::new()));
-                    }
-                    let id = aw_store::journal::record_id(record.as_bytes());
-                    bytes.push((path.join("records").join(id), record.into_bytes()));
+                    control |= matches!(parsed, aw_store::journal::Record::Control(_));
+                    checked.push(record);
                 }
+                let mut pieces = Vec::with_capacity(parts.len());
                 for (name, encoded) in parts {
                     let raw = STANDARD.decode(encoded)?;
                     if name.len() != 64 || aw_store::journal::record_id(&raw) != name {
                         return Err(AppError("An online image part is damaged.".into()));
                     }
-                    bytes.push((path.join("parts").join(name), raw));
+                    pieces.push((name, raw));
                 }
-                if !finish {
-                    durable::write_all(&bytes)?;
-                    return Ok(Reply::Staged);
-                }
+                let staged = {
+                    let mut all = self.staged.lock().map_err(AppError::from)?;
+                    // A piece after one this server has not got — it started anew
+                    // meanwhile: the command is lost, and is not half written.
+                    let had = all.get(&key).map_or(0, |s| s.pieces);
+                    if piece != had {
+                        all.remove(&key);
+                        return Err(AppError("The server lost this command. It was not saved; please try again.".into()));
+                    }
+                    let staged = all.entry(key.clone()).or_insert_with(|| Staged { base: base.clone(), records: Vec::new(), parts: Vec::new(), control: false, size: 0, pieces: 0, at: std::time::Instant::now() });
+                    if staged.base != base {
+                        return Err(AppError("The online transaction changed.".into()));
+                    }
+                    staged.pieces += 1;
+                    staged.size += checked.iter().map(String::len).sum::<usize>() + pieces.iter().map(|(_, raw)| raw.len()).sum::<usize>();
+                    if staged.size > MOST {
+                        all.remove(&key);
+                        return Err(AppError("This command is too big for the server.".into()));
+                    }
+                    staged.control |= control;
+                    staged.records.extend(checked);
+                    staged.parts.extend(pieces);
+                    if !finish {
+                        return Ok(Reply::Staged);
+                    }
+                    all.remove(&key).expect("staged just now")
+                };
                 // The per-world Keeper claim excludes every other writer here.
-                let current = self.store.digest(world)?;
-                if current != meta.base && control {
-                    std::fs::remove_dir_all(path)?;
+                if staged.control && self.store.digest(world)? != staged.base {
                     return Ok(Reply::Conflict);
                 }
-                // What came last and the intent to commit it: one wait on the disk.
-                bytes.push((path.join("commit"), b"complete this command before serving the world".to_vec()));
-                durable::write_all(&bytes)?;
-                self.finish_online_command(&path)
+                for records in staged.records.chunks(2000) {
+                    self.store.receive(world, records)?;
+                }
+                for parts in staged.parts.chunks(32) {
+                    self.store.take_parts(world, parts)?;
+                }
+                let reply = Reply::Committed { digest: self.store.digest(world)? };
+                self.receipts.lock().map_err(AppError::from)?.insert(key, (reply.clone(), std::time::Instant::now()));
+                Ok(reply)
             }
             _ => Ok(Reply::NotOffered),
         }
     }
 
-    fn finish_online_command(&self, path: &Path) -> Answer<Reply> {
-        let meta: Transaction = serde_json::from_slice(&std::fs::read(path.join("transaction.json"))?)?;
-        let mut records = Vec::new();
-        for file in std::fs::read_dir(path.join("records"))? {
-            records.push(std::fs::read_to_string(file?.path())?);
-            if records.len() == 2000 {
-                self.store.receive(&meta.world, &records)?;
-                records.clear();
-            }
+    /// Receipts nobody asks for any more, and commands staged and never
+    /// finished, go.
+    pub(super) fn release_receipts(&self) {
+        if let Ok(mut receipts) = self.receipts.lock() {
+            receipts.retain(|_, (_, at)| at.elapsed() < RECEIPT_FOR);
         }
-        if !records.is_empty() {
-            self.store.receive(&meta.world, &records)?;
+        if let Ok(mut staged) = self.staged.lock() {
+            staged.retain(|_, s| s.at.elapsed() < STAGED_FOR);
         }
-        // Pictures a few at a time: one wait on the disk for each handful.
-        let mut parts = Vec::new();
-        for file in std::fs::read_dir(path.join("parts"))? {
-            let file = file?;
-            parts.push((file.file_name().to_string_lossy().into_owned(), std::fs::read(file.path())?));
-            if parts.len() == 32 {
-                self.store.take_parts(&meta.world, &parts)?;
-                parts.clear();
-            }
-        }
-        if !parts.is_empty() {
-            self.store.take_parts(&meta.world, &parts)?;
-        }
-        let reply = Reply::Committed { digest: self.store.digest(&meta.world)? };
-        // A receipt lost in a crash: the command is asked again and changes nothing.
-        durable::replace(&path.join("receipt.json"), &serde_json::to_vec(&reply)?)?;
-        // Receipts make a retry safe if the connection went after the commit.
-        std::fs::remove_dir_all(path.join("records"))?;
-        std::fs::remove_dir_all(path.join("parts"))?;
-        let _ = std::fs::remove_file(path.join("commit"));
-        Ok(reply)
-    }
-
-    /// Receipts answer a commit asked again after its answer got lost; after
-    /// a while nobody asks again, and they go.
-    pub(super) fn release_receipts(&self, older: std::time::Duration) {
-        let Ok(scopes) = std::fs::read_dir(self.transactions()) else { return };
-        for scope in scopes.flatten() {
-            let Ok(entries) = std::fs::read_dir(scope.path()) else { continue };
-            for entry in entries.flatten() {
-                let receipt = entry.path().join("receipt.json");
-                let old = std::fs::metadata(&receipt).and_then(|m| m.modified()).ok()
-                    .and_then(|at| at.elapsed().ok()).is_some_and(|age| age > older);
-                if old {
-                    let _ = std::fs::remove_dir_all(entry.path());
-                }
-            }
-        }
-    }
-
-    pub(super) fn recover_online_commands(&self) -> Answer<()> {
-        let root = self.transactions();
-        if !root.exists() {
-            return Ok(());
-        }
-        for scope in std::fs::read_dir(&root)? {
-            let scope = scope?.path();
-            if !scope.is_dir() { continue }
-            for entry in std::fs::read_dir(scope)? {
-                let path = entry?.path();
-                if !path.is_dir() { continue }
-                if path.join("receipt.json").exists() {
-                    // A crash after writing the receipt needs no journal replay.
-                    for name in ["records", "parts"] {
-                        let _ = std::fs::remove_dir_all(path.join(name));
-                    }
-                } else if path.join("commit").exists() {
-                    self.finish_online_command(&path)?;
-                } else if let Ok(raw) = std::fs::read(path.join("transaction.json")) {
-                    if serde_json::from_slice::<Transaction>(&raw).is_ok_and(|m| network::now().saturating_sub(m.created) > 86400) {
-                        std::fs::remove_dir_all(path)?;
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 }

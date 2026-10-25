@@ -2000,11 +2000,13 @@ pub(crate) async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, w
             }
         }
         let there: HashSet<&str> = held.iter().map(|o| o.world.as_str()).collect();
-        // A member's world the server names no more — taken out, say, or
-        // closed: gone from the list here too.
+        // A world the server names no more — taken out, say, closed or
+        // deleted there: gone from the list here too, one's own as well,
+        // unless it is still on its way there. Named again, it comes back.
         for entry in online_worlds(store) {
             let on_it = entry.server.as_deref().is_some_and(|c| c.split('@').next() == Some(server.endpoint.as_str()));
-            if on_it && !there.contains(entry.world.as_str()) && !store.holds_token(&entry.world) {
+            let on_its_way = store.holds(&entry.world) || settings.uploading.contains(&entry.world);
+            if on_it && !there.contains(entry.world.as_str()) && !on_its_way {
                 drop_online(store, &entry.world)?;
             }
         }
@@ -2025,8 +2027,10 @@ pub(crate) async fn with_servers(store: &Store, net: &WorldNet, me: &Identity, w
             // A GM's world goes to the server it lives on, and nowhere else:
             // one living on this device stays here.
             let home = settings.homes.get(&world);
+            // One without a home here that the server holds lives there — one
+            // dropped from the list while it was closed, say.
             let wanted = if gm {
-                home.is_some_and(|h| *h == server.endpoint)
+                home.map_or(there.contains(world.as_str()) && !store.holds(&world), |h| *h == server.endpoint)
             } else {
                 there.contains(world.as_str()) && home.is_none_or(|h| *h == server.endpoint)
             };

@@ -127,6 +127,10 @@ pub enum Ask {
         records: Vec<String>,
         parts: Vec<(String, String)>,
         finish: bool,
+        /// Which piece of the command this is, from 0: a server that lost
+        /// those before — it restarted meanwhile — refuses the rest.
+        #[serde(default)]
+        piece: u32,
     },
     /// Discards an unfinished online command belonging to the asking member.
     Abort { transaction: String },
