@@ -28,6 +28,9 @@ def build():
     # The C parts (ring) for musl: clang can aim there without a musl toolchain.
     env.setdefault("CC_x86_64_unknown_linux_musl", "clang")
     env.setdefault("CFLAGS_x86_64_unknown_linux_musl", "--target=x86_64-unknown-linux-musl")
+    # SQLite would ask for the *64 calls of the system's glibc headers, which
+    # musl has not: on 64 bits every file call is 64-bit anyway.
+    env.setdefault("LIBSQLITE3_FLAGS", "-DSQLITE_DISABLE_LFS")
     subprocess.run(["cargo", "build", "--release", "--locked", "-p", "aw-desktop", "--no-default-features",
                     "--features", "server", "--bin", "aw-server", "--target", TARGET], cwd=ROOT, env=env, check=True)
     return os.path.join(env["CARGO_TARGET_DIR"], TARGET, "release", "aw-server")
