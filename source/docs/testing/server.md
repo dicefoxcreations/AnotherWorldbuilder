@@ -140,6 +140,8 @@ Automatic (`cargo test -p aw-desktop server::`):
 - `a_world_comes_a_little_at_a_time_and_while_it_is_written_nobody_waits` – named once, given in pieces of two records, the world is whole on the server; while it is being written, an ask about it gets `Busy` at once, and *Worlds* and *Manage* still list it with its GM.
 - `an_unencrypted_world_is_read_and_written_by_the_server_in_the_members_name` – the admission stands open and without keys; Bob sees his part through the server, writes in "Rumours", not in the name (GM only); the GM gets the sentence, the version history names Bob.
 
+**What went wrong?** Each app writes its log beside its profile (`logs/`, *Options → About → Open the log folder*): failed commands with the reason, how long a server world's frame took, saves and what was not saved. A server that fails at what it was asked writes the reason to its own log and answers `Reply::Failed` with it — the app shows the reason instead of taking it for a lost connection.
+
 **Is a server answering?** `cargo run -p aw-sync --example server_probe -- <address or code> [times]` looks the server up as the app does and asks it for its worlds; `AW_LOG=1` shows how the connection goes. A connection that stands but gets no answer means the server itself is stuck, not the network.
 
 **Is all of a world there?** *Options → World → Where it lives → Check* (GM, world on a server, `network::world_check`): the server names which entries it lacks (those follow with the next sync), and every image part comes back and is measured against its name; parts missing or no longer whole are given again and asked for once more. While the server writes the world (the usual sync), it answers `Busy` — the check waits and asks again instead of stopping.
