@@ -447,8 +447,16 @@ pub(crate) fn running() -> Option<Arc<WorldNet>> {
 struct DesktopHost;
 
 impl Host for DesktopHost {
+    /// What is told on the local network: the worlds on the list by name;
+    /// the others offered here without one — their members find the GM's
+    /// device by the id alone.
     fn offers(&self) -> Vec<Offer> {
-        profile::store_now().and_then(|store| offers(&store).ok()).unwrap_or_default()
+        let Some(store) = profile::store_now() else { return Vec::new() };
+        offers(&store)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|o| if store.on_the_list(&o.world).unwrap_or(false) { o } else { Offer { world: o.world, name: String::new(), icon: String::new(), gm: String::new() } })
+            .collect()
     }
     fn serves(&self, world: &str) -> bool {
         // No world in particular: the list of those hosted here.
@@ -456,10 +464,6 @@ impl Host for DesktopHost {
     }
     fn answer(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Reply {
         let Some(store) = profile::store_now() else { return Reply::NotOffered };
-        // Reached here only where the GM offers it.
-        if !world.is_empty() && !answered_here(&store, world) {
-            return Reply::NotOffered;
-        }
         answer(&store, world, who, ask).unwrap_or(Reply::NotOffered)
     }
 }
@@ -1167,8 +1171,11 @@ pub fn network_worlds(app: tauri::AppHandle) -> Answer<Vec<NetWorld>> {
     let mut out: Vec<NetWorld> = net
         .found()
         .into_iter()
-        // A world held here as game master is one's own, not a find.
+        // A world held here as game master is one's own, not a find; one
+        // told without a name is there only if its GM's device named it to
+        // this one.
         .filter(|o| !store.is_gm(&o.world))
+        .filter_map(|o| if o.name.is_empty() { named().lock().ok()?.get(&o.world)?.1.clone() } else { Some(o) })
         .map(|o| NetWorld {
             local: store.load_world_meta(&o.world).ok().map(|_| "player".into()),
             id: o.world,
@@ -1206,6 +1213,35 @@ pub struct JoinOutcome {
 
 pub(crate) fn outcome(kind: &str, world: Option<WorldInfo>) -> JoinOutcome {
     JoinOutcome { kind: kind.into(), world }
+}
+
+/// Worlds told on the local network without a name — not on their list —
+/// as their GM's device names them to this one when asked: one it was let
+/// into ahead of time, say. By world, with when it was asked.
+static NAMED: OnceLock<Mutex<HashMap<String, (std::time::Instant, Option<Offer>)>>> = OnceLock::new();
+/// How long what a GM's device said of an unnamed world holds.
+const NAMED_FOR: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn named() -> &'static Mutex<HashMap<String, (std::time::Instant, Option<Offer>)>> {
+    NAMED.get_or_init(Default::default)
+}
+
+/// Asks the GM's device of each world found without a name which of them it
+/// names to this one — now and then, not every round.
+async fn name_the_unnamed(store: &Store, net: &WorldNet, me: &Identity) {
+    for offer in net.found().into_iter().filter(|o| o.name.is_empty() && !store.holds(&o.world)) {
+        let asked = named().lock().ok().and_then(|n| n.get(&offer.world).map(|(at, _)| at.elapsed() < NAMED_FOR)).unwrap_or(false);
+        if asked {
+            continue;
+        }
+        let told = match ask(net, &Via::Host, &offer.world, me, Ask::Worlds).await {
+            Ok(Reply::Worlds { worlds, .. }) => worlds.into_iter().find(|w| w.world == offer.world),
+            _ => None,
+        };
+        if let Ok(mut n) = named().lock() {
+            n.insert(offer.world, (std::time::Instant::now(), told));
+        }
+    }
 }
 
 /// Whom a world is swapped with: the device found for it, or a server.
@@ -1800,6 +1836,7 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
         out.updated.extend(crate::online::poll(&app, &store, &net, &me).await?);
         let _ = meet_through_folder(&store, &net, &me);
         let waiting = asked().lock().map_err(AppError::from)?.clone();
+        name_the_unnamed(&store, &net, &me).await;
         for offer in net.found() {
             let world = offer.world;
             if crate::online::requires_online(&store, &world) { continue }
@@ -2322,12 +2359,30 @@ pub(crate) fn invite(store: &Store, world: &str, id: &str) -> Answer<WorldMeta> 
 mod tests {
     use super::*;
 
-    /// The GM offers a world on the network: anyone may learn of it and ask.
+    /// What the GM's device answers — for a world it offers on the network,
+    /// as every GM's world here is (not on the list, unless `offer` put it there).
+    fn answer(store: &Store, world: &str, who: &IdentityPublic, ask: Ask) -> Answer<Reply> {
+        if store.is_gm(world) {
+            let mut settings = store.load_network().unwrap();
+            if !settings.shared.iter().any(|w| w == world) {
+                settings.enabled = true;
+                settings.shared.push(world.to_string());
+                store.save_network(&settings).unwrap();
+            }
+        }
+        super::answer(store, world, who, ask)
+    }
+
+    /// The GM offers a world on the network, seen by everyone there: anyone
+    /// may learn of it and ask.
     fn offer(store: &Store, world: &str) {
         let mut settings = store.load_network().unwrap();
         settings.enabled = true;
-        settings.shared.push(world.to_string());
+        if !settings.shared.iter().any(|w| w == world) {
+            settings.shared.push(world.to_string());
+        }
         store.save_network(&settings).unwrap();
+        store.set_listed(world, true).unwrap();
     }
 
     fn stores() -> (tempfile::TempDir, Store, Identity, Store, Identity) {

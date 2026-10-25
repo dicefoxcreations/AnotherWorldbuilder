@@ -181,7 +181,9 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
       )}
       {/* A world on a server is there and nowhere else: no copies of it, the GM's neither. */}
       {world.isGm && place.kind !== "server" && <Copies world={world} onChanged={onChanged} onError={onError} />}
-      {world.isGm && place.kind === "server" && <Listed world={world} onChanged={onChanged} onError={onError} />}
+      {world.isGm && (place.kind === "server" || world.offered) && (
+        <Listed world={world} where={place.kind === "server" ? "on the server" : "on the network"} onChanged={onChanged} onError={onError} />
+      )}
       {moving && storage && (
         <MoveDialog world={world} place={place} storage={storage} servers={servers} onStorage={setStorage} onDone={onChanged} onClose={() => setMoving(false)} onError={onError} />
       )}
@@ -190,10 +192,11 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
 }
 
 /**
- * Whether the server names the world to everyone who asks. Off, only its GM,
- * its members and the ids let in ahead of time (Players → by id) see it.
+ * Whether the server — or the GM's device, for a world offered on the
+ * network — names the world to everyone who asks. Off, only its GM, its
+ * members and the ids let in ahead of time (Players → by id) see it.
  */
-function Listed({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
+function Listed({ world, where, onChanged, onError }: { world: WorldInfo; where: string; onChanged: () => void; onError: (e: unknown) => void }) {
   const [busy, setBusy] = useState(false);
   const turn = async (listed: boolean) => {
     setBusy(true);
@@ -210,7 +213,7 @@ function Listed({ world, onChanged, onError }: { world: WorldInfo; onChanged: ()
     <label className="switch-row">
       <input type="checkbox" checked={world.listed} disabled={busy} onChange={(e) => void turn(e.target.checked)} />
       <span>
-        <strong>Seen by everyone on the server</strong>
+        <strong>Seen by everyone {where}</strong>
         <small className="small">{world.listed ? "on · anyone there may ask to join" : "off · only members and players added by id"}</small>
       </span>
     </label>

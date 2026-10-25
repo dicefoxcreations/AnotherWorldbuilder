@@ -1117,7 +1117,7 @@ fn app_restart(app: tauri::AppHandle) {
 fn world_listed_set(app: tauri::AppHandle, world: String, listed: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
     if !store.is_gm(&world) {
-        return Err(AppError("Only the GM decides who sees the world on its server.".into()));
+        return Err(AppError("Only the GM decides who sees the world.".into()));
     }
     store.set_listed(&world, listed)?;
     world_info(&store, &store.load_world_meta(&world)?, store.load_identity()?.id().as_str())

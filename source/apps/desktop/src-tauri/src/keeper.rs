@@ -45,10 +45,11 @@ fn default_plan() -> BackupPlan {
 
 pub(crate) struct Keeper {
     store: Store,
-    /// In the app: the GM's own device, answering for its worlds as a server
-    /// does — under the same rules. It holds their keys: whom the GM let in
-    /// ahead of time it lets in at once. It keeps no one else's world.
-    own: bool,
+    /// In the app, beside what the device holds of others' worlds: it keeps
+    /// the GM's own worlds for others — those offered on the network — and
+    /// may let players keep copies, where a server is the one place a world
+    /// lies.
+    in_app: bool,
     admin: String,
     /// Where the backups of the worlds lie: `backups/` in the data folder.
     backups: PathBuf,
@@ -112,7 +113,7 @@ impl Keeper {
             Err(_) => Book::default(),
         };
         let me = store.load_identity()?.public();
-        let keeper = Keeper { store, own: false, admin, backups: data.join("backups"), me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default() };
+        let keeper = Keeper { store, in_app: false, admin, backups: data.join("backups"), me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default() };
         keeper.recover_online_commands()?;
         Ok(keeper)
     }
@@ -188,16 +189,19 @@ impl Keeper {
     }
 
     fn may_bring(&self, id: &str) -> Answer<bool> {
-        Ok(!self.own && (id == self.admin || self.book()?.gms.iter().any(|g| g == id)))
+        Ok(id == self.admin || self.book()?.gms.iter().any(|g| g == id))
     }
 
     /// Whether anyone may learn of a world and ask to join it: one its GM put
-    /// on the list — on the GM's own device, one they offer on the network.
+    /// on the list (`Item::Listing`).
     fn listed(&self, world: &str) -> bool {
-        if self.own {
-            return network::offered(&self.store, world);
-        }
         self.store.on_the_list(world).unwrap_or(false)
+    }
+
+    /// Whether a world is kept here for others: on a server every world it
+    /// holds; in the app the GM's own, offered on the network.
+    fn keeps(&self, world: &str) -> bool {
+        !self.in_app || network::answered_here(&self.store, world)
     }
 
     /// The worlds held and open: name, icon, GM.
@@ -208,7 +212,7 @@ impl Keeper {
         let mut out = Vec::new();
         for meta in self.store.list_worlds()? {
             let world = meta.public.world_id.to_string();
-            if closed.contains(&world) || (self.own && !network::answered_here(&self.store, &world)) {
+            if closed.contains(&world) || !self.keeps(&world) {
                 continue;
             }
             let theirs = id.is_some_and(|id| {
@@ -232,21 +236,17 @@ impl Keeper {
         if self.book()?.blocked.contains(&id) {
             return Ok(Reply::NotOffered);
         }
-        if self.own {
-            // The GM's own worlds alone — none on its way to another folder,
-            // nothing brought, no one managing.
-            match ask {
-                Ask::Worlds => {}
-                Ask::Manage { .. } | Ask::Backups { .. } | Ask::HostWorlds => return Ok(Reply::NotOffered),
-                _ if !self.store.is_gm(world) || crate::online::requires_online(&self.store, world) => return Ok(Reply::NotOffered),
-                _ if store::moving(world) => return Ok(Reply::Busy),
-                _ => {}
+        // In the app, what is not kept for others is not here for them; one
+        // on its way to another folder is asked for again shortly.
+        if self.in_app && !world.is_empty() {
+            if !self.keeps(world) {
+                return Ok(Reply::NotOffered);
+            }
+            if store::moving(world) {
+                return Ok(Reply::Busy);
             }
         }
         match ask {
-            Ask::Worlds if self.own => {
-                return Ok(Reply::Worlds { worlds: self.offers(Some(&id))?, host: None, admin: false, may_bring: false, asked: false });
-            }
             Ask::Worlds => {
                 let asked = self.book()?.asking.contains(&id);
                 return Ok(Reply::Worlds {
@@ -337,36 +337,38 @@ impl Keeper {
         // A member by the grant the GM wrote. Anyone else may ask to join a
         // world on the list; one that is not is as if it were not here — its
         // GM adds a new player by their id.
-        // Let in ahead of time, on the GM's own device: in at once — the keys
-        // for the id are here now.
-        if self.own && !store.has_grant(world, &id)? && who.is_genuine() {
-            let meta = store.load_world_meta(world)?;
-            if meta.member(&id).is_none() && meta.invited.contains(&id) {
-                crate::admit(store, world, who.clone(), Vec::new())?;
-            }
-        }
         if !store.has_grant(world, &id)? {
             let expected = store.expects(world, &id)?;
             let may_ask = expected || self.listed(world);
             // Let in ahead of time by their id: whatever they ask, they ask
             // to join — a device that still takes them for a member, too.
-            return Ok(if may_ask && (expected || matches!(ask, Ask::Join)) {
+            if may_ask && (expected || matches!(ask, Ask::Join)) {
                 let mut requests = store.load_requests(world)?;
                 if who.is_genuine() && !requests.iter().any(|r| r.identity.id == who.id) && requests.len() < MAX_REQUESTS {
                     requests.push(JoinRequest { identity: who.clone(), at: network::now() });
                     store.save_requests(world, &requests)?;
                 }
-                Reply::Requested
-            } else if may_ask || store.load_requests(world)?.iter().any(|r| r.identity.id == who.id) {
-                // Whoever asked already knows of it, and waits for the GM.
-                Reply::NotMember
+                // Whoever holds the world's keys takes the requests in: those
+                // let in ahead of time are in. A server holds none — the GM's
+                // device does it when it next reads the world; here, at once.
+                if store.holds_token(world) {
+                    network::take_requests(store, world, vec![who.clone()])?;
+                }
+                if !store.has_grant(world, &id)? {
+                    return Ok(Reply::Requested);
+                }
             } else {
-                Reply::NotOffered
-            });
+                return Ok(if may_ask || store.load_requests(world)?.iter().any(|r| r.identity.id == who.id) {
+                    // Whoever asked already knows of it, and waits for the GM.
+                    Reply::NotMember
+                } else {
+                    Reply::NotOffered
+                });
+            }
         }
-        // On the GM's own device: online where the world stays here, else
-        // their copy.
-        if self.own {
+        // Where players may keep copies — in the app, as the GM says — or
+        // work online.
+        if self.in_app {
             if crate::host::online_only(store, world) {
                 return Ok(network::online(store, world, who, ask));
             }
@@ -580,7 +582,7 @@ pub(crate) fn here(store: &Store) -> Answer<Arc<Keeper>> {
     }
     let admin = store.load_identity()?.id().to_string();
     let mut keeper = Keeper::open(store.clone(), &store.profile_dir().join("host"), admin)?;
-    keeper.own = true;
+    keeper.in_app = true;
     let keeper = Arc::new(keeper);
     all.insert(store.profile_dir().to_path_buf(), keeper.clone());
     Ok(keeper)
