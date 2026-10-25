@@ -1378,6 +1378,12 @@ fn attribute_create(app: tauri::AppHandle, world: String, attribute: String) -> 
 fn member_attributes_set(app: tauri::AppHandle, world: String, member: String, attributes: Vec<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
+    member_attributes_set_in(&store, world, member, attributes, me.id().as_str())
+}
+
+/// `member_attributes_set` for whom the store is given — the host, acting
+/// for a supporter: `me`.
+pub(crate) fn member_attributes_set_in(store: &Store, world: String, member: String, attributes: Vec<String>, me: &str) -> Answer<WorldInfo> {
     let gm = store.is_gm(&world);
     if !gm && !store.supports(&world)? {
         return Err(AppError("Only the GM or a supporter assigns players.".into()));
@@ -1391,7 +1397,7 @@ fn member_attributes_set(app: tauri::AppHandle, world: String, member: String, a
     let mut after = before.clone();
     after.assign(&member, &attributes)?;
     store.keep_roster(&world, &before, &after)?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
+    world_info(store, &store.load_world_meta(&world)?, me)
 }
 
 #[cfg(feature = "gui")]

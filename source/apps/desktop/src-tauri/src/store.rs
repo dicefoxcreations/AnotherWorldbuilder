@@ -1661,8 +1661,12 @@ impl Store {
     /// Whether this device's member supports the world — lets players in,
     /// and may take the game master's place.
     pub fn supports(&self, world_id: &str) -> Result<bool> {
-        let me = self.load_identity()?;
-        self.with_journal(world_id, |j| Ok(j.supporters().iter().any(|s| s == me.id().as_str())))
+        // A host: the member it acts for.
+        let me = match crate::host::acting() {
+            Some(a) => a.member.id.to_string(),
+            None => self.load_identity()?.id().to_string(),
+        };
+        self.with_journal(world_id, |j| Ok(j.supporters().iter().any(|s| *s == me)))
     }
 
     /// To whom the game master hands the world, if anyone.

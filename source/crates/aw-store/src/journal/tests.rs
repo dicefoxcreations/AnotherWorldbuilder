@@ -923,11 +923,11 @@ fn a_supporter_lets_a_player_in_with_the_keys_for_everyone_and_a_removal_after_i
     t.to_bob();
 
     // Not a supporter yet: his act waits, and lets nobody in.
-    let id = t.bob_journal.support_grant(&t.bob, &carla.public(), &content(&carla), &[], 5);
+    let id = t.bob_journal.support_grant(&t.bob, &t.bob.public(), &carla.public(), &content(&carla), &[], 5);
     assert!(id.is_err(), "his own device does not take it either");
     t.gm_says(Item::Supporters { ids: vec![t.bob.id().to_string()] });
     t.to_bob();
-    t.bob_journal.support_grant(&t.bob, &carla.public(), &content(&carla), &[], 5).unwrap();
+    t.bob_journal.support_grant(&t.bob, &t.bob.public(), &carla.public(), &content(&carla), &[], 5).unwrap();
     t.to_gm();
     assert!(t.gm_journal.grant(carla.id().as_str()).is_some(), "in, on every device");
     assert_eq!(t.gm_journal.acted_by(carla.id().as_str()).map(|b| b.id.clone()), Some(t.bob.public().id));
@@ -948,7 +948,7 @@ fn a_supporter_lets_a_player_in_with_the_keys_for_everyone_and_a_removal_after_i
     assert!(!t.gm_journal.superseded().is_empty(), "the act the GM's word took over goes");
     // Let in again by the supporter, after the removal: in again.
     t.to_bob();
-    t.bob_journal.support_grant(&t.bob, &carla.public(), &content(&carla), &[], 9).unwrap();
+    t.bob_journal.support_grant(&t.bob, &t.bob.public(), &carla.public(), &content(&carla), &[], 9).unwrap();
     t.to_gm();
     assert!(t.gm_journal.grant(carla.id().as_str()).is_some());
     // No supporter any more: what he alone let in is out.
@@ -969,7 +969,7 @@ fn a_supporter_takes_a_player_out_and_hands_on_the_new_keys_but_never_touches_th
     let mut turned = Keyring::from_json(&t.ring.to_json().unwrap()).unwrap();
     turned.rotate(&attr("players")).unwrap();
     let new = turned.new_since(&t.ring);
-    t.bob_journal.support_revoke(&t.bob, dana.id().as_str(), 7).unwrap();
+    t.bob_journal.support_revoke(&t.bob, &t.bob.public(), dana.id().as_str(), 7).unwrap();
     t.bob_journal.support_keys(&t.bob, &new, &[], 7).unwrap();
     t.to_gm();
     assert!(t.gm_journal.grant(dana.id().as_str()).is_none(), "out, on every device");
@@ -987,8 +987,8 @@ fn a_supporter_takes_a_player_out_and_hands_on_the_new_keys_but_never_touches_th
 
     // Neither the game master nor a supporter is his to take out.
     t.to_bob();
-    t.bob_journal.support_revoke(&t.bob, t.gm.id().as_str(), 8).unwrap();
-    t.bob_journal.support_revoke(&t.bob, t.bob.id().as_str(), 9).unwrap();
+    t.bob_journal.support_revoke(&t.bob, &t.bob.public(), t.gm.id().as_str(), 8).unwrap();
+    t.bob_journal.support_revoke(&t.bob, &t.bob.public(), t.bob.id().as_str(), 9).unwrap();
     t.to_gm();
     assert!(t.gm_journal.grant(t.bob.id().as_str()).is_some(), "a supporter stays in");
     assert!(t.gm_journal.acted_on().is_empty());

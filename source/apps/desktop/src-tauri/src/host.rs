@@ -49,6 +49,15 @@ pub(crate) fn as_member<T>(acting: Acting, f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// Runs `f` in no one's name: the host as itself — the game master's device
+/// writing its own word for a supporter it acts for.
+pub(crate) fn as_nobody<T>(f: impl FnOnce() -> T) -> T {
+    let before = ACTING.with(|a| a.take());
+    let out = f();
+    ACTING.with(|a| *a.borrow_mut() = before);
+    out
+}
+
 /// What a member may see and change here — by the member list and, in an
 /// encrypted world, the keys their grant names.
 pub(crate) fn acting_for(store: &Store, world: &str, member: &IdentityPublic) -> Answer<Acting> {
@@ -123,7 +132,8 @@ fn out<T: Serialize>(answer: Answer<T>) -> Answer<serde_json::Value> {
 
 /// Does what a player's app asks, in their name — what a player does with a
 /// world: read, write into what they may, look at versions and images, be
-/// seen, roll. Nothing of the GM's.
+/// seen, roll; and, for a supporter, let players in, give them roles, take
+/// them out. Nothing of the GM's.
 pub(crate) fn call(store: &Store, world: &str, member: &IdentityPublic, command: &str, args: &serde_json::Value) -> Answer<serde_json::Value> {
     let acting = acting_for(store, world, member)?;
     let w = || world.to_string();
@@ -138,14 +148,17 @@ pub(crate) fn call(store: &Store, world: &str, member: &IdentityPublic, command:
             let listed: Vec<String> =
                 self::acting().map(|a| a.attributes.iter().filter(|x| !matches!(x, Attribute::All | Attribute::Players)).map(|x| x.to_string()).collect()).unwrap_or_default();
             info["attributes"] = serde_json::to_value(&listed)?;
-            info["members"] = serde_json::json!([{
-                "id": member.id.to_string(),
-                "name": member.name,
-                "fingerprint": member.fingerprint(),
-                "role": "player",
-                "attributes": listed,
-                "trusted": store.trusted(world, member.id.as_str())?,
-            }]);
+            // A supporter sees the members as the GM does; a player, themselves.
+            if !store.supports(world)? {
+                info["members"] = serde_json::json!([{
+                    "id": member.id.to_string(),
+                    "name": member.name,
+                    "fingerprint": member.fingerprint(),
+                    "role": "player",
+                    "attributes": listed,
+                    "trusted": store.trusted(world, member.id.as_str())?,
+                }]);
+            }
             Ok(info)
         }
         // How far the world is — the player's app loads again when it moved on.
@@ -171,6 +184,13 @@ pub(crate) fn call(store: &Store, world: &str, member: &IdentityPublic, command:
         "world_presence" => out(network::world_presence_in(store, w(), arg(args, "article")?)),
         "dice_roll" => out(network::dice_roll_in(store, w(), arg(args, "roll")?)),
         "dice_rolls" => out(network::dice_rolls(w())),
+        "join_requests" => out(network::join_requests_in(store, w())),
+        "join_answer" => out(network::join_answer_in(store, w(), arg(args, "id")?, arg(args, "accept")?, member.id.as_str())),
+        "member_attributes_set" => out(crate::member_attributes_set_in(store, w(), arg(args, "member")?, arg(args, "attributes")?, member.id.as_str())),
+        "member_remove" => {
+            store.remove_member(world, &arg::<String>(args, "id")?)?;
+            out(crate::world_info(store, &store.load_world_meta(world)?, member.id.as_str()))
+        }
         _ => Err(AppError("Not available online.".into())),
     })
 }

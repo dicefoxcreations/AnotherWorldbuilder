@@ -1772,4 +1772,48 @@ mod tests {
         let versions = document::article_versions_in(&marla.store, world.clone(), article.clone()).unwrap();
         assert!(versions.iter().any(|v| v.author == "Bob"), "{:?}", versions.iter().map(|v| &v.author).collect::<Vec<_>>());
     }
+
+    #[test]
+    fn in_an_unencrypted_world_the_server_acts_for_a_supporter_in_their_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let (marla, bob, carla, dan) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"), someone(dir.path(), "Carla"), someone(dir.path(), "Dan"));
+        let keeper = keeper(dir.path(), &marla);
+        let (world, _) = world(&marla, "Eldermere");
+        marla.store.set_encrypted(&world, false).unwrap();
+        for who in [&bob, &carla, &dan] {
+            admit(&marla.store, &world, who.me.public(), Vec::new()).unwrap();
+        }
+        marla.store.set_supporters(&world, vec![bob.me.id().to_string()]).unwrap();
+        marla.store.add_host(&world, keeper.me.id.as_str()).unwrap();
+        swap(&keeper, &marla, &world);
+        let call = |who: &Someone, command: &str, args: serde_json::Value| -> Result<serde_json::Value, String> {
+            match keeper.answer(&world, &who.me.public(), Ask::Call { command: command.into(), args: args.to_string() }) {
+                Reply::Called { value: Some(v), .. } => Ok(serde_json::from_str(&v).unwrap()),
+                Reply::Called { error: Some(e), .. } => Err(e),
+                other => panic!("{other:?}"),
+            }
+        };
+
+        // Bob sees the members as the GM does; Carla only herself.
+        let info = call(&bob, "world_info", serde_json::json!({})).unwrap();
+        assert_eq!(info["members"].as_array().unwrap().len(), 4, "{}", info["members"]);
+        assert_eq!(call(&carla, "world_info", serde_json::json!({})).unwrap()["members"].as_array().unwrap().len(), 1);
+
+        // He makes Carla a rogue and takes Dan out — the server writes it in his name.
+        call(&bob, "member_attributes_set", serde_json::json!({ "member": carla.me.id().to_string(), "attributes": ["class:rogue"] })).unwrap();
+        call(&bob, "member_remove", serde_json::json!({ "id": dan.me.id().to_string() })).unwrap();
+        assert!(matches!(swap(&keeper, &dan, &world), Reply::NotMember | Reply::NotOffered), "out at once");
+        // Not the GM, nor the role gm; and Carla is no supporter.
+        assert!(call(&bob, "member_remove", serde_json::json!({ "id": marla.me.id().to_string() })).is_err());
+        assert!(call(&bob, "member_attributes_set", serde_json::json!({ "member": carla.me.id().to_string(), "attributes": ["gm"] })).is_err());
+        assert!(call(&carla, "member_remove", serde_json::json!({ "id": bob.me.id().to_string() })).is_err());
+
+        // Marla's device takes it in as her own word.
+        swap(&keeper, &marla, &world);
+        crate::answer_proposals(&marla.store, &world).unwrap();
+        let meta = marla.store.load_world_meta(&world).unwrap();
+        assert!(meta.member(dan.me.id().as_str()).is_none());
+        assert!(meta.member(carla.me.id().as_str()).unwrap().attributes.contains(&"class:rogue".to_string()));
+        assert!(marla.store.with_journal(&world, |j| Ok(j.acted_on().is_empty())).unwrap());
+    }
 }

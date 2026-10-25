@@ -574,6 +574,11 @@ pub struct Support {
     /// Milliseconds since 1970, by the supporter's clock.
     pub at: u64,
     pub act: Act,
+    /// A server writing in the supporter's name — one the game master named
+    /// (`Item::Hosts`), for a world it shows its members itself. It signs,
+    /// not they.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<IdentityPublic>,
     pub signature: String,
 }
 
@@ -604,14 +609,16 @@ impl Act {
 }
 
 impl Support {
-    pub fn new(world: &str, by: &Identity, act: Act, after: u64, at: u64) -> Result<Self> {
-        let mut s = Support { world: world.to_string(), by: by.public(), after, at, act, signature: String::new() };
-        s.signature = hex::encode(by.sign(&s.signed_bytes()?));
+    /// Signed by `signer`: the supporter `by` — or a server in their name.
+    pub fn new(world: &str, signer: &Identity, by: &IdentityPublic, act: Act, after: u64, at: u64) -> Result<Self> {
+        let host = (signer.id() != &by.id).then(|| signer.public());
+        let mut s = Support { world: world.to_string(), by: by.clone(), after, at, act, host, signature: String::new() };
+        s.signature = hex::encode(signer.sign(&s.signed_bytes()?));
         Ok(s)
     }
 
     fn signed_bytes(&self) -> Result<Vec<u8>> {
-        Ok(serde_json::to_vec(&(SUPPORT, &self.world, &self.by, self.after, self.at, &self.act))?)
+        Ok(serde_json::to_vec(&(SUPPORT, &self.world, &self.by, self.after, self.at, &self.act, &self.host))?)
     }
 
     fn verify(&self, world: &str) -> Result<()> {
@@ -622,10 +629,11 @@ impl Support {
             Act::Grant { member, .. } => member.is_genuine(),
             _ => true,
         };
-        if !self.by.is_genuine() || !genuine {
+        let signer = self.host.as_ref().unwrap_or(&self.by);
+        if !self.by.is_genuine() || !signer.is_genuine() || !genuine {
             return Err("an id that does not match its keys".into());
         }
-        self.by.verify(&self.signed_bytes()?, &signature(&self.signature)?)?;
+        signer.verify(&self.signed_bytes()?, &signature(&self.signature)?)?;
         Ok(())
     }
 }
@@ -1591,7 +1599,7 @@ impl Journal {
             Record::Support(support) => {
                 support.verify(self.world.world_id.as_str())?;
                 // Only a supporter's — whom the game master's word may still be on its way.
-                if !self.supports(&support.by) {
+                if !self.ready(&Record::Support(support.clone())) {
                     self.waiting.insert(id, Pending::Record(raw, Box::new(Record::Support(support)), write));
                     return Ok(Added::Waiting);
                 }
@@ -1837,7 +1845,8 @@ impl Journal {
             Record::Version(v) => self.builds_on_what_is_here(v) && matches!(self.check_version(v), Ok(Some(_))),
             Record::Proposal(p) => self.is_member(&p.author),
             Record::Badge(b) => self.is_member(&b.author),
-            Record::Support(a) => self.supports(&a.by),
+            // Signed by a server: one the game master named.
+            Record::Support(a) => self.supports(&a.by) && a.host.as_ref().is_none_or(|h| self.hosts().iter().any(|x| x == h.id.as_str())),
         }
     }
 

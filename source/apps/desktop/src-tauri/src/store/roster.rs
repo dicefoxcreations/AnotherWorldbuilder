@@ -6,6 +6,11 @@
 //! or take their roles, take them out; what is taken turns over — and write
 //! it down differently: the game master as their word, a supporter as acts
 //! the game master's device takes in as its own.
+//!
+//! A host showing a world to its members itself acts for a supporter too:
+//! the game master's device as the game master, whose list it holds; a
+//! server — in an unencrypted world, whose grants name everyone openly — with
+//! acts it signs in the supporter's name.
 
 use super::*;
 use aw_model::Attribute;
@@ -118,13 +123,28 @@ impl Store {
     /// supporter's.
     pub fn roster(&self, world_id: &str) -> Result<Roster> {
         let me = self.load_identity()?;
-        if self.is_gm(world_id) {
+        if self.holds_token(world_id) {
             let mut roster = Roster { members: self.load_local(world_id)?.members, ring: self.load_keyring(world_id)? };
             self.with_journal(world_id, |j| {
                 roster.take_in(j, &me);
                 Ok(())
             })?;
             return Ok(roster);
+        }
+        if crate::host::acting().is_some() {
+            return self.with_journal(world_id, |j| {
+                if j.encrypted() {
+                    return Err(StoreError::Journal("A server holds no keys of this world.".into()));
+                }
+                let gm = j.world_item().map(|(.., gm)| gm.clone());
+                let mut members: Vec<Member> = gm.into_iter().map(|identity| Member { identity, role: Role::Gm, attributes: vec!["gm".into(), "players".into(), "all".into()] }).collect();
+                for identity in j.granted_members() {
+                    if let Some(grant) = j.grant_content(identity.id.as_str(), me.seal_secret()) {
+                        members.push(Member { identity, role: Role::Player, attributes: grant.attributes });
+                    }
+                }
+                Ok(Roster { members, ring: Keyring::new() })
+            });
         }
         self.with_journal(world_id, |j| {
             let keys = sealed_keys(j, &me)?;
@@ -144,23 +164,13 @@ impl Store {
         if requests.len() != asked {
             self.save_requests(world_id, &requests)?;
         }
-        if self.is_gm(world_id) {
-            let mut meta = self.load_world_meta(world_id)?;
-            meta.members = after.members.clone();
-            meta.invited.retain(|i| after.member(i).is_none());
-            meta.supporters.retain(|s| after.member(s).is_some());
-            self.write_keyring(world_id, &after.ring)?;
-            // Saving the members hands out the keys anew.
-            self.save_world_meta(&meta)?;
-            for id in &gone {
-                self.gone(world_id, id)?;
-            }
-            if after.turned_since(before) {
-                self.reseal(world_id)?;
-            }
-            return Ok(());
+        // The game master's device writes its own word — for whomever it acts.
+        if self.holds_token(world_id) {
+            return crate::host::as_nobody(|| self.keep_as_gm(world_id, before, after, &gone));
         }
         let me = self.load_identity()?;
+        // A server signs in the name of the supporter it acts for.
+        let by = crate::host::acting().map(|a| a.member).unwrap_or_else(|| me.public());
         let admins = self.load_local(world_id)?.admins;
         let encrypted = self.is_encrypted(world_id)?;
         let new = after.ring.new_since(&before.ring);
@@ -174,7 +184,7 @@ impl Store {
             .supporters()
             .into_iter()
             .chain(journal.handing_to())
-            .filter(|id| id != me.id().as_str())
+            .filter(|id| id != by.id.as_str())
             .filter_map(|id| after.member(&id).map(|m| m.identity.clone()).or_else(|| admins.iter().find(|a| a.id.as_str() == id).cloned()))
             .collect();
         let at = now();
@@ -182,7 +192,7 @@ impl Store {
             journal.support_keys(&me, &new, &others, at)?;
         }
         for id in &gone {
-            journal.support_revoke(&me, id, at)?;
+            journal.support_revoke(&me, &by, id, at)?;
         }
         for m in after.members.iter().filter(|m| m.role == Role::Player) {
             let attributes: Vec<Attribute> = m.attributes.iter().filter_map(|a| a.parse().ok()).collect();
@@ -191,7 +201,27 @@ impl Store {
                 continue;
             }
             let keys = if encrypted { after.ring.grant(&m.identity, &attributes)? } else { Vec::new() };
-            journal.support_grant(&me, &m.identity, &GrantContent { attributes: m.attributes.clone(), keys }, &others, at)?;
+            journal.support_grant(&me, &by, &m.identity, &GrantContent { attributes: m.attributes.clone(), keys }, &others, at)?;
+        }
+        Ok(())
+    }
+
+    /// The game master's word on what changed.
+    fn keep_as_gm(&self, world_id: &str, before: &Roster, after: &Roster, gone: &[String]) -> Result<()> {
+        {
+            let mut meta = self.load_world_meta(world_id)?;
+            meta.members = after.members.clone();
+            meta.invited.retain(|i| after.member(i).is_none());
+            meta.supporters.retain(|s| after.member(s).is_some());
+            self.write_keyring(world_id, &after.ring)?;
+            // Saving the members hands out the keys anew.
+            self.save_world_meta(&meta)?;
+            for id in gone {
+                self.gone(world_id, id)?;
+            }
+            if after.turned_since(before) {
+                self.reseal(world_id)?;
+            }
         }
         Ok(())
     }

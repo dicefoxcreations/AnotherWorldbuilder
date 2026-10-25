@@ -2351,7 +2351,11 @@ pub struct RequestInfo {
 #[cfg(feature = "gui")]
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn join_requests(app: tauri::AppHandle, world: String) -> Answer<Vec<RequestInfo>> {
-    let store = store(&app)?;
+    join_requests_in(&store(&app)?, world)
+}
+
+/// `join_requests` for whom the store is given — the host, acting for a supporter.
+pub(crate) fn join_requests_in(store: &Store, world: String) -> Answer<Vec<RequestInfo>> {
     if !store.is_gm(&world) && !store.supports(&world)? {
         return Ok(Vec::new());
     }
@@ -2373,6 +2377,13 @@ pub fn join_requests(app: tauri::AppHandle, world: String) -> Answer<Vec<Request
 pub fn join_answer(app: tauri::AppHandle, world: String, id: String, accept: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let me = store.load_identity()?;
+    join_answer_in(&store, world, id, accept, me.id().as_str())
+}
+
+/// `join_answer` for whom the store is given — the host, acting for a
+/// supporter: `me`.
+pub(crate) fn join_answer_in(store: &Store, world: String, id: String, accept: bool, me: &str) -> Answer<WorldInfo> {
+    let store = store.clone();
     let gm = store.is_gm(&world);
     if !gm && !store.supports(&world)? {
         return Err(AppError("Only the GM or a supporter can let someone in.".into()));
@@ -2386,7 +2397,7 @@ pub fn join_answer(app: tauri::AppHandle, world: String, id: String, accept: boo
     requests.retain(|r| r.identity.id.as_str() != id);
     store.save_requests(&world, &requests)?;
     let meta = if accept { admit(&store, &world, request.identity, Vec::new())? } else { store.load_world_meta(&world)? };
-    world_info(&store, &meta, me.id().as_str())
+    world_info(&store, &meta, me)
 }
 
 #[cfg(feature = "gui")]

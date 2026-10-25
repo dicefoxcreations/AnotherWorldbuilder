@@ -30,35 +30,35 @@ impl Journal {
 
     /// A supporter lets a player in or changes their roles: their grant,
     /// sealed for them, the supporter, the game master and `others` — the
-    /// other supporters.
-    pub fn support_grant(&mut self, by: &Identity, member: &IdentityPublic, content: &GrantContent, others: &[IdentityPublic], at: u64) -> Result<String> {
+    /// other supporters. Signed by the supporter, or by a server in their
+    /// name (`by`).
+    pub fn support_grant(&mut self, signer: &Identity, by: &IdentityPublic, member: &IdentityPublic, content: &GrantContent, others: &[IdentityPublic], at: u64) -> Result<String> {
         let bytes = serde_json::to_vec(content)?;
         let sealed = if self.encrypted() { self.seal_for_supporters(by, Some(member), others, &bytes)? } else { Sealed::plain(&bytes) };
-        self.support(by, Act::Grant { member: member.clone(), sealed }, at)
+        self.support(signer, by, Act::Grant { member: member.clone(), sealed }, at)
     }
 
     /// A supporter takes a player out.
-    pub fn support_revoke(&mut self, by: &Identity, member: &str, at: u64) -> Result<String> {
-        self.support(by, Act::Revoked { member: member.to_string() }, at)
+    pub fn support_revoke(&mut self, signer: &Identity, by: &IdentityPublic, member: &str, at: u64) -> Result<String> {
+        self.support(signer, by, Act::Revoked { member: member.to_string() }, at)
     }
 
     /// A supporter hands on the keys they turned over: for the game master
     /// and `others`.
     pub fn support_keys(&mut self, by: &Identity, keys: &Keyring, others: &[IdentityPublic], at: u64) -> Result<String> {
-        let sealed = self.seal_for_supporters(by, None, others, keys.to_json()?.as_bytes())?;
-        self.support(by, Act::Keys { sealed }, at)
+        let sealed = self.seal_for_supporters(&by.public(), None, others, keys.to_json()?.as_bytes())?;
+        self.support(by, &by.public(), Act::Keys { sealed }, at)
     }
 
-    fn support(&mut self, by: &Identity, act: Act, at: u64) -> Result<String> {
-        let support = Support::new(self.world.world_id.as_str(), by, act, self.max_seq, at)?;
+    fn support(&mut self, signer: &Identity, by: &IdentityPublic, act: Act, at: u64) -> Result<String> {
+        let support = Support::new(self.world.world_id.as_str(), signer, by, act, self.control_count(), at)?;
         self.append(Record::Support(support))
     }
 
-    fn seal_for_supporters(&self, by: &Identity, member: Option<&IdentityPublic>, others: &[IdentityPublic], bytes: &[u8]) -> Result<Sealed> {
+    fn seal_for_supporters(&self, by: &IdentityPublic, member: Option<&IdentityPublic>, others: &[IdentityPublic], bytes: &[u8]) -> Result<Sealed> {
         let gm = self.gm().cloned().ok_or("a world without its game master")?;
-        let me = by.public();
         let mut all: Vec<&IdentityPublic> = Vec::new();
-        for who in member.into_iter().chain([&me, &gm]).chain(others) {
+        for who in member.into_iter().chain([by, &gm]).chain(others) {
             if !all.iter().any(|a| a.id == who.id) {
                 all.push(who);
             }
