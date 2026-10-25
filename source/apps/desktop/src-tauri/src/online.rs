@@ -859,7 +859,14 @@ pub(crate) async fn world_call(app: tauri::AppHandle, world: String, command: St
     let needs = Needs::of(&command, &args);
     let label = command.clone();
     let result = execute(&base, &world, &server, &connection, needs, |cache| async move {
-        if command == "world_connect" { return Ok(serde_json::Value::Null) }
+        if command == "world_connect" {
+            // The game master's: each player's grant as it should be — a
+            // grant written by an older version is brought up to date.
+            if cache.is_gm(&name) {
+                cache.refresh_grants(&name)?;
+            }
+            return Ok(serde_json::Value::Null);
+        }
         dispatch::run(app.clone(), cache, &name, &command, &args).await
     }).await;
     if let Err(e) = &result {

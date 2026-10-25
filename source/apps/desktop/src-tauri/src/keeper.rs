@@ -1047,6 +1047,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_gm_connecting_brings_an_old_grant_up_to_date() {
+        use aw_store::journal::{GrantContent, Item, Sealed};
+        let dir = tempfile::tempdir().unwrap();
+        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
+        let keeper = keeper(dir.path(), &gm);
+        let (world, _) = world(&gm, "Eldermere");
+        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
+        // As an older version wrote it: the roles alone, not his name.
+        let listed = gm.store.load_world_meta(&world).unwrap().member(bob.me.id().as_str()).unwrap().attributes.clone();
+        let parsed: Vec<aw_model::Attribute> = listed.iter().filter_map(|a| a.parse().ok()).collect();
+        let keys = gm.store.load_keyring(&world).unwrap().grant(&bob.me.public(), &parsed).unwrap();
+        let content = serde_json::to_vec(&GrantContent { attributes: listed, keys }).unwrap();
+        let sealed = Sealed::new(&[&bob.me.public(), &gm.me.public()], &content).unwrap();
+        gm.store.control(&world, Item::Grant { member: bob.me.public(), sealed }, "").unwrap();
+        swap(&keeper, &gm, &world);
+        let named = |store: &Store| store.view_keys(&world, &bob.me).map(|h| h.attributes().contains(&"player:bob".parse().unwrap()));
+
+        let server = on_server(&gm, &world);
+        let wire = online_wire(&keeper, &gm.me);
+        run_online(&gm.store, &world, &server, &wire, |cache| Ok(cache.refresh_grants(&world)?)).await.unwrap();
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+
+        let server = on_server(&bob, &world);
+        let wire = online_wire(&keeper, &bob.me);
+        assert!(run_online(&bob.store, &world, &server, &wire, |cache| Ok(named(&cache)?)).await.unwrap(), "his name is his now");
+        crate::online::close_session(&bob.store, &world).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn a_player_downloads_every_piece_before_opening_and_copies_off_is_respected() {
         let dir = tempfile::tempdir().unwrap();
         let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));

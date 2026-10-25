@@ -1506,6 +1506,11 @@ impl Store {
         Ok(())
     }
 
+    /// Each member's grant as it should be — written where it is not.
+    pub fn refresh_grants(&self, world_id: &str) -> Result<()> {
+        self.regrant(world_id)
+    }
+
     /// Writes each member's keys anew where they changed: new attributes,
     /// rotated ones.
     fn regrant(&self, world_id: &str) -> Result<()> {
