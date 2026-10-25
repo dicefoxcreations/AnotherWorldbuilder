@@ -51,6 +51,8 @@ use std::path::{Path, PathBuf};
 
 pub use history::Session;
 pub use layer::{LayerDoc, Plain};
+pub use crate::shelf::Mode;
+use crate::shelf::{Shelf, Stored};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -731,31 +733,33 @@ pub fn dir_name(id: &str) -> String {
 /// folder and in a shared one: `control/<hash>.json` (the world's own record
 /// `control/world-<hash>.json`) and `articles/<article>/<hash>.json`. Drafts
 /// are not shared through folders: `None`.
-fn place(id: &str, record: &Record) -> Option<(Vec<String>, String)> {
-    match record {
-        Record::Control(c) if matches!(c.item, Item::World { .. }) => Some((vec!["control".into()], format!("world-{id}.json"))),
-        Record::Control(_) => Some((vec!["control".into()], format!("{id}.json"))),
-        Record::Version(v) => Some((vec!["articles".into(), dir_name(&v.article.to_string())], format!("{id}.json"))),
-        Record::Image(_) => Some((vec!["media".into()], format!("{id}.json"))),
-        Record::Proposal(_) => Some((vec!["proposals".into()], format!("{id}.json"))),
-        Record::Badge(_) => Some((vec!["members".into()], format!("{id}.json"))),
-        Record::Draft(_) => None,
-    }
+/// How a record is kept: its kind — the order it is taken in, see `order`
+/// — and the article it belongs to, where it belongs to one.
+fn shelved(id: &str, raw: &[u8], record: &Record) -> Stored {
+    let article = match record {
+        Record::Control(c) => match &c.item {
+            Item::Layer(h) => Some(h.article.to_string()),
+            Item::Article { article } | Item::Removed { article, .. } => Some(article.to_string()),
+            _ => None,
+        },
+        Record::Version(v) => Some(v.article.to_string()),
+        Record::Draft(d) => Some(d.article.to_string()),
+        Record::Image(_) | Record::Proposal(_) | Record::Badge(_) => None,
+    };
+    Stored { id: id.to_string(), kind: order(record).0, article, at: now(), raw: Some(raw.to_vec()) }
 }
 
-/// Where a shared record lies below the world's folder: its folders and
-/// its file name.
-pub fn shared_path(raw: &[u8]) -> Option<(Vec<String>, String)> {
-    place(&record_id(raw), &serde_json::from_slice(raw).ok()?)
+/// How a record's bytes are kept — for whoever puts records on a shelf
+/// themselves. `None` where they are no record.
+pub fn stored(raw: &[u8]) -> Option<Stored> {
+    let record: Record = serde_json::from_slice(raw).ok()?;
+    Some(shelved(&record_id(raw), raw, &record))
 }
 
-/// The record id in a file name, if it is one: `<hash>.json` or
-/// `world-<hash>.json`.
-pub fn id_in_name(name: &str) -> Option<&str> {
-    let stem = name.strip_suffix(".json")?;
-    let hash = stem.strip_prefix("world-").unwrap_or(stem);
-    (hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hash)
-}
+/// The kind versions are kept as — read whole only when needed.
+const KIND_VERSION: u8 = 1;
+/// The kind drafts are kept as — on this device's own shelf.
+const KIND_DRAFT: u8 = 2;
 
 /// A new generation of a layer — fresh keys, and `plain` as its start.
 #[allow(clippy::too_many_arguments)]
@@ -902,19 +906,17 @@ pub enum Added {
     Waiting,
 }
 
-/// How often every folder is read again regardless of its time — for what
-/// a folder's time does not show. A large world takes a moment for it.
-const FULL_SCAN: std::time::Duration = std::time::Duration::from_secs(300);
-
 pub struct Journal {
-    /// The world's folder.
+    /// The world's folder: its records on the shelf, its images beside it.
     dir: PathBuf,
-    /// This device's own folder for the world, in the profile: drafts and
-    /// the index.
+    shelf: Shelf,
+    /// This device's own folder for the world, in the profile: the index,
+    /// and the drafts of sessions — on a shelf of their own, they go
+    /// nowhere else.
     private: PathBuf,
-    drafts_dir: PathBuf,
+    drafts_shelf: Shelf,
     world: WorldPublic,
-    /// The bytes of control records and drafts. Versions stay in their files.
+    /// The bytes of control records and drafts. Versions stay on the shelf.
     raw: BTreeMap<String, Vec<u8>>,
     controls: BTreeMap<String, Control>,
     drafts: BTreeMap<String, Draft>,
@@ -937,18 +939,9 @@ pub struct Journal {
     dirty: bool,
     /// Records taken in together, written together: one wait on the disk
     /// for all of them, not two for each.
-    batch: Option<Vec<(PathBuf, Vec<u8>, String)>>,
+    batch: Option<Vec<Stored>>,
     /// Records whose layer head or parents have not come yet.
     waiting: BTreeMap<String, Pending>,
-    /// Files read already, whatever came of them.
-    read: HashSet<PathBuf>,
-    /// What each folder held when last looked through, with its modification
-    /// time: a folder whose time did not change is not read again. A world of
-    /// ten thousand documents has as many folders.
-    listings: HashMap<PathBuf, (std::time::SystemTime, HashSet<String>)>,
-    /// When every folder was last read regardless — now and then, in case a
-    /// file system keeps coarse times.
-    full_scan: Option<std::time::Instant>,
     /// Item key → newest (seq, record id).
     latest: BTreeMap<String, (u64, String)>,
     /// Every generation of every layer → (seq, record id) of its head.
@@ -1005,32 +998,33 @@ pub struct Journal {
     newly_checked: usize,
 }
 
-/// Reads and parses record files on every core — a big world has hundreds
-/// of thousands of them. What does not parse, or is too big, is left out.
-fn read_records(paths: &[PathBuf]) -> Result<Vec<(Vec<u8>, Record, u64)>> {
-    let read = |path: &PathBuf| -> std::io::Result<Option<(Vec<u8>, Record, u64)>> {
-        let meta = std::fs::metadata(path)?;
-        if meta.len() > MAX_RECORD as u64 {
-            return Ok(None);
+/// Parses records on every core — a big world has hundreds of thousands of
+/// them. What does not parse, or is too big, is left out.
+fn parse_records(stored: Vec<Stored>) -> Vec<(Vec<u8>, Record, u64)> {
+    let parse = |s: Stored| -> Option<(Vec<u8>, Record, u64)> {
+        let raw = s.raw?;
+        if raw.len() > MAX_RECORD {
+            return None;
         }
-        let at = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-        let raw = std::fs::read(path)?;
-        Ok(serde_json::from_slice(&raw).ok().map(|record| (raw, record, at)))
+        let record = serde_json::from_slice(&raw).ok()?;
+        Some((raw, record, s.at))
     };
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    if paths.len() < 256 || threads < 2 {
-        return Ok(paths.iter().map(read).collect::<std::io::Result<Vec<_>>>()?.into_iter().flatten().collect());
+    if stored.len() < 256 || threads < 2 {
+        return stored.into_iter().filter_map(parse).collect();
     }
-    let chunk = paths.len().div_ceil(threads);
-    let pieces: Vec<std::io::Result<Vec<_>>> = std::thread::scope(|scope| {
-        let workers: Vec<_> = paths.chunks(chunk).map(|some| scope.spawn(move || some.iter().map(read).collect::<std::io::Result<Vec<_>>>())).collect();
-        workers.into_iter().map(|w| w.join().unwrap_or_else(|_| Err(std::io::Error::other("a reader failed")))).collect()
-    });
-    let mut out = Vec::with_capacity(paths.len());
-    for piece in pieces {
-        out.extend(piece?.into_iter().flatten());
+    let chunk = stored.len().div_ceil(threads);
+    let mut pieces: Vec<Vec<Stored>> = Vec::new();
+    let mut rest = stored;
+    while !rest.is_empty() {
+        let tail = rest.split_off(chunk.min(rest.len()));
+        pieces.push(rest);
+        rest = tail;
     }
-    Ok(out)
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = pieces.into_iter().map(|some| scope.spawn(move || some.into_iter().filter_map(parse).collect::<Vec<_>>())).collect();
+        workers.into_iter().flat_map(|w| w.join().unwrap_or_default()).collect()
+    })
 }
 
 /// The list of checked control records, in the device's folder for the world.
@@ -1070,8 +1064,8 @@ fn order(record: &Record) -> (u8, u64) {
 impl Journal {
     /// Opens the journal of the world in `dir`, with this device's drafts
     /// and index in `private`, checking every record it has not checked
-    /// before.
-    pub fn open(dir: &Path, private: &Path, world: &WorldPublic) -> Result<Self> {
+    /// before. `mode`: whether others may write the folder too.
+    pub fn open(dir: &Path, private: &Path, world: &WorldPublic, mode: Mode) -> Result<Self> {
         if !world.is_genuine() {
             return Err("the world id does not belong to its key".into());
         }
@@ -1082,8 +1076,9 @@ impl Journal {
             .unwrap_or_default();
         let mut journal = Journal {
             dir: dir.to_path_buf(),
+            shelf: Shelf::open(dir, private, mode)?,
             private: private.to_path_buf(),
-            drafts_dir: private.join("drafts"),
+            drafts_shelf: Shelf::open(&private.join("drafts"), &private.join("drafts"), Mode::Alone)?,
             world: world.clone(),
             raw: BTreeMap::new(),
             controls: BTreeMap::new(),
@@ -1099,9 +1094,6 @@ impl Journal {
             dirty: false,
             batch: None,
             waiting: BTreeMap::new(),
-            read: HashSet::new(),
-            listings: HashMap::new(),
-            full_scan: None,
             latest: BTreeMap::new(),
             generations: BTreeMap::new(),
             born: BTreeMap::new(),
@@ -1127,7 +1119,7 @@ impl Journal {
             checked: std::fs::read(private.join(CHECKED)).map(|raw| raw.chunks_exact(32).filter_map(|c| c.try_into().ok()).collect()).unwrap_or_default(),
             newly_checked: 0,
         };
-        journal.refresh()?;
+        journal.load()?;
         // Parts of deleted images leave the disk, too — unless an image here
         // needs them still: a part is named by its bytes, and an image kept as
         // it is gets the same name again each time.
@@ -1150,85 +1142,55 @@ impl Journal {
         self.version
     }
 
-    /// The folders records lie in.
-    fn folders(&self) -> Vec<PathBuf> {
-        let mut out = vec![self.dir.join("control"), self.dir.join("media"), self.dir.join("proposals"), self.dir.join("members")];
-        if let Ok(entries) = std::fs::read_dir(self.dir.join("articles")) {
-            out.extend(entries.filter_map(|e| e.ok()).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()));
-        }
-        out.push(self.drafts_dir.clone());
-        out
+    /// Takes in everything on the shelves.
+    fn load(&mut self) -> Result<()> {
+        let mut all = self.shelf.all(|kind| kind != KIND_VERSION)?;
+        let present: HashSet<String> = all.iter().map(|s| s.id.clone()).collect();
+        all.extend(self.drafts_shelf.all(|_| true)?);
+        self.take_stored(all)?;
+        // What the index knows but the shelf holds no more is forgotten.
+        let before = self.indexed.len();
+        self.indexed.retain(|id, _| present.contains(id));
+        self.dirty |= self.indexed.len() != before;
+        self.flush()?;
+        Ok(())
     }
 
-    /// Picks up records that appeared in the folders meanwhile — and lets go
-    /// of versions whose files are gone. Whatever does not check out is left
-    /// lying and ignored.
+    /// Picks up what others sharing the folder wrote meanwhile. Whatever
+    /// does not check out is left lying and ignored.
     pub fn refresh(&mut self) -> Result<bool> {
-        let mut to_read: Vec<PathBuf> = Vec::new();
+        let fresh = self.shelf.fresh()?;
+        let changed = !fresh.is_empty() && self.take_stored(fresh)?;
+        // What was checked meanwhile is written down, too.
+        self.flush()?;
+        self.keep_checked();
+        Ok(changed)
+    }
+
+    /// Takes in records from the shelf — versions known from the index by
+    /// their head alone.
+    fn take_stored(&mut self, stored: Vec<Stored>) -> Result<bool> {
+        let mut changed = false;
         let mut heads: Vec<(String, VersionHead)> = Vec::new();
-        let mut present: HashSet<String> = HashSet::new();
-        let full = self.full_scan.is_none_or(|at| at.elapsed() >= FULL_SCAN);
-        if full {
-            self.full_scan = Some(std::time::Instant::now());
-        }
-        let folders: Vec<(PathBuf, Option<std::time::SystemTime>)> =
-            self.folders().into_iter().map(|f| { let stamp = std::fs::metadata(&f).and_then(|m| m.modified()).ok(); (f, stamp) }).collect();
-        // No folder came, went or changed since the last look: nothing to pick up.
-        if !full
-            && folders.iter().filter(|(_, stamp)| stamp.is_some()).count() == self.listings.len()
-            && folders.iter().all(|(folder, stamp)| stamp.is_none_or(|stamp| self.listings.get(folder).is_some_and(|(was, _)| *was == stamp)))
-        {
-            return Ok(false);
-        }
-        // A folder gone is listed no more.
-        let there: HashSet<&PathBuf> = folders.iter().filter(|(_, stamp)| stamp.is_some()).map(|(f, _)| f).collect();
-        self.listings.retain(|f, _| there.contains(f));
-        for (folder, stamp) in folders {
-            if let (false, Some(stamp), Some((was, ids))) = (full, stamp, self.listings.get(&folder)) {
-                if *was == stamp {
-                    present.extend(ids.iter().cloned());
-                    continue;
-                }
+        let mut to_parse: Vec<Stored> = Vec::with_capacity(stored.len());
+        for mut s in stored {
+            if self.raw.contains_key(&s.id) || self.versions.contains_key(&s.id) || self.waiting.contains_key(&s.id) {
+                continue;
             }
-            let Ok(entries) = std::fs::read_dir(&folder) else { continue };
-            let mut listed = HashSet::new();
-            for entry in entries {
-                let path = entry?.path();
-                let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-                let Some(id) = id_in_name(name).map(str::to_string) else { continue };
-                listed.insert(id.clone());
-                present.insert(id.clone());
-                if self.read.contains(&path) || self.versions.contains_key(&id) || self.waiting.contains_key(&id) {
-                    continue;
-                }
+            if s.kind == KIND_VERSION {
                 // Checked before: its head is enough.
-                if let Some((head, at)) = self.indexed.get(&id) {
-                    if self.dir.join("articles").join(dir_name(&head.article.to_string())).join(name) == path {
-                        self.arrived.entry(id.clone()).or_insert(*at);
-                        heads.push((id, head.clone()));
-                        continue;
-                    }
+                if let Some((head, at)) = self.indexed.get(&s.id) {
+                    self.arrived.entry(s.id.clone()).or_insert(*at);
+                    heads.push((s.id, head.clone()));
+                    continue;
                 }
-                self.read.insert(path.clone());
-                to_read.push(path);
+                if s.raw.is_none() {
+                    s.raw = self.shelf.get(&s.id);
+                }
             }
-            if let Some(stamp) = stamp {
-                self.listings.insert(folder, (stamp, listed));
-            }
+            to_parse.push(s);
         }
-        // Versions whose files went — deleted elsewhere — are gone here too.
-        let gone: Vec<String> = self.versions.keys().filter(|id| !present.contains(*id)).cloned().collect();
-        let mut changed = !gone.is_empty();
-        if changed {
-            for id in &gone {
-                self.indexed.remove(id);
-            }
-            self.dirty = true;
-            self.flush()?;
-            self.reload()?;
-            return Ok(true);
-        }
-        let mut parsed = read_records(&to_read)?;
+        let mut parsed = parse_records(to_parse);
         parsed.sort_by_key(|(_, r, _)| order(r));
         // What the game master deleted goes first — it is not taken in.
         for (raw, record, _) in &parsed {
@@ -1247,8 +1209,7 @@ impl Journal {
         heads.sort_by_key(|(_, h)| h.until);
         for (id, head) in heads {
             if self.deleted.contains(&id) {
-                let path = self.dir.join("articles").join(dir_name(&head.article.to_string())).join(format!("{id}.json"));
-                let _ = std::fs::remove_file(path);
+                self.shelf.remove(std::slice::from_ref(&id))?;
                 self.indexed.remove(&id);
                 self.dirty = true;
                 continue;
@@ -1260,11 +1221,6 @@ impl Journal {
         for (raw, record, at) in rest {
             changed |= self.take_found(raw, record, at);
         }
-        // What the index knows but no folder holds any more is forgotten.
-        let before = self.indexed.len();
-        self.indexed.retain(|id, _| present.contains(id));
-        self.dirty |= self.indexed.len() != before;
-        self.flush()?;
         self.keep_checked();
         Ok(changed)
     }
@@ -1272,7 +1228,7 @@ impl Journal {
     fn take_found(&mut self, raw: Vec<u8>, record: Record, at: u64) -> bool {
         let id = record_id(&raw);
         if self.deleted.contains(&id) {
-            self.forget_file(&id, &record);
+            self.forget(&id, &record);
             return false;
         }
         self.arrived.entry(id).or_insert(at);
@@ -1388,12 +1344,9 @@ impl Journal {
     /// Writes what was taken in together.
     fn write_batch(&mut self) -> Result<()> {
         let Some(batch) = self.batch.take() else { return Ok(()) };
-        let files: Vec<(PathBuf, Vec<u8>)> = batch.iter().map(|(path, raw, _)| (path.clone(), raw.clone())).collect();
-        crate::durable::write_all(&files)?;
-        for (path, _, id) in &batch {
-            self.listed(path, id, true);
-        }
-        Ok(())
+        let (drafts, shared): (Vec<Stored>, Vec<Stored>) = batch.into_iter().partition(|s| s.kind == KIND_DRAFT);
+        self.drafts_shelf.put(&drafts)?;
+        self.shelf.put(&shared)
     }
 
     /// Forgets everything and reads it all from disk again — keys and who
@@ -1403,7 +1356,7 @@ impl Journal {
         let me = self.me.take();
         let version = self.version;
         self.flush()?;
-        let mut fresh = Journal::open(&self.dir, &self.private, &self.world)?;
+        let mut fresh = Journal::open(&self.dir, &self.private, &self.world, self.shelf.mode())?;
         fresh.keys = keys;
         fresh.me = me;
         fresh.version = version + fresh.version + 1;
@@ -1506,7 +1459,7 @@ impl Journal {
                 // Its version is here already: nothing to keep.
                 if self.covered(&draft) {
                     self.waiting.remove(&id);
-                    self.forget_file(&id, &Record::Draft(draft));
+                    self.forget(&id, &Record::Draft(draft));
                     return Ok(Added::Known);
                 }
                 let Some(head) = self.head_of(draft.layer, draft.generation).cloned() else {
@@ -1641,8 +1594,7 @@ impl Journal {
         if let Some(v) = self.full.borrow().get(id) {
             return Some(v.clone());
         }
-        let path = self.version_path(id)?;
-        let raw = std::fs::read(path).ok()?;
+        let raw = self.shelf.get(id)?;
         self.remember(id, &raw)
     }
 
@@ -1656,11 +1608,6 @@ impl Journal {
         let version = std::sync::Arc::new(version);
         self.full.borrow_mut().insert(id.to_string(), version.clone());
         Some(version)
-    }
-
-    fn version_path(&self, id: &str) -> Option<PathBuf> {
-        let head = self.versions.get(id)?;
-        Some(self.dir.join("articles").join(dir_name(&head.article.to_string())).join(format!("{id}.json")))
     }
 
     /// The number of documents, without reading any of them.
@@ -1780,64 +1727,39 @@ impl Journal {
         if let Some(ids) = self.by_layer.get_mut(&(draft.layer, draft.generation)) {
             ids.retain(|i| i != id);
         }
-        self.forget_file(id, &Record::Draft(draft));
+        self.forget(id, &Record::Draft(draft));
     }
 
-    /// Removes a record's file — a draft its version holds, or what the game
-    /// master deleted.
-    fn forget_file(&mut self, id: &str, record: &Record) {
-        if let Some(path) = self.path_of(id, record) {
-            if path.exists() {
-                let _ = std::fs::remove_file(&path);
-            }
-            self.read.remove(&path);
-            self.listed(&path, id, false);
-        }
-    }
-
-    /// One's own file written or removed: the folder's listing follows, so
-    /// it need not be read again for it.
-    fn listed(&mut self, path: &Path, id: &str, there: bool) {
-        let Some(folder) = path.parent() else { return };
-        let Some((stamp, ids)) = self.listings.get_mut(folder) else { return };
-        if there {
-            ids.insert(id.to_string());
-        } else {
-            ids.remove(id);
-        }
-        if let Ok(now) = std::fs::metadata(folder).and_then(|m| m.modified()) {
-            *stamp = now;
-        }
-    }
-
-    /// `listed` for a record known to be new.
-    fn listed_new(&mut self, path: &Path, id: &str) {
-        let Some(folder) = path.parent() else { return };
-        let Some((stamp, ids)) = self.listings.get_mut(folder) else { return };
-        ids.insert(id.to_string());
-        if let Ok(now) = std::fs::metadata(folder).and_then(|m| m.modified()) {
-            *stamp = now;
-        }
-    }
-
-    fn path_of(&self, id: &str, record: &Record) -> Option<PathBuf> {
-        Some(match place(id, record) {
-            Some((folders, name)) => folders.iter().fold(self.dir.clone(), |p, f| p.join(f)).join(name),
-            None => self.drafts_dir.join(format!("{id}.json")),
-        })
+    /// Lets a record go from its shelf — a draft its version holds, or what
+    /// the game master deleted. Shared, the next state leaves it out.
+    fn forget(&mut self, id: &str, record: &Record) {
+        let ids = [id.to_string()];
+        let _ = if matches!(record, Record::Draft(_)) { self.drafts_shelf.remove(&ids) } else { self.shelf.remove(&ids) };
     }
 
     fn store(&mut self, id: &str, raw: &[u8], record: &Record) -> Result<()> {
-        let path = self.path_of(id, record).ok_or("a record without a place")?;
+        let stored = shelved(id, raw, record);
         if let Some(batch) = &mut self.batch {
-            batch.push((path.clone(), raw.to_vec(), id.to_string()));
-            self.read.insert(path);
+            batch.push(stored);
             return Ok(());
         }
-        crate::durable::write(&path, raw)?;
-        self.listed(&path, id, true);
-        self.read.insert(path);
-        Ok(())
+        if stored.kind == KIND_DRAFT {
+            self.drafts_shelf.put(&[stored])
+        } else {
+            self.shelf.put(&[stored])
+        }
+    }
+
+    /// Writes the next state of a shared folder: what this and other
+    /// devices added since, without what the game master deleted — the game
+    /// master's device does it. Returns whether there was anything to do.
+    pub fn consolidate(&mut self) -> Result<bool> {
+        self.shelf.consolidate(&self.deleted)
+    }
+
+    /// Whether the next state of a shared folder is due — see `Shelf::due`.
+    pub fn consolidation_due(&self, quiet: std::time::Duration) -> bool {
+        self.shelf.due(quiet)
     }
 
     fn index_control(&mut self, id: &str, control: Control) {
@@ -2812,9 +2734,8 @@ impl Journal {
         if let Some(raw) = self.raw.get(id) {
             return Some(raw.clone());
         }
-        let head = self.versions.get(id)?;
-        let path = self.dir.join("articles").join(dir_name(&head.article.to_string())).join(format!("{id}.json"));
-        std::fs::read(path).ok().filter(|raw| record_id(raw) == id)
+        self.versions.get(id)?;
+        self.shelf.get(id).filter(|raw| record_id(raw) == id)
     }
 
     /// Records in an order the receiver can take them in: control first,

@@ -164,7 +164,7 @@ fn nothing_sits_in_the_clear_on_disk() {
             if path.is_dir() {
                 all_files(&path, out);
             } else {
-                out.push_str(&std::fs::read_to_string(path).unwrap());
+                out.push_str(&String::from_utf8_lossy(&std::fs::read(path).unwrap()));
             }
         }
     }

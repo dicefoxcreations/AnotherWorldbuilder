@@ -53,7 +53,7 @@ fn table() -> Table {
 
 /// A device's journal: its world folder and its drafts.
 fn open(base: &Path, who: &str, token: &WorldToken) -> Journal {
-    Journal::open(&base.join(who).join("world"), &base.join(who).join("private"), &token.public()).unwrap()
+    Journal::open(&base.join(who).join("world"), &base.join(who).join("private"), &token.public(), Mode::Shared).unwrap()
 }
 
 /// A grant, sealed for its member and the game master.
@@ -295,7 +295,7 @@ fn the_journal_reads_itself_back_from_disk() {
     t.gm_journal.edit(story, 1, &[], &plain("", "The inn is new."), &t.gm, "s", 1).unwrap();
     t.gm_journal.close("s", &t.gm).unwrap();
     t.gm_journal.edit(story, 1, &[], &plain("", "The inn is new. Still open."), &t.gm, "s2", 2).unwrap();
-    let mut again = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.clone(), &t.token.public()).unwrap();
+    let mut again = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.clone(), &t.token.public(), Mode::Shared).unwrap();
     again.set_keys(t.ring.everything());
     assert_eq!(text_of(&mut again, story), "The inn is new. Still open.");
     assert_eq!(again.inventory(), t.gm_journal.inventory());
@@ -566,12 +566,8 @@ fn through_folder(from: &Journal, to: &mut Journal) {
     }
 }
 
-fn files_in(dir: &Path) -> Vec<String> {
-    let mut out: Vec<String> = std::fs::read_dir(dir)
-        .map(|e| e.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect())
-        .unwrap_or_default();
-    out.sort();
-    out
+fn drafts_of(journal: &Journal) -> usize {
+    journal.drafts_shelf.all(|_| true).unwrap().len()
 }
 
 #[test]
@@ -580,16 +576,11 @@ fn a_session_ends_in_one_version_holding_the_whole_document() {
     let (article, _, story) = t.article(("players", "players", "The inn is old.", Level::Open));
     let secret = t.secret_part(article, "The innkeeper is a spy.");
     t.gm_journal.edit(secret, 1, &[], &plain("", "The innkeeper is a spy. And a cook."), &t.gm, "s-gm", 1).unwrap();
-    assert_eq!(files_in(&t.gm_journal.drafts_dir).len(), 1, "a draft while the session lasts");
+    assert_eq!(drafts_of(&t.gm_journal), 1, "a draft while the session lasts");
     let first = t.gm_journal.close("s-gm", &t.gm).unwrap().remove(0);
-    assert!(files_in(&t.gm_journal.drafts_dir).is_empty(), "the version holds it now");
-
-    // On disk: the world's own record, the other control records, and the
-    // document's folder with its version.
-    let control = files_in(&t.gm_journal.dir.join("control"));
-    assert_eq!(control.iter().filter(|n| n.starts_with("world-")).count(), 1, "{control:?}");
-    let folder = t.gm_journal.dir.join("articles").join(dir_name(&article.to_string()));
-    assert_eq!(files_in(&folder), vec![format!("{first}.json")]);
+    assert_eq!(drafts_of(&t.gm_journal), 0, "the version holds it now");
+    // Kept in the world's folder, for whoever shares it.
+    assert!(t.gm_journal.shelf.get(&first).is_some());
 
     // Bob writes the story: his version takes the secret over as it is.
     t.to_bob();
@@ -600,7 +591,7 @@ fn a_session_ends_in_one_version_holding_the_whole_document() {
     let theirs = t.bob_journal.version_full(&first).unwrap();
     let kept = |v: &Version| v.blocks.iter().find(|b| b.layer == secret).cloned();
     assert_eq!(kept(&mine), kept(&theirs), "the secret, unread, the same bytes");
-    assert!(files_in(&t.bob_journal.drafts_dir).is_empty());
+    assert_eq!(drafts_of(&t.bob_journal), 0);
 
     // The newest version alone shows the document — to someone with all keys.
     let mut dana = open(t._dir.path(), "dana", &t.token);
@@ -710,7 +701,7 @@ fn opened_again_only_the_newest_versions_are_read() {
     // The app looks in at every step — and writes down what it checked.
     t.gm_journal.refresh().unwrap();
     // Opened again: the index knows the versions, the newest shows the text.
-    let mut again = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.clone(), &t.token.public()).unwrap();
+    let mut again = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.clone(), &t.token.public(), Mode::Shared).unwrap();
     again.set_keys(t.ring.everything());
     assert_eq!(again.versions.len(), 5);
     assert_eq!(text_of(&mut again, story), text);
@@ -722,7 +713,7 @@ fn opened_again_only_the_newest_versions_are_read() {
     assert_eq!((before.text.as_str(), after.text.as_str()), ("Zero. 1. 2.", "Zero. 1. 2. 3."));
     // Without the index everything is read and checked anew.
     std::fs::remove_file(t.gm_journal.private.join("index.json")).unwrap();
-    let mut fresh = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.clone(), &t.token.public()).unwrap();
+    let mut fresh = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.clone(), &t.token.public(), Mode::Shared).unwrap();
     fresh.set_keys(t.ring.everything());
     assert_eq!(text_of(&mut fresh, story), text);
     assert_eq!(fresh.full.borrow().len(), 5);
@@ -741,18 +732,20 @@ fn what_the_game_master_deletes_is_gone_everywhere_and_stays_gone() {
     assert_eq!(t.gm_journal.removable(article), ids[..2].to_vec(), "the newest stays");
     let old = t.bob_journal.raw(&ids[0]).unwrap();
     t.gm_says(Item::Deleted { records: ids[..2].to_vec() });
-    let folder = t.gm_journal.dir.join("articles").join(dir_name(&article.to_string()));
-    assert_eq!(files_in(&folder), vec![format!("{}.json", ids[2])]);
     assert_eq!(text_of(&mut t.gm_journal, story), "Zero. 3.");
+    // The next state leaves it out.
+    assert!(t.gm_journal.consolidate().unwrap());
+    assert!(t.gm_journal.shelf.get(&ids[0]).is_none() && t.gm_journal.shelf.get(&ids[2]).is_some());
 
     t.to_bob();
-    assert_eq!(files_in(&t.bob_journal.dir.join("articles").join(dir_name(&article.to_string()))).len(), 1);
+    t.bob_journal.consolidate().unwrap();
+    assert!(t.bob_journal.shelf.get(&ids[0]).is_none());
     assert_eq!(text_of(&mut t.bob_journal, story), "Zero. 3.");
     // Passed on again by someone who still has it: not taken.
     assert_eq!(t.bob_journal.add(&old).unwrap(), Added::Known);
     assert!(!t.bob_journal.inventory().contains(&ids[0]));
     // And after a restart, too.
-    let mut again = Journal::open(&t.bob_journal.dir.clone(), &t.bob_journal.private.clone(), &t.token.public()).unwrap();
+    let mut again = Journal::open(&t.bob_journal.dir.clone(), &t.bob_journal.private.clone(), &t.token.public(), Mode::Shared).unwrap();
     again.set_keys(t.bob_journal.keys.clone().unwrap());
     assert_eq!(again.versions.len(), 1);
     assert_eq!(text_of(&mut again, story), "Zero. 3.");
@@ -809,8 +802,8 @@ fn a_members_proposal_reaches_the_gm_sealed_for_the_two_of_them() {
     let mut t = table();
     t.to_bob();
     let id = t.bob_journal.propose(&t.bob, b"{\"name\":\"Goblin\"}", 7).unwrap();
-    // It travels like everything else, in its own folder.
-    assert!(t.bob_journal.dir.join("proposals").join(format!("{id}.json")).exists());
+    // It travels like everything else.
+    assert!(t.bob_journal.shelf.get(&id).is_some());
     t.to_gm();
     let (got, proposal) = t.gm_journal.proposals().next().expect("the GM has it");
     assert_eq!(got, &id);
@@ -835,14 +828,15 @@ fn a_members_proposal_reaches_the_gm_sealed_for_the_two_of_them() {
     assert_eq!(t.gm_journal.proposals().count(), 0);
     t.to_bob();
     assert_eq!(t.bob_journal.proposals().count(), 0);
-    assert!(!t.bob_journal.dir.join("proposals").join(format!("{id}.json")).exists());
+    t.bob_journal.consolidate().unwrap();
+    assert!(t.bob_journal.shelf.get(&id).is_none());
 }
 
 #[test]
 fn what_another_device_writes_into_a_known_folder_is_picked_up() {
     let mut t = table();
     let (_, _, story) = t.article(("players", "players", "Zero.", Level::Open));
-    let mut other = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.join("other"), &t.token.public()).unwrap();
+    let mut other = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.join("other"), &t.token.public(), Mode::Shared).unwrap();
     other.set_keys(t.ring.everything());
     assert_eq!(text_of(&mut other, story), "Zero.");
     assert!(!other.refresh().unwrap(), "nothing changed, nothing to pick up");
@@ -851,16 +845,12 @@ fn what_another_device_writes_into_a_known_folder_is_picked_up() {
     let version = t.gm_journal.close("s-1", &t.gm).unwrap().remove(0);
     assert!(other.refresh().unwrap());
     assert_eq!(text_of(&mut other, story), "Zero. One.");
-    // Its file deleted there: gone here too.
-    let path = std::fs::read_dir(t.gm_journal.dir.join("articles"))
-        .unwrap()
-        .flatten()
-        .map(|folder| folder.path().join(format!("{version}.json")))
-        .find(|p| p.exists())
-        .unwrap();
-    std::fs::remove_file(path).unwrap();
-    other.refresh().unwrap();
-    assert!(!other.versions.contains_key(&version));
+    // Consolidated there: nothing new here, nothing lost.
+    assert!(t.gm_journal.consolidate().unwrap());
+    assert!(!other.refresh().unwrap());
+    assert!(other.versions.contains_key(&version));
+    let again = Journal::open(&t.gm_journal.dir.clone(), &t.gm_journal.private.join("third"), &t.token.public(), Mode::Shared).unwrap();
+    assert!(again.versions.contains_key(&version));
 }
 
 #[test]

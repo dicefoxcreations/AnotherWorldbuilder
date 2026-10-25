@@ -537,6 +537,18 @@ fn opening() -> &'static Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<()>>>> {
     OPENING.get_or_init(Default::default)
 }
 
+/// Whether this process alone writes the folders it keeps worlds in — a
+/// server's do not lie in a folder others share.
+static ALONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn keep_worlds_alone() {
+    ALONE.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How long nobody writes before the game master's device writes the next
+/// state of a world in a shared folder.
+const STATE_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
+
 fn open_journals() -> &'static Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<Open>>>> {
     static OPEN: OnceLock<Mutex<HashMap<(PathBuf, PathBuf), Arc<Mutex<Open>>>>> = OnceLock::new();
     OPEN.get_or_init(Default::default)
@@ -794,7 +806,9 @@ impl Store {
                 match meanwhile {
                     Some(open) => (open, false),
                     None => {
-                        let journal = Journal::open(&dir, &self.private_world_dir(world_id), &local.public)?;
+                        let alone = self.online_cache || ALONE.load(std::sync::atomic::Ordering::Relaxed);
+                        let mode = if alone { journal::Mode::Alone } else { journal::Mode::Shared };
+                        let journal = Journal::open(&dir, &self.private_world_dir(world_id), &local.public, mode)?;
                         let open = Arc::new(Mutex::new(Open { journal, projection: None }));
                         open_journals().lock().map_err(poisoned)?.insert(key, open.clone());
                         (open, true)
@@ -825,6 +839,25 @@ impl Store {
             let _ = self.resume_switch(world_id);
         }
         Ok(open)
+    }
+
+    /// Writes the next state of the game master's worlds in shared folders
+    /// that nobody wrote for a quiet minute. A world busy right now waits for
+    /// the next time.
+    pub fn consolidate_quiet(&self) {
+        let open: Vec<Arc<Mutex<Open>>> = match open_journals().lock() {
+            Ok(all) => all.iter().filter(|((profile, _), _)| *profile == self.profile).map(|(_, o)| o.clone()).collect(),
+            Err(_) => return,
+        };
+        for open in open {
+            let Ok(mut guard) = open.try_lock() else { continue };
+            let world = guard.journal.world().world_id.to_string();
+            if self.holds_token(&world) && guard.journal.consolidation_due(STATE_AFTER) {
+                if let Err(e) = guard.journal.consolidate() {
+                    eprintln!("{world}: the next state was not written: {e}");
+                }
+            }
+        }
     }
 
     /// Ends one's own sessions that rest: no longer open in this process —

@@ -3,7 +3,7 @@
 The former "Shared folders" transport of its own was removed. A cloud folder provided by the operating system is chosen like any other local storage location; Worldbuilder works directly on its world folders.
 
 1. Open **Settings → Storage → Add world locations**.
-2. Choose one or more folders that are to hold `world-<id>/` with `world.json` (format 3), `control/` and `articles/`. Only finished versions go through folders – a change appears for the others as soon as the author leaves edit mode.
+2. Choose one or more folders that are to hold `world-<id>/` with `world.json`, its state files and `updates/` ([world format 4](../architecture/world-format.md)). Only finished versions go through folders – a change appears for the others as soon as the author leaves edit mode.
 3. Under **New world → Local** choose the target folder. Existing current worlds appear in the shared library.
 4. **Remove location** only removes the assignment. It deletes neither worlds nor keys.
 

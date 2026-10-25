@@ -125,8 +125,13 @@ pub(crate) fn set_plan(store: &Store, world: &str, plan: Plan) -> Answer<View> {
 
 /// A file named by its content: the same name, the same bytes, for good.
 fn unchanging(path: &Path) -> bool {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit())
+    // An image's part, named by its bytes; a state and an update file,
+    // never written again under their names.
+    (stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit()))
+        || (name.starts_with("state-") && name.ends_with(".sqlite"))
+        || name.ends_with(".awu")
 }
 
 /// Backs a world up now — by hand; every backup stays.

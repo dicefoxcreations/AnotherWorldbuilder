@@ -13,7 +13,7 @@
 
 - [The journal of a world](architecture/journal.md): signed entries, read and write keys, versions, writing together.
 - [Storage locations](architecture/storage.md): profile and worlds, the choice on first start, moving.
-- [World format 3](architecture/world-format.md): one file per version, drafts in the profile, version limit, deleting.
+- [World format 4](architecture/world-format.md): a state and updates, one entry per version, drafts in the profile, version limit, deleting.
 - [Images](architecture/images.md): gallery, names, visibility through sections, metadata removed, originals in parts.
 - [Windows beside](architecture/windows.md): documents and sections in their own windows, kept in step with each other.
 - [Calendar and timeline](architecture/calendar-timeline.md): world calendar, date with time, `<timeline>`, lists from properties, family trees.

@@ -1,10 +1,10 @@
 # The journal of a world
 
-As of October 2026. The sync design for the whole world; it replaces the earlier text prototype and the handing over of whole world packages. Code: `crates/aw-store/src/journal/`. How the files lie is described in [world format 3](world-format.md).
+As of October 2026. The sync design for the whole world; it replaces the earlier text prototype and the handing over of whole world packages. Code: `crates/aw-store/src/journal/`. How the entries are kept is described in [world format 4](world-format.md).
 
 ## Basic idea
 
-A world is not a file that gets overwritten but a set of **signed entries**. Every entry is a file of its own, named after the hash of its bytes, and is never changed: control entries under `control/`, one file per version of a document under `articles/<document>/`. What a session writes until its end lies in the profile as a draft. Two devices compare what they have by the names and exchange what is missing – over the LAN, directly over the internet or through a [shared folder](../testing/folder-sync.md). Every device checks every entry itself, no matter who passed it on.
+A world is not a file that gets overwritten but a set of **signed entries**. Every entry is named after the hash of its bytes and is never changed: control entries, and one entry per version of a document, kept in the world's state and update files ([world format](world-format.md)). What a session writes until its end lies in the profile as a draft. Two devices compare what they have by the names and exchange what is missing – over the LAN, directly over the internet or through a [shared folder](../testing/folder-sync.md). Every device checks every entry itself, no matter who passed it on.
 
 | Kind | Who writes | Signed by | Content |
 | --- | --- | --- | --- |
@@ -25,7 +25,7 @@ What stays open: number, size and time of the entries, and the level of a sectio
 
 Of every control item the newest entry counts (GM counter `seq`). Versions and drafts merge by CRDT: whoever writes at different places at the same time keeps both. Every change carries its session and its time itself – which version it belongs to stays recognisable, no matter which file it stands in.
 
-In storage format 3, `world.json` contains nothing but the format version and the public world identifier including the public signing key. The GM's member list and advance invitations are under `profile/worlds/<world>/state.json`; private keys also stay in the profile. The [storage locations](storage.md) describe the separation. `articles.json`, `templates.json`, `held.json` no longer exist – everything shared stands in the journal.
+`world.json` contains nothing but the format version and the public world identifier including the public signing key. The GM's member list and advance invitations are under `profile/worlds/<world>/state.json`; private keys also stay in the profile. The [storage locations](storage.md) describe the separation. `articles.json`, `templates.json`, `held.json` no longer exist – everything shared stands in the journal.
 
 ## Players create documents
 

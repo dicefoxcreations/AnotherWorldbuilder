@@ -2,3 +2,4 @@
 pub mod durable;
 pub mod journal;
 pub mod media;
+pub mod shelf;

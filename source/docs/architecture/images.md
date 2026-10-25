@@ -1,6 +1,6 @@
 # Images
 
-As of October 2026. Builds on [world format 3](world-format.md) and the [journal](journal.md). Code: `crates/aw-store/src/media/` (format, metadata, parts, gallery entry), `journal/` (entry `image`, key in the section), `store/images.rs`, `media.rs` (commands), `network.rs` (parts over the connection); interface: `shared/ui/WorldImage.tsx`, `shared/ui/ImagePicker.tsx`, `features/settings/Gallery.tsx`.
+As of October 2026. Builds on [world format 4](world-format.md) and the [journal](journal.md). Code: `crates/aw-store/src/media/` (format, metadata, parts, gallery entry), `journal/` (entry `image`, key in the section), `store/images.rs`, `media.rs` (commands), `network.rs` (parts over the connection); interface: `shared/ui/WorldImage.tsx`, `shared/ui/ImagePicker.tsx`, `features/settings/Gallery.tsx`.
 
 ## Goals
 

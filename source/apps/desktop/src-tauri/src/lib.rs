@@ -2271,6 +2271,14 @@ pub fn run() {
         // stands, then it is clamped into the usable area.
         .setup(|app| {
             online::tell_progress_to(app.handle().clone());
+            // The game master's worlds in shared folders: the next state
+            // once nobody wrote for a while.
+            std::thread::spawn(|| loop {
+                std::thread::sleep(std::time::Duration::from_secs(20));
+                if let Some(store) = profile::store_now() {
+                    store.consolidate_quiet();
+                }
+            });
             network::start(app.handle()).map_err(|e| std::io::Error::other(e.0))?;
             browser::start(app.handle());
             if let Some(w) = app.get_webview_window("main") {

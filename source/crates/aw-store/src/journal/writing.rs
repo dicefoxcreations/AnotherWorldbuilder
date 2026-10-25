@@ -102,19 +102,16 @@ impl Journal {
             let record = Record::Image(entry);
             let raw = serde_json::to_vec(&record)?;
             let id = record_id(&raw);
-            let path = self.path_of(&id, &record).ok_or("a record without a place")?;
-            records.push((id, path, raw, record));
+            records.push((id, raw, record));
         }
-        let files: Vec<(PathBuf, Vec<u8>)> = records.iter().map(|(_, path, raw, _)| (path.clone(), raw.clone())).collect();
-        crate::durable::write_all(&files)?;
+        let shelved: Vec<Stored> = records.iter().map(|(id, raw, record)| shelved(id, raw, record)).collect();
+        self.shelf.put(&shelved)?;
         let mut ids = Vec::with_capacity(records.len());
-        for (id, path, raw, record) in records {
+        for (id, raw, record) in records {
             match self.take(raw, record, false)? {
                 Added::New(_) | Added::Known => {}
                 other => return Err(format!("a record of one's own was not taken: {other:?}").into()),
             }
-            self.listed_new(&path, &id);
-            self.read.insert(path);
             ids.push(id);
         }
         self.flush()?;
@@ -146,20 +143,17 @@ impl Journal {
             let record = Record::Control(control);
             let raw = serde_json::to_vec(&record)?;
             let id = record_id(&raw);
-            let path = self.path_of(&id, &record).ok_or("a record without a place")?;
-            records.push((id, path, raw, record));
+            records.push((id, raw, record));
         }
         // On disk first, all at once — then taken in, as `store` would after each.
-        let files: Vec<(PathBuf, Vec<u8>)> = records.iter().map(|(_, path, raw, _)| (path.clone(), raw.clone())).collect();
-        crate::durable::write_all(&files)?;
+        let shelved: Vec<Stored> = records.iter().map(|(id, raw, record)| shelved(id, raw, record)).collect();
+        self.shelf.put(&shelved)?;
         let mut ids = Vec::with_capacity(records.len());
-        for (id, path, raw, record) in records {
+        for (id, raw, record) in records {
             match self.take(raw, record, false)? {
                 Added::New(_) => {}
                 other => return Err(format!("a record of one's own was not taken: {other:?}").into()),
             }
-            self.listed_new(&path, &id);
-            self.read.insert(path);
             ids.push(id);
         }
         self.flush()?;

@@ -2938,8 +2938,8 @@ mod tests {
 
     /// The version files of a document on a device.
     fn version_files(store: &Store, world: &str, article: &str) -> usize {
-        let folder = store.world_dir(world).join("articles").join(aw_store::journal::dir_name(article));
-        std::fs::read_dir(folder).map(|e| e.count()).unwrap_or(0)
+        let article: aw_model::ArticleId = article.parse().unwrap();
+        store.with_journal(world, |j| Ok(j.kept_versions(article).len())).unwrap()
     }
 
     #[test]

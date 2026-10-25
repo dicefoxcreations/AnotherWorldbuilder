@@ -25,6 +25,8 @@ aw-sync = { path = "crates/aw-sync" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# The state of a world: SQLite, built in.
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 # Debug builds are what the app is tried with day to day. Unoptimised, the
 # cryptography alone makes opening a world take seconds; optimised libraries

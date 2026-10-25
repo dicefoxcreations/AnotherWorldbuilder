@@ -125,6 +125,7 @@ pub fn main() {
 
 async fn run(o: Options) -> Answer<()> {
     let (profile, worlds) = (o.data.join("profile"), o.data.join("worlds"));
+    store::keep_worlds_alone();
     std::fs::create_dir_all(&profile)?;
     std::fs::create_dir_all(&worlds)?;
     let store = profile::use_folders(&profile, &worlds, &o.data.join("locks"))?;

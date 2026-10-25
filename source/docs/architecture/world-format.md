@@ -1,6 +1,6 @@
-# World format 3: one file per version
+# World format 4: a state and updates
 
-As of October 2026. Code: `crates/aw-store/src/journal/` (`mod.rs` entries and loading, `writing.rs` drafts, versions and cleaning up, `history.rs` version list), `store.rs` (end of session, limit, new base). Rights, keys, generations and review are in the [journal](journal.md). No migration: worlds in format 2 are not converted and no longer loaded.
+As of October 2026. Code: `crates/aw-store/src/shelf.rs` (where entries are kept), `crates/aw-store/src/journal/` (`mod.rs` entries and loading, `writing.rs` drafts, versions and cleaning up, `history.rs` version list), `store.rs` (end of session, limit, new base, the next state). Rights, keys, generations and review are in the [journal](journal.md). No migration in the app: worlds in format 3 (one file per entry) are turned into format 4 once with `cargo run --release -p aw-store --example convert_world -- <world folder> <profile folder of the world>`.
 
 ## Why
 
@@ -9,7 +9,8 @@ Up to format 2 every save (autosave after a 0.6 s pause) was a file of its own, 
 Goals:
 
 - **One file per version of a document.** It contains the whole document; one file is enough for the current state.
-- **One layout** for local and shared folders.
+- **One layout** for local and shared folders — safe in a cloud folder that copies whole files, whether or not the folder is shared.
+- **Few files:** a big world is one state file, not a hundred thousand small ones.
 - **Limited storage:** the GM sets how many versions remain and can delete versions.
 - **Live writing and presence stay** as they are.
 
@@ -17,14 +18,22 @@ Goals:
 
 ```text
 world-<id>/
-  world.json                      format 3: format version, world ID, public key
-  control/<hash>.json             GM entries: world, types, grants, key headers, verdicts, deletions
-  articles/<art-id>/<hash>.json   one complete file per version
-  requests/<hash>.json            join requests
-  proposals/<hash>.json           new documents players ask for (sealed for GM and author)
+  world.json                                  public descriptor: world ID, public key
+  state-<generation>-<hash>.sqlite            the entries, consolidated
+  updates/<device>-<number>.awu               entries one device added since
+  media/parts/                                images, in parts named by their bytes
 ```
 
-Files are named after the hash of their bytes and are never changed. The same files have the same name on every device and in every folder. Article IDs already stand in plain text in every entry; the folders reveal nothing new. Title, type and slug stay encrypted.
+Every entry is signed and named after the hash of its bytes, as before: GM entries (world, types, grants, key headers, verdicts, deletions), one complete entry per version of a document, the gallery, proposals and badges. Article IDs stand in plain text; title, type, slug and content stay encrypted.
+
+**Nothing in the folder is ever changed in place.** A cloud folder copies whole files and cannot merge two writers, and a file may arrive in pieces:
+
+- **The state** is a SQLite file with one row per entry (`records`: id, kind, article, arrival, bytes) and what it holds of each device's updates (`meta`). Its name carries the hash of its bytes: a state that has not fully arrived does not check out, and the one before is read.
+- **An update file** holds what one device wrote at once — a version, a change to the world — with a checksum at its end. Each device writes only its own files and numbers them without gaps. A file still on its way waits.
+- **Consolidating:** the GM's device writes the next state once nobody wrote for a minute: the last state, every device's updates in order up to the first gap, without what the GM deleted. Then it lets go of what the state before already held — whoever is a state behind still finds what they need.
+- **Reading:** the newest whole state plus every update it does not hold.
+
+A server, and a session reading a world from its server, keep the state alone: one SQLite file changed in place, transaction by transaction, without updates.
 
 ## The version file
 
@@ -46,7 +55,7 @@ A version is one session of one author: from "Edit" until leaving it, as before.
 
 Every version names its predecessors. If two versions build on the same one (offline, at the same time), there are two **tips**. The app shows the merge of both; the next save names both as predecessors and closes the fork. Overlaps are marked with ⚠ as before.
 
-A local **index in the profile** (`index.json`) remembers the head of each checked version – document, author, session, predecessors, sections – and which section blocks passed their check. On opening a world, `control/` and the drafts are read, of the versions only the file names. On opening, a section reads only the tip(s); the version list and comparisons read the rest when opened. If a tip has not passed its check here yet, all versions of the section are read and checked in order. If the index is gone, that happens for all.
+A local **index in the profile** (`index.json`) remembers the head of each checked version – document, author, session, predecessors, sections – and which section blocks passed their check. On opening a world, the GM entries and the drafts are read, of the versions only the ids. On opening, a section reads only the tip(s); the version list and comparisons read the rest when opened. If a tip has not passed its check here yet, all versions of the section are read and checked in order. If the index is gone, that happens for all.
 
 ## Session and live writing
 

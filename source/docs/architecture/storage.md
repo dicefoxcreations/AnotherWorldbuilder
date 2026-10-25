@@ -9,7 +9,7 @@ As of October 2026. Code: `profile.rs`, `store.rs`, `network.rs`; interface: `St
 | Profile | Identity and private keys in `identity.json`, avatar, network settings in `network.json` |
 | `profile/worlds/world-<id>/` | Private world data: `state.json`, `owner.key`, `keyring.json`, `requests.json`, `handover.json` |
 | `profile/worlds/world-<id>/drafts/`, `index.json` | Drafts of running sessions; what the device has already checked of the versions |
-| Local world folder `world-<id>/` | Public descriptor `world.json` (format 3), control entries under `control/`, one file per version under `articles/<document>/` ([world format 3](world-format.md)); contents and key grants are encrypted |
+| Local world folder `world-<id>/` | Public descriptor `world.json`, the entries in a state file and update files ([world format 4](world-format.md)), images under `media/`; contents and key grants are encrypted |
 
 Private data is assigned by world ID, independent of the storage location. A copy of a world folder carries no GM keys. Opened journals and decrypted views are kept apart per profile.
 
