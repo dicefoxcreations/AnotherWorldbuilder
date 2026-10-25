@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readTable, tableAt, writeTable } from "../../src/shared/TableText.ts";
 
-const text = "| Item Rarity | Obaya's Reward |\n| ----------- | -------------: |\n| Common      | 10 pp          |\n| Very rare   | 5,000 pp   | ^magic-item-rewards ";
+const text = "| Item Rarity | Reward |\n| ----------- | -----: |\n| Common      | 10 pp  |\n| Very rare   | 5,000 pp   | ^magic-item-rewards ";
 
 test("a table reads as cells, its mark in its last cell", () => {
   const t = readTable(text);
-  assert.deepEqual(t.head, ["Item Rarity", "Obaya's Reward"]);
+  assert.deepEqual(t.head, ["Item Rarity", "Reward"]);
   assert.deepEqual(t.align, ["", "right"]);
   assert.deepEqual(t.rows, [["Common", "10 pp"], ["Very rare", "5,000 pp ^magic-item-rewards"]]);
 });

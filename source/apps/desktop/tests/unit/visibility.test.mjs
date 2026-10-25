@@ -23,8 +23,8 @@ test("blocks without their own access follow the document's", async () => {
       { parts: [{ key: "b", view: "gm", edit: "gm" }, { key: "c", view: "all", edit: "gm OR player:anna" }] },
     ],
   };
-  const next = withAccess(doc, { edit: "gm OR player:leo" });
-  assert.equal(next.access.edit, "gm OR player:leo");
-  assert.deepEqual(next.blocks.map((b) => b.parts.map((p) => `${p.view}|${p.edit}`)), [["all|gm OR player:leo"], ["gm|gm OR player:leo", "all|gm OR player:anna"]]);
+  const next = withAccess(doc, { edit: "gm OR player:bob" });
+  assert.equal(next.access.edit, "gm OR player:bob");
+  assert.deepEqual(next.blocks.map((b) => b.parts.map((p) => `${p.view}|${p.edit}`)), [["all|gm OR player:bob"], ["gm|gm OR player:bob", "all|gm OR player:anna"]]);
   assert.equal(withAccess(doc, { view: "players" }).blocks[1].parts[0].view, "gm", "a secret stays secret");
 });

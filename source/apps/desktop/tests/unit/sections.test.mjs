@@ -28,7 +28,7 @@ test("the same heading twice gets a number", () => {
 
 test("an embedded document ends the section above it", () => {
   const embed = { ends: 3 };
-  const placed = sectioned([[h(3, "Waterdeep"), p, embed, p]], new Set(["3:waterdeep"]));
+  const placed = sectioned([[h(3, "Harbour"), p, embed, p]], new Set(["3:harbour"]));
   assert.deepEqual(placed[0].map((x) => x.hidden), [false, true, false, false]);
   const deeper = sectioned([[h(2, "City"), p, embed]], new Set(["2:city"]));
   assert.deepEqual(deeper[0].map((x) => x.hidden), [false, true, true], "under a higher heading it folds along");
