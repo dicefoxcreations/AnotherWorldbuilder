@@ -932,7 +932,7 @@ function PlayersArea({
           <li>
             <div>
               <strong>{me.name}</strong> <span className="role-badge player">Player</span>
-              {world.supporter && <span className="role-badge">Supporter</span>}
+              {world.supporter && <> <span className="role-badge">Supporter</span></>}
               <small className="small">{world.attributes.filter((a) => !PLAIN.includes(a)).join(", ")}</small>
             </div>
             <OwnColour world={world} me={me} onChanged={onChanged} onError={onError} />
@@ -1010,7 +1010,7 @@ function PlayersArea({
               <div>
                 <strong>{m.name}</strong>{" "}
                 <span className={`role-badge ${m.role}`}>{m.role === "gm" ? "GM" : "Player"}</span>
-                {supports(m.id) && <span className="role-badge">Supporter</span>}
+                {supports(m.id) && <> <span className="role-badge">Supporter</span></>}
                 <small className="small">{m.fingerprint}</small>
                 {world.isGm && (m.role !== "gm" || m.id === me.id) && (
                   <Assigned
