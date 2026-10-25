@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { invoke } from "@tauri-apps/api/core";
 import App from "./app/App";
 import { Legend } from "./features/templates/TemplateLegend";
 import { watchApartClicks } from "./shared/apart";
@@ -19,6 +20,11 @@ followKeptColors();
 
 // Ctrl+click and the middle button open a place in a window of its own.
 watchApartClicks();
+
+// What goes wrong in the page goes into the app's log.
+const logged = (text: string) => invoke("app_log", { kind: "page", text }).catch(() => {});
+window.addEventListener("error", (e) => void logged(`${e.message} (${e.filename}:${e.lineno})`));
+window.addEventListener("unhandledrejection", (e) => void logged(`unhandled: ${String(e.reason)}`));
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

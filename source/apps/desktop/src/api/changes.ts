@@ -113,6 +113,10 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
       ? await call<T>("world_call", { world, command: cmd, args: args ?? {} })
       : await call<T>(cmd, args);
   } catch (error) {
+    // Into the app's log — a server world's command the app logs itself.
+    if (cmd !== "app_log" && !(typeof world === "string" && online.has(world))) {
+      call("app_log", { kind: "command", text: `${typeof world === "string" ? world + ": " : ""}${cmd} failed: ${String(error)}` }).catch(() => {});
+    }
     // There is deliberately no retry against the local command handler.
     if (typeof world === "string" && String(error).includes("[online]")) {
       suspendOnlineWorld(world);

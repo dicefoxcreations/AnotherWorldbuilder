@@ -1306,6 +1306,9 @@ async fn ask(net: &WorldNet, via: &Via, world: &str, me: &Identity, ask: Ask) ->
     if reply == Reply::Busy {
         return Err(AppError(BUSY.into()));
     }
+    if let Reply::Failed { error } = reply {
+        return Err(AppError(format!("The other side: {error}")));
+    }
     Ok(reply)
 }
 
@@ -1519,7 +1522,11 @@ pub async fn remote_call(app: tauri::AppHandle, world: String, command: String, 
     let me = store.load_identity()?;
     let net = running().ok_or_else(|| AppError("This world is online — switch the network on.".into()))?;
     let entry = online_worlds(&store).into_iter().find(|w| w.world == world).ok_or_else(|| AppError("This world is not online.".into()))?;
-    call_via(&net, &me, &world, &via_of(&entry), &command, &args).await
+    let answer = call_via(&net, &me, &world, &via_of(&entry), &command, &args).await;
+    if let Err(e) = &answer {
+        crate::applog::line("command", &format!("{world}: {command} (on its host) failed: {}", e.0));
+    }
+    answer
 }
 
 /// The worlds the servers hold, by id: which server, and the world as it is named there.

@@ -307,6 +307,9 @@ pub enum Reply {
     /// server, for its admin.
     Requested,
     /// This world is not offered (any more).
+    /// What was asked went wrong on the host — and why, for the asking side
+    /// to say rather than take for a lost connection.
+    Failed { error: String },
     NotOffered,
     /// The worlds a server holds — and who the server is: what it writes
     /// in a member's name it signs as itself. `admin`: the asking side is

@@ -733,7 +733,13 @@ impl Host for Keeper {
         true
     }
     fn answer(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Reply {
-        self.reply(world, who, ask).unwrap_or(Reply::NotOffered)
+        let what = format!("{ask:?}").chars().take(40).collect::<String>();
+        self.reply(world, who, ask).unwrap_or_else(|e| {
+            let line = format!("{world}: {} asked {what}…: {}", who.name, e.0);
+            crate::applog::line("answer", &line);
+            eprintln!("{line}");
+            Reply::Failed { error: e.0 }
+        })
     }
 }
 /// What a folder takes on disk.
@@ -1265,7 +1271,7 @@ mod tests {
 
         // Olaf takes her out again: turned away at once, out for good once
         // Marla's device hears of it.
-        assert!(matches!(manage(&keeper, &olaf, Some(Order::Remove { world: world.clone(), id: marla.me.id().to_string() })), Reply::NotOffered | Reply::Managed { .. }));
+        assert!(matches!(manage(&keeper, &olaf, Some(Order::Remove { world: world.clone(), id: marla.me.id().to_string() })), Reply::Failed { .. }));
         assert!(marla.store.is_gm(&world), "not the GM");
         let Reply::Managed { state } = manage(&keeper, &olaf, Some(Order::Remove { world: world.clone(), id: eve.me.id().to_string() })) else { panic!("Olaf manages") };
         assert!(state.worlds.iter().find(|w| w.world == world).unwrap().members.is_empty(), "Eve is on her way out");
@@ -1288,10 +1294,10 @@ mod tests {
         assert_eq!(swap(&keeper, &dan, &world), Reply::NotOffered);
         let Reply::Digest { removing, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
         assert_eq!(removing, vec![dan.me.id().to_string()]);
-        assert!(matches!(manage(&keeper, &olaf, Some(Order::Kick { id: marla.me.id().to_string() })), Reply::NotOffered), "not an admin");
+        assert!(matches!(manage(&keeper, &olaf, Some(Order::Kick { id: marla.me.id().to_string() })), Reply::Failed { .. }), "not an admin");
         // An admin cannot be turned away; the first one stays.
-        assert!(matches!(manage(&keeper, &olaf, Some(Order::Block { id: marla.me.id().to_string() })), Reply::NotOffered));
-        assert!(matches!(manage(&keeper, &olaf, Some(Order::Admin { id: marla.me.id().to_string(), on: false })), Reply::NotOffered));
+        assert!(matches!(manage(&keeper, &olaf, Some(Order::Block { id: marla.me.id().to_string() })), Reply::Failed { .. }));
+        assert!(matches!(manage(&keeper, &olaf, Some(Order::Admin { id: marla.me.id().to_string(), on: false })), Reply::Failed { .. }));
     }
 
     #[test]
@@ -1639,7 +1645,7 @@ mod tests {
 
         // Weekly, three kept — on disk, after a restart too. Nonsense is refused.
         assert!(matches!(backups(&marla, Some(BackupPlan { every: "weekly".into(), keep: 3 })), Reply::Backups { .. }));
-        assert_eq!(backups(&marla, Some(BackupPlan { every: "hourly".into(), keep: 3 })), Reply::NotOffered);
+        assert!(matches!(backups(&marla, Some(BackupPlan { every: "hourly".into(), keep: 3 })), Reply::Failed { .. }));
         let again = Keeper::open(keeper.store.clone(), dir.path(), marla.me.id().to_string()).unwrap();
         assert_eq!(again.plan(&eldermere).unwrap(), BackupPlan { every: "weekly".into(), keep: 3 });
     }
@@ -1703,7 +1709,7 @@ mod tests {
         assert_eq!(seen.worldbuilders.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), vec!["Olaf"]);
 
         // Closed, nobody gets it — its GM neither; deleted only once closed.
-        assert!(matches!(manage(&keeper, &marla, Some(Order::Delete { world: thule.clone() })), Reply::NotOffered));
+        assert!(matches!(manage(&keeper, &marla, Some(Order::Delete { world: thule.clone() })), Reply::Failed { .. }));
         manage(&keeper, &marla, Some(Order::Close { world: thule.clone() }));
         assert_eq!(swap(&keeper, &olaf, &thule), Reply::NotOffered);
         let Reply::Worlds { worlds, .. } = keeper.answer("", &eve.me.public(), Ask::Worlds) else { panic!() };
@@ -1717,7 +1723,7 @@ mod tests {
         manage(&keeper, &marla, Some(Order::Block { id: eve.me.id().to_string() }));
         assert_eq!(keeper.answer("", &eve.me.public(), Ask::Worlds), Reply::NotOffered);
         assert_eq!(keeper.answer(&eldermere, &eve.me.public(), Ask::Join), Reply::NotOffered);
-        assert!(matches!(manage(&keeper, &marla, Some(Order::Block { id: marla.me.id().to_string() })), Reply::NotOffered));
+        assert!(matches!(manage(&keeper, &marla, Some(Order::Block { id: marla.me.id().to_string() })), Reply::Failed { .. }));
         manage(&keeper, &marla, Some(Order::Unblock { id: eve.me.id().to_string() }));
         assert_eq!(keeper.answer(&eldermere, &eve.me.public(), Ask::Join), Reply::Requested);
 

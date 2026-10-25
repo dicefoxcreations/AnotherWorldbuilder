@@ -9,6 +9,7 @@
 // The server (`--no-default-features`) uses less of it than the app.
 #![cfg_attr(not(feature = "gui"), allow(dead_code, unused_imports))]
 
+mod applog;
 mod document;
 #[cfg(feature = "gui")]
 mod window_state;
@@ -2290,6 +2291,10 @@ pub fn run() {
         // stands, then it is clamped into the usable area.
         .setup(|app| {
             online::tell_progress_to(app.handle().clone());
+            if let Ok(dir) = profile::config_dir(app.handle()) {
+                applog::set_fallback(dir);
+            }
+            applog::line("start", &format!("AnotherWorldbuilder {} on {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS));
             // The game master's worlds in shared folders: the next state
             // once nobody wrote for a while.
             std::thread::spawn(|| loop {
@@ -2325,6 +2330,8 @@ pub fn run() {
             document::version_document,
             document::version_carry,
             document::world_conflicts,
+            applog::app_log,
+            applog::app_log_open,
             document::conflict_dismiss,
             document::conflict_rescue,
             network::network_settings,

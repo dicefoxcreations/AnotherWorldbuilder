@@ -52,7 +52,7 @@ pub fn profile_root() -> Option<PathBuf> {
 
 #[cfg(feature = "gui")]
 /// The fixed place where the choice is remembered.
-fn config_dir(app: &tauri::AppHandle) -> Answer<PathBuf> {
+pub(crate) fn config_dir(app: &tauri::AppHandle) -> Answer<PathBuf> {
     match profile_root() {
         Some(root) if !root.is_absolute() => Err(AppError("AW_PROFILE_ROOT must be absolute.".into())),
         Some(root) => Ok(root),

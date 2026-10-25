@@ -49,11 +49,16 @@ impl Transport for Connection<'_> {
         Box::pin(async move {
             let quick = matches!(ask, Ask::Digest { .. });
             let limit = std::time::Duration::from_secs(if quick { 6 } else { 120 });
-            patiently(limit, || async {
+            let reply = patiently(limit, || async {
                 tokio::time::timeout(limit, self.net.ask_server(self.server, world, self.me, ask.clone()))
                     .await.map_err(|_| AppError(UNAVAILABLE.into()))?
                     .map_err(|e| AppError(format!("{UNAVAILABLE} {e}")))
-            }).await
+            }).await?;
+            // The server's own error, said as it is.
+            if let Reply::Failed { error } = reply {
+                return Err(AppError(format!("The server: {error}")));
+            }
+            Ok(reply)
         })
     }
 }
@@ -333,6 +338,7 @@ impl Session {
     /// The frame, a piece at a time — see `Ask::Frame`. Its mark is the one
     /// it began at: what came meanwhile follows with `read_since`.
     async fn read_frame(&mut self, world: &str, transport: &impl Transport) -> Answer<bool> {
+        let started = std::time::Instant::now();
         let mut after = None;
         let mut first = None;
         let mut came = false;
@@ -356,6 +362,7 @@ impl Session {
             }
         }
         progress(world, "loading", 0, 0);
+        crate::applog::line("online", &format!("{world}: frame of {done} records read in {:.1} s", started.elapsed().as_secs_f64()));
         self.mark = first.flatten();
         self.framed = true;
         self.pending = if self.store.holds(world) { self.store.article_ids(world)? } else { Vec::new() };
@@ -711,6 +718,7 @@ pub(crate) async fn poll(app: &tauri::AppHandle, base: &Store, net: &WorldNet, m
                 // stops the open world.
                 session.synced = None;
                 session.misses += 1;
+                crate::applog::line("online", &format!("{world}: not reached ({} in a row): {}", session.misses, error.0));
                 if session.misses == MISSES {
                     let message = if error.0.starts_with("[online]") { error.0 } else { format!("{UNAVAILABLE} {}", error.0) };
                     let _ = app.emit("online-unavailable", serde_json::json!({ "world": world, "error": message }));
@@ -849,10 +857,14 @@ pub(crate) async fn world_call(app: tauri::AppHandle, world: String, command: St
     let connection = Connection { net: &net, server: &server, me: &me };
     let name = world.clone();
     let needs = Needs::of(&command, &args);
+    let label = command.clone();
     let result = execute(&base, &world, &server, &connection, needs, |cache| async move {
         if command == "world_connect" { return Ok(serde_json::Value::Null) }
         dispatch::run(app.clone(), cache, &name, &command, &args).await
     }).await;
+    if let Err(e) = &result {
+        crate::applog::line("command", &format!("{world}: {label} failed: {}", e.0));
+    }
     result
 }
 
@@ -949,6 +961,10 @@ async fn publish(session: &mut Session, base: &Store, world: &str, transport: &i
     progress(world, "sending", 0, 0);
     if result.is_err() {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(1), transport.ask(world, Ask::Abort { transaction })).await;
+    }
+    match &result {
+        Ok(_) => crate::applog::line("online", &format!("{world}: saved {} records, {} image parts", added.len(), parts.len())),
+        Err(e) => crate::applog::line("online", &format!("{world}: not saved ({} records): {}", added.len(), e.0)),
     }
     session.remote = result?;
     Ok(added)

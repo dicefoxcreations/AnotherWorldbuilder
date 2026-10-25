@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import logo from "../../assets/logo.png";
 
 /**
@@ -28,6 +29,9 @@ export function AboutArea() {
         <h2>AnotherWorldbuilder{version && <small className="small"> {version}</small>}</h2>
       </div>
       <p className="small">© 2026 DiceFox Creations. All rights reserved.</p>
+      <button className="compact" onClick={() => invoke("app_log_open").catch(() => {})}>
+        Open the log folder
+      </button>
       {notices === null ? (
         <button className="compact" onClick={show}>
           Third-party licenses
