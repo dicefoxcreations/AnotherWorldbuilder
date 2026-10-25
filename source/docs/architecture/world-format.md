@@ -18,7 +18,7 @@ Goals:
 
 ```text
 world-<id>/
-  world.json                                  public descriptor: world ID, public key
+  world.json                                  public descriptor: world ID, public key, and the format (`version` 4); a folder with another one is passed over
   state-<generation>-<hash>.sqlite            the entries, consolidated
   updates/<device>-<number>.awu               entries one device added since
   media/parts/                                images, in parts named by their bytes

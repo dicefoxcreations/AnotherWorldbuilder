@@ -65,7 +65,12 @@ fn main() {
 
     std::fs::create_dir_all(new).unwrap();
     std::fs::create_dir_all(new_private).unwrap();
-    std::fs::copy(old.join("world.json"), new.join("world.json")).unwrap();
+    // Its descriptor names world format 4: an app that knows only the old
+    // one passes it over, and the old one is passed over by the new.
+    let mut descriptor: serde_json::Value = serde_json::from_slice(&std::fs::read(old.join("world.json")).unwrap()).unwrap();
+    assert_eq!(descriptor["version"], 3, "a world of record files");
+    descriptor["version"] = 4.into();
+    std::fs::write(new.join("world.json"), serde_json::to_vec_pretty(&descriptor).unwrap()).unwrap();
     let copied = std::process::Command::new("cp").args(["-a", "--reflink=auto"]).arg(old.join("media")).arg(new).status().unwrap();
     assert!(copied.success(), "the images could not be copied");
     for entry in &entries {

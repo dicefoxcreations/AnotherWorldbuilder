@@ -1,7 +1,8 @@
 //! Public world descriptors. Earlier development formats are not supported.
 use super::*;
 
-const WORLD_LAYOUT: u8 = 3;
+/// World format 4: a state and updates beside it — see `docs/architecture/world-format.md`.
+const WORLD_LAYOUT: u8 = 4;
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Descriptor {
