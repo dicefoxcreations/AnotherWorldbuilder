@@ -1194,6 +1194,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn one_who_writes_around_what_came_in_keeps_it_and_their_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
+        swap(&keeper, &gm, &world);
+        let (gm_server, bob_server) = (on_server(&gm, &world), on_server(&bob, &world));
+        let (gm_wire, bob_wire) = (online_wire(&keeper, &gm.me), online_wire(&keeper, &bob.me));
+        let gm0 = write_online(&gm, &world, &article, &gm_server, &gm_wire, None).await;
+        let _ = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await;
+        // The GM starts a word; Bob reads it.
+        let gm1 = write_online(&gm, &world, &article, &gm_server, &gm_wire, Some((gm0.code.replace("Rumours\n", "Rumours G\n"), gm0.base.clone()))).await;
+        tokio::time::sleep(crate::online::FRESH).await;
+        let bob1 = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await;
+        assert!(bob1.code.contains("Rumours G\n"), "{}", bob1.code);
+        // Both go on, neither seeing the other: the GM after the G, Bob before it.
+        let _ = write_online(&gm, &world, &article, &gm_server, &gm_wire, Some((gm1.code.replace("Rumours G\n", "Rumours GM 1\n"), gm1.base.clone()))).await;
+        // Bob's session reads the GM's on the way — his save builds on what he saw.
+        tokio::time::sleep(crate::online::FRESH).await;
+        let bob2 = write_online(&bob, &world, &article, &bob_server, &bob_wire, Some((bob1.code.replace("Rumours G\n", "Rumours Leo 16  G\n"), bob1.base.clone()))).await;
+        assert!(bob2.code.contains("Leo 16"), "his own, at once: {}", bob2.code);
+        tokio::time::sleep(crate::online::FRESH).await;
+        let bob3 = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await;
+        let gm3 = write_online(&gm, &world, &article, &gm_server, &gm_wire, None).await;
+        assert!(bob3.code.contains("Leo 16") && bob3.code.contains("M 1"), "{}", bob3.code);
+        assert_eq!(gm3.code.lines().nth(4), bob3.code.lines().nth(4));
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+        crate::online::close_session(&bob.store, &world).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn a_world_opens_with_its_frame_and_documents_follow_as_they_are_read() {
         use crate::online::{execute, Needs};
         use std::future::ready;

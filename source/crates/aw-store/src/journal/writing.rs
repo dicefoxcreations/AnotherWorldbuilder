@@ -224,13 +224,24 @@ impl Journal {
             return Err("the state this was written on is not here".into());
         }
         // Unchanged is no change — and needs no right to change.
-        if opened.doc.plain_at(&base)? == *wanted {
+        let seen = opened.doc.plain_at(&base)?;
+        let tracing = std::env::var_os("AW_TRACE").is_some();
+        if seen == *wanted {
+            if tracing {
+                eprintln!("TRACE edit {layer}: unchanged against {} heads", base.len());
+            }
             return Ok(None);
         }
         let seed = head.write_seed(&keys)?.ok_or("you may not change this part")?;
         let time = self.draft_time(&head.article, author, session, time);
         let opened = self.opened.get_mut(&(layer, generation)).ok_or("not open")?;
         let changes = opened.doc.edit(&base, wanted, author.id().as_str(), session, time)?;
+        if tracing {
+            let now = opened.doc.plain()?.text;
+            let at = super::diff::splices(&seen.text, &wanted.text);
+            let kept = at.iter().all(|s| now.contains(s.insert.as_str()));
+            eprintln!("TRACE edit {layer}: {} changes, splices {:?}, all in it now: {kept}", changes.len(), at.iter().map(|s| (s.at, s.delete, s.insert.clone())).collect::<Vec<_>>());
+        }
         self.sign_changes(&head, changes, &WriteKey::from_seed(&seed), author, session, time)
     }
 

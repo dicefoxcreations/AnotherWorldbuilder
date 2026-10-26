@@ -233,9 +233,41 @@ pub fn ranges(old: &str, new: &str) -> (Vec<Range>, Vec<Range>) {
 /// The edits that turn `old` into `new`, in order — each position counts in
 /// the text as the edits before it left it.
 pub fn splices(old: &str, new: &str) -> Vec<Splice> {
+    as_splices(steps(old, new))
+}
+
+/// The edits to write `new` over `old` — letter by letter, the fewest. What
+/// one did not change is never taken out and put back: someone writing at
+/// the same moment next to it keeps what they wrote, where they wrote it.
+/// (`splices` is the way a reader sees a change — whole words.)
+pub fn edits(old: &str, new: &str) -> Vec<Splice> {
+    let a: Vec<char> = old.chars().collect();
+    let b: Vec<char> = new.chars().collect();
+    let head = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let tail = a[head..].iter().rev().zip(b[head..].iter().rev()).take_while(|(x, y)| x == y).count();
+    let (a_mid, b_mid) = (&a[head..a.len() - tail], &b[head..b.len() - tail]);
+    let text = |c: &[char]| c.iter().collect::<String>();
+    let mut out = Vec::new();
+    push(&mut out, Kind::Same, &text(&a[..head]));
+    match lcs(a_mid, b_mid, 4_000_000) {
+        Some(steps) => {
+            for (kind, c) in steps {
+                push(&mut out, kind, c.encode_utf8(&mut [0; 4]));
+            }
+        }
+        None => {
+            push(&mut out, Kind::Gone, &text(a_mid));
+            push(&mut out, Kind::New, &text(b_mid));
+        }
+    }
+    push(&mut out, Kind::Same, &text(&a[a.len() - tail..]));
+    as_splices(out)
+}
+
+fn as_splices(steps: Vec<Step>) -> Vec<Splice> {
     let mut out: Vec<Splice> = Vec::new();
     let mut at = 0;
-    for step in steps(old, new) {
+    for step in steps {
         let len = units(&step.text);
         match step.kind {
             Kind::Same => at += len,
@@ -270,6 +302,16 @@ mod tests {
     fn marked(text: &str, ranges: &[Range]) -> Vec<String> {
         let units: Vec<u16> = text.encode_utf16().collect();
         ranges.iter().map(|r| String::from_utf16(&units[r.start..r.end]).unwrap()).collect()
+    }
+
+    #[test]
+    fn written_letter_by_letter_nothing_unchanged_is_taken_out() {
+        let old = "Am Markt. G\n\nNext.";
+        assert_eq!(edits(old, "Am Markt. GM\n\nNext."), vec![Splice { at: 11, delete: 0, insert: "M".into() }]);
+        assert_eq!(edits(old, "Am Markt. Leo G\n\nNext."), vec![Splice { at: 10, delete: 0, insert: "Leo ".into() }]);
+        let both = "Ä🙂 one two three";
+        let changed = "Ä🙂 one 2 three!";
+        assert_eq!(apply(both, &edits(both, changed)), changed);
     }
 
     #[test]

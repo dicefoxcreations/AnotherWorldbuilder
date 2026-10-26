@@ -173,10 +173,10 @@ impl LayerDoc {
             self.doc.put(ROOT, "title", wanted.title.as_str())?;
         }
         if now.text != wanted.text {
-            // Written as a reader sees the change — words, and letters only
-            // inside a word that stays alike — not as the smallest edit.
+            // Letter by letter: what stays is not taken out and put back, so
+            // what someone wrote beside it at the same time stays where it was.
             let text = self.text.clone();
-            for s in diff::splices(&now.text, &wanted.text) {
+            for s in diff::edits(&now.text, &wanted.text) {
                 self.doc.splice_text(&text, s.at, s.delete as isize, &s.insert)?;
             }
         }
@@ -497,6 +497,28 @@ mod tests {
         }
         let now = doc.plain().unwrap().text;
         assert!(now.contains("GM dreizehn.") && now.contains("Leo dreizehn gleicher Absatz."), "{now}");
+    }
+
+    #[test]
+    fn one_who_wrote_around_what_came_in_keeps_their_own() {
+        let para = |n: u32, more: &str| format!("Absatz {n}: Die Gruppe zieht weiter am Markt.{more}");
+        let text = |more: &str| [para(15, ""), para(16, more), para(17, "")].join("\n\n");
+        let mut doc = LayerDoc::genesis(&plain(&text("")), "lay", 1).unwrap();
+        let base = doc.doc.get_heads();
+        let heads = |c: &[Change]| c.iter().map(|c| c.hash()).collect::<Vec<_>>();
+        // The GM types; Leo reads the first letter.
+        let mut gm = heads(&doc.edit(&base, &plain(&text(" G")), "id:gm", "s1", 1).unwrap());
+        let leo_base = gm.clone();
+        for more in [" GM", " GM ", " GM 1"] {
+            let c = doc.edit(&gm, &plain(&text(more)), "id:gm", "s1", 1).unwrap();
+            if !c.is_empty() {
+                gm = heads(&c);
+            }
+        }
+        // Leo writes before the G he saw.
+        doc.edit(&leo_base, &plain(&text(" Leo 16  G")), "id:leo", "s2", 1).unwrap();
+        let now = doc.plain().unwrap().text;
+        assert!(now.contains("Leo 16") && now.contains("M 1"), "{now}");
     }
 
     #[test]

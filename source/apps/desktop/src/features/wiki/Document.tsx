@@ -649,7 +649,7 @@ function DocumentEditor({
     const now = textRef.current ?? sent;
     const before = sentDoc;
     const ours = docRef.current;
-    trace("adopt", { theirs: flat(document), before: before && flat(before), ours: ours && flat(ours), typedInCode: now !== sent });
+    trace("adopt", { theirs: flat(document), before: before && flat(before), ours: ours && flat(ours), typedInCode: now !== sent, sent, now });
     kept.current = { code, base };
     keptDoc.current = document;
     // Typed on the visual side meanwhile: merged there, part by part — the
@@ -719,7 +719,7 @@ function DocumentEditor({
     busy.current = true;
     unsavedSince.current = null;
     setStatus("saving");
-    trace("save", sentDoc && flat(sentDoc));
+    trace("save", { doc: sentDoc && flat(sentDoc), code: sending, base: Object.keys(kept.current.base).length });
     const started = Date.now();
     try {
       const saving = api.documentSave(world.id, article.id, sending, kept.current.base, session);
@@ -742,7 +742,7 @@ function DocumentEditor({
       }
       setStatus("saved");
       setProblem(null);
-      trace("saved", { ms: Date.now() - started, same: !!(meant && sameContent(meant.document, r.document)) });
+      trace("saved", { ms: Date.now() - started, same: !!(meant && sameContent(meant.document, r.document)), code: r.code });
     } catch (e) {
       trace("save-failed", { ms: Date.now() - started, error: String(e) });
       setStatus("failed");
