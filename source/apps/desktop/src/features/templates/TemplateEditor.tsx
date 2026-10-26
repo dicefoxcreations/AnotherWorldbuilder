@@ -373,6 +373,10 @@ export function TemplateEditor({
               world={world}
               template={draft}
               templates={others}
+              documents={articles.filter((a) => a.articleType === draft.id && !a.pending).map((a) => a.id)}
+              saved={saved}
+              onApplied={onArticlesChanged}
+              onError={onError}
               onTemplate={(fresh) => {
                 onChange(fresh);
                 api.templateWrite(world.id, fresh).then(setText).catch(() => {});
@@ -544,14 +548,38 @@ function Preview({
   world,
   template,
   templates,
+  documents,
+  saved,
+  onApplied,
+  onError,
   onTemplate,
 }: {
   world: WorldInfo;
   template: Template;
   /** The other types — the supertype chain comes from them. */
   templates: Template[];
+  /** The documents of this type there are. */
+  documents: string[];
+  saved: boolean;
+  onApplied: () => void;
+  onError: (e: unknown) => void;
   onTemplate: (t: Template) => void;
 }) {
+  const [applying, setApplying] = useState<string | null>(null);
+  const apply = () => {
+    const access = bracket(template);
+    setApplying("…");
+    api
+      .typeAccessApply(world.id, template.id, documents, access.view, access.edit)
+      .then((n) => {
+        setApplying(`${n} changed`);
+        onApplied();
+      })
+      .catch((e) => {
+        setApplying(null);
+        onError(e);
+      });
+  };
   // What an article of this type really gets: its own and the inherited.
   const whole = effective(templates, template);
   const ownBlocks = new Set(template.blocks.map((b) => b.key));
@@ -589,11 +617,29 @@ function Preview({
           // The article's permission: the name is its base layer — whoever
           // cannot open it finds the article nowhere. It never has access of
           // its own; that would be a second statement for the same decision.
-          <AccessRow
-            world={world}
-            access={bracket(template)}
-            onChange={(part) => onTemplate(articleAccess(template, part))}
-          />
+          <>
+            <AccessRow
+              world={world}
+              access={bracket(template)}
+              onChange={(part) => onTemplate(articleAccess(template, part))}
+            />
+            <div className="access-row">
+              <span className="mark-short" title="Who besides the GM may make documents of it">
+                ＋
+              </span>
+              <VisibilityPicker world={world} value={template.create || "gm"} onChange={(create) => onTemplate({ ...template, create: create === "gm" ? "" : create })} small />
+              {documents.length > 0 && (
+                <button
+                  className="compact"
+                  disabled={!saved || applying === "…"}
+                  title={saved ? "Who sees and edits, for the documents there are — sections with access of their own keep it" : "Save the type first"}
+                  onClick={apply}
+                >
+                  {applying ?? `Apply to ${documents.length} documents`}
+                </button>
+              )}
+            </div>
+          </>
         }
       />
 

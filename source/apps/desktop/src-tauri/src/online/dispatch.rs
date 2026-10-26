@@ -56,6 +56,7 @@ pub(super) async fn run(app: tauri::AppHandle, store: Store, world: &str, comman
                     "article_create" => serde_json::to_value(crate::article_create(app.clone(), world.to_string(), argument(args, "articleType")?, argument(args, "slug")?, argument(args, "name")?, argument(args, "visibility")?, argument(args, "layers")?)?)?,
                     "article_propose" => serde_json::to_value(crate::article_propose(app.clone(), world.to_string(), argument(args, "article")?, argument(args, "articleType")?, argument(args, "slug")?, argument(args, "name")?, argument(args, "layers")?)?)?,
                     "texts_written" => serde_json::to_value(crate::texts_written(app.clone(), world.to_string(), argument(args, "articleType")?, argument(args, "texts")?)?)?,
+                    "type_access_apply" => serde_json::to_value(crate::type_access_apply(app.clone(), world.to_string(), argument(args, "articleType")?, argument(args, "articles")?, argument(args, "view")?, argument(args, "edit")?)?)?,
                     "visibility_set" => serde_json::to_value(crate::visibility_set(app.clone(), world.to_string(), argument(args, "article")?, argument(args, "layer")?, argument(args, "policy")?)?)?,
                     "article_delete" => serde_json::to_value(crate::article_delete(app.clone(), world.to_string(), argument(args, "article")?, argument(args, "confirmation")?)?)?,
                     "template_read" => serde_json::to_value(crate::template_read(app.clone(), world.to_string(), argument(args, "text")?, argument(args, "base")?)?)?,

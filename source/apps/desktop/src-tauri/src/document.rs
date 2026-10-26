@@ -3152,6 +3152,23 @@ mod tests {
     }
 
     #[test]
+    fn a_types_access_goes_to_its_documents_and_their_sections_alike() {
+        let w = world("typeaccess");
+        let story = TemplateBlock { key: "story".into(), title: "Story".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("story", "all", "gm", "open")] };
+        let secret = TemplateBlock { key: "secret".into(), title: "Secret".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("secret", "gm", "gm", "gm-only")] };
+        w.store.save_templates(&w.id, &[template("npc", vec![], vec![story, secret])]).unwrap();
+        let ilva = doc(&w, "npc", "Ilva", vec![layer("story", "A smuggler.", "all", "gm", "open"), layer("secret", "Works for the duke.", "gm", "gm", "gm-only")]);
+        let other = doc(&w, "npc", "Bram", vec![layer("story", "A fisher.", "all", "gm", "open")]);
+        let n = crate::type_access_apply_in(&w.store, &w.id, "npc", &[ilva.clone()], None, Some("players".into())).unwrap();
+        assert_eq!(n, 1);
+        let code = code_of(&w.store, &w.gm, &w.id, &ilva).unwrap().code;
+        assert!(code.starts_with("<article view=all edit=players>"), "{code}");
+        assert!(code.contains("<block title=Story>\nA smuggler."), "the section follows: {code}");
+        assert!(code.contains("<block title=Secret view=gm edit=gm level=gm-only>"), "the secret keeps its own: {code}");
+        assert!(code_of(&w.store, &w.gm, &w.id, &other).unwrap().code.contains("edit=gm>"), "only the documents named");
+    }
+
+    #[test]
     fn a_player_may_only_what_they_may() {
         let w = world("player");
         let story = TemplateBlock {

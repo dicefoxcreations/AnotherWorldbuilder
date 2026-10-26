@@ -1979,6 +1979,54 @@ fn visibility_set(
     Ok(())
 }
 
+/// A type's access, given to documents of it that are there already: who
+/// sees and who edits each of `articles` — and each section of them that
+/// had the same access as its document; a section with access of its own
+/// keeps it. The game master's. How many documents changed.
+pub(crate) fn type_access_apply_in(store: &Store, world: &str, article_type: &str, articles: &[String], view: Option<String>, edit: Option<String>) -> Answer<usize> {
+    if !store.is_gm(world) {
+        return Err(AppError("Only the GM sets who sees and edits documents.".into()));
+    }
+    let identity = store.load_identity()?;
+    let held = store.view_keys(world, &identity)?;
+    let all = store.load_articles(world)?;
+    let same = |a: &str, b: &str| a == b || a.parse::<Policy>().ok().is_some_and(|a| b.parse::<Policy>().ok() == Some(a));
+    let mut changed = 0;
+    for article in all.iter().filter(|a| a.article_type == article_type && articles.contains(&a.id.to_string())) {
+        let id = article.id.to_string();
+        let base = article.layers.iter().find(|l| l.is_base).ok_or_else(|| AppError("A document without its base.".into()))?;
+        let base = layer_content(base, &held)?;
+        let view = view.as_deref().map(|v| own_view(v, &id, &article.article_type));
+        let edit = edit.as_deref().map(|e| own_view(e, &id, &article.article_type));
+        let mut touched = false;
+        for layer in &article.layers {
+            let content = layer_content(layer, &held)?;
+            // A section with access of its own — a secret, say — keeps it.
+            if !(same(&content.own, &base.own) && same(&content.edit, &base.edit)) {
+                continue;
+            }
+            let own = view.clone().unwrap_or_else(|| content.own.clone());
+            let rule = edit.clone().unwrap_or_else(|| content.edit.clone());
+            if same(&own, &content.own) && same(&rule, &content.edit) {
+                continue;
+            }
+            let wanted: Policy = own.parse().map_err(AppError::from)?;
+            store.ensure_attributes(world, &wanted)?;
+            store.ensure_attributes(world, &rule.parse().map_err(AppError::from)?)?;
+            store.rekey(world, layer.id, &wanted, Access { section: content.section, own, edit: rule }, layer.level, "")?;
+            touched = true;
+        }
+        changed += usize::from(touched);
+    }
+    Ok(changed)
+}
+
+#[cfg(feature = "gui")]
+#[cfg_attr(feature = "gui", tauri::command(async))]
+fn type_access_apply(app: tauri::AppHandle, world: String, article_type: String, articles: Vec<String>, view: Option<String>, edit: Option<String>) -> Answer<usize> {
+    type_access_apply_in(&store(&app)?, &world, &article_type, &articles, view, edit)
+}
+
 #[cfg(feature = "gui")]
 /// Deletes an article — for good.
 ///
@@ -2408,6 +2456,7 @@ pub fn run() {
             article_create,
             view,
             visibility_set,
+            type_access_apply,
             article_delete,
             template_read,
             template_write,

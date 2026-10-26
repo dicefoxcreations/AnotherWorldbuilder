@@ -797,7 +797,7 @@ export type Node =
   /** `<view of=Stats>` — a property group's layout, drawn with this document's values. */
   | { kind: "view"; of: string }
   /** `<embed of=Sessions>` — another document's text under its name. */
-  | { kind: "embed"; of: string; fold?: string; title?: string }
+  | { kind: "embed"; of: string; fold?: string; title?: string; section?: string }
   /** `for`: a stand-in for a part this reader may not open. */
   | { kind: "image"; src: string; align: string; wrap: boolean; width: number; caption: string; for: string }
   /** `<list type=Place …>` — which documents it shows, the display decides. */
@@ -1230,6 +1230,9 @@ export const api = {
    * Rust rejects the change when the full keyring is missing. There is
    * deliberately no check here — one in the frontend could be bypassed.
    */
+  /** A type's access for documents of it already there — and their sections that had theirs. How many changed. */
+  typeAccessApply: (world: string, articleType: string, articles: string[], view: string | null, edit: string | null) =>
+    invoke<number>("type_access_apply", { world, articleType, articles, view, edit }),
   visibilitySet: (world: string, article: string, layer: string | null, policy: string) =>
     invoke<void>("visibility_set", { world, article, layer, policy }),
 

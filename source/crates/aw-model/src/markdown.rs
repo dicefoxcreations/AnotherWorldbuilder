@@ -223,6 +223,9 @@ pub enum Node {
         /// `title=off`: its text without the name above it.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         title: String,
+        /// `section=Map`: of its text, that section alone.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        section: String,
     },
     /// `<view of=Stats>` — the layout of a property group, drawn here with
     /// this document's values. Defined once in the group, it changes
@@ -941,7 +944,7 @@ fn read_tag(raw: &str) -> Option<Node> {
     if name.eq_ignore_ascii_case("embed") {
         let attrs = attributes(rest);
         let get = |n: &str| attrs.iter().find(|(a, _)| a == n).map(|(_, v)| v.trim().to_string()).unwrap_or_default();
-        return Some(Node::Embed { of: get("of"), fold: get("fold"), title: get("title") });
+        return Some(Node::Embed { of: get("of"), fold: get("fold"), title: get("title"), section: get("section") });
     }
     if name.eq_ignore_ascii_case("create") {
         let attrs = attributes(rest);
@@ -1582,10 +1585,14 @@ mod tests {
 
     #[test]
     fn an_embed_names_the_document_it_shows() {
-        assert_eq!(split("<embed of=\"Sessions\">"), vec![Node::Embed { of: "Sessions".into(), fold: String::new(), title: String::new() }]);
+        assert_eq!(split("<embed of=\"Sessions\">"), vec![Node::Embed { of: "Sessions".into(), fold: String::new(), title: String::new(), section: String::new() }]);
         assert_eq!(
             split("<embed of=Quests fold=folded title=off>"),
-            vec![Node::Embed { of: "Quests".into(), fold: "folded".into(), title: "off".into() }]
+            vec![Node::Embed { of: "Quests".into(), fold: "folded".into(), title: "off".into(), section: String::new() }]
+        );
+        assert_eq!(
+            split("<embed of=Harbour section=Map>"),
+            vec![Node::Embed { of: "Harbour".into(), fold: String::new(), title: String::new(), section: "Map".into() }]
         );
     }
 

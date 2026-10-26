@@ -581,6 +581,18 @@ export function EmbedCard({ attrs, onChange }: { attrs: ImageAttrs; onChange: (n
               onRemove={() => onChange(writeTagLine("embed", withAttr(attrs, "of", "")))}
             />
           </InspectorSection>
+          {chosen && (
+            <InspectorSection title="Section">
+              <select value={attr(attrs, "section")} onChange={(e) => set("section", e.target.value)}>
+                <option value="">The whole page</option>
+                {[...new Set([...(typeOf(data?.templates ?? [], chosen.articleType)?.blocks ?? []).map((b) => b.title.trim()), ...chosen.layers.map((l) => l.title.trim())].filter(Boolean))].map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </InspectorSection>
+          )}
           <InspectorSection title="Look">
             <div className="inspector-access block-settings">
               <span className="small muted">Title</span>
@@ -619,7 +631,7 @@ export function EmbedCard({ attrs, onChange }: { attrs: ImageAttrs; onChange: (n
         </>
       }
     >
-      <Embed of={of} fold={fold} title={title} />
+      <Embed of={of} fold={fold} title={title} section={attr(attrs, "section")} />
     </Surface>
   );
 }

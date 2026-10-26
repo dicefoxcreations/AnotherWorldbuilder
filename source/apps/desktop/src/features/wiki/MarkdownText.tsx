@@ -371,7 +371,7 @@ function Element({
     case "create":
       return <CreateButton of={node.of} label={node.label} />;
     case "embed":
-      return <Embed of={node.of} fold={node.fold} title={node.title} />;
+      return <Embed of={node.of} fold={node.fold} title={node.title} section={node.section} />;
     case "anchor":
       return <Anchor id={node.id} />;
     case "wikilink": {
