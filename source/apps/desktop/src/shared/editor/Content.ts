@@ -1,3 +1,4 @@
+import { rebase } from "./Merge";
 import type { DocumentText } from "../../api/client";
 
 /**
@@ -36,5 +37,30 @@ export function keepTyped(saved: DocumentText, typed: DocumentText | null): Docu
       if (was.length !== block.parts.length) return block;
       return { ...block, parts: block.parts.map((p, j) => (was[j].text.trim() === p.text.trim() ? { ...p, text: was[j].text } : p)) };
     }),
+  };
+}
+
+/**
+ * What came from others (`theirs`) with what one typed since `base` on top
+ * — part by part, property by property. None where one's own changes
+ * reach beyond the parts the others' reading has (a part added here): then
+ * the code is merged instead.
+ */
+export function mergeTyped(base: DocumentText, ours: DocumentText, theirs: DocumentText): DocumentText | null {
+  const parts = (d: DocumentText) => new Map(d.blocks.flatMap((b) => b.parts.map((p) => [p.key, p.text] as const)));
+  const [was, mine, other] = [parts(base), parts(ours), parts(theirs)];
+  for (const [key, text] of mine) if (!other.has(key) && text !== was.get(key)) return null;
+  const props = (d: DocumentText) => new Map(d.properties.map((p) => [p.name, p.value] as const));
+  const [pWas, pMine] = [props(base), props(ours)];
+  for (const [name, value] of pMine) if (!theirs.properties.some((p) => p.name === name) && value !== pWas.get(name)) return null;
+  const merged = (b: string | undefined, o: string | undefined, t: string) => (b === undefined || o === undefined ? t : rebase(b, o, t));
+  return {
+    ...theirs,
+    name: rebase(base.name, ours.name, theirs.name),
+    properties: theirs.properties.map((p) => ({ ...p, value: merged(pWas.get(p.name), pMine.get(p.name), p.value) })),
+    blocks: theirs.blocks.map((block) => ({
+      ...block,
+      parts: block.parts.map((p) => ({ ...p, text: merged(was.get(p.key), mine.get(p.key), p.text) })),
+    })),
   };
 }

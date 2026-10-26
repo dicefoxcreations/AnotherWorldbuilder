@@ -1098,6 +1098,62 @@ mod tests {
         assert!(std::fs::read_dir(cache).unwrap().next().is_none(), "closing releases the disposable data");
     }
 
+    /// As the editor does: what one typed, saved on the state one last kept —
+    /// and what stands then. None: only read.
+    async fn write_online(who: &Someone, world: &str, article: &str, server: &Server, wire: &OnlineWire<'_>, wanted: Option<(String, document::Bases)>) -> document::DocumentCode {
+        use crate::online::{execute, Needs};
+        execute(&who.store, world, server, wire, Needs::Articles(vec![article.to_string()]), |cache| {
+            std::future::ready((|| {
+                if let Some((text, base)) = &wanted {
+                    document::save(&cache, &who.me, world, article, text, base, &format!("s-{}", who.me.public().name))?;
+                }
+                document::code_of(&cache, &who.me, world, article)
+            })())
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn two_who_type_in_one_part_at_once_both_keep_what_they_typed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
+        let keeper = keeper(dir.path(), &gm);
+        let (world, article) = world(&gm, "Eldermere");
+        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
+        swap(&keeper, &gm, &world);
+        let (gm_server, bob_server) = (on_server(&gm, &world), on_server(&bob, &world));
+        let (gm_wire, bob_wire) = (online_wire(&keeper, &gm.me), online_wire(&keeper, &bob.me));
+        let who = [(&gm, &gm_server, &gm_wire), (&bob, &bob_server, &bob_wire)];
+        let mut kept = Vec::new();
+        for (w, server, wire) in who {
+            kept.push(write_online(w, &world, &article, server, wire, None).await);
+        }
+        let typed = ["-the-GM-adds-this.", "Bob writes that. "];
+        for n in 0..typed[0].len().max(typed[1].len()) {
+            for (i, (w, server, wire)) in who.into_iter().enumerate() {
+                let Some(c) = typed[i].chars().nth(n) else { continue };
+                let now = &kept[i].code;
+                // The GM at the part's end, Bob at its start: one paragraph, both.
+                let text = if i == 0 {
+                    now.replacen("\n</block>", &format!("{c}\n</block>"), 1)
+                } else {
+                    let at = now.find("Content of Rumours").unwrap();
+                    format!("{}{c}{}", &now[..at], &now[at..])
+                };
+                kept[i] = write_online(w, &world, &article, server, wire, Some((text, kept[i].base.clone()))).await;
+            }
+        }
+        // The sessions read the server again — each with what the other wrote.
+        tokio::time::sleep(crate::online::FRESH).await;
+        let gm_code = write_online(&gm, &world, &article, &gm_server, &gm_wire, None).await.code;
+        let bob_code = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await.code;
+        assert!(gm_code.contains("Bob writes that. Content of Rumours-the-GM-adds-this."), "{gm_code}");
+        assert_eq!(gm_code.lines().nth(4), bob_code.lines().nth(4), "both read the same");
+        crate::online::close_session(&gm.store, &world).await.unwrap();
+        crate::online::close_session(&bob.store, &world).await.unwrap();
+    }
+
     #[tokio::test]
     async fn a_world_opens_with_its_frame_and_documents_follow_as_they_are_read() {
         use crate::online::{execute, Needs};

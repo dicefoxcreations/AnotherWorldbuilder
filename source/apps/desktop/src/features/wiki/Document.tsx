@@ -37,7 +37,7 @@ import { anchorName, anchorRange, anchorsIn, markSection, relinked, renameInText
 import { withClosingTag } from "../../shared/editor/Closing";
 import { formatted } from "../../shared/editor/Format";
 import { cutAtHeadings, headingLevel } from "../../shared/Sections";
-import { keepTyped, sameContent } from "../../shared/editor/Content";
+import { keepTyped, mergeTyped, sameContent } from "../../shared/editor/Content";
 import { mapPosition, rebase, useSteadyCaret } from "../../shared/editor/Merge";
 import { RemoteCarets, type RemoteCaret } from "../../shared/editor/RemoteCarets";
 import { MarkedField } from "../../shared/editor/MarkedField";
@@ -617,7 +617,15 @@ function DocumentEditor({
   // What is kept: the code as it stands, and the state of each layer it
   // stands on. Saving writes the difference against these.
   const kept = useRef<{ code: string; base: Bases } | null>(null);
+  // The document as kept — what one's own changes on the visual side are measured against.
+  const keptDoc = useRef<DocumentText | null>(null);
   const busy = useRef(false);
+  // Typed on while a save was on its way.
+  const again = useRef(false);
+  // What others wrote, passed over while saving: looked at once the save is done.
+  const missed = useRef(false);
+  // The last change on the visual side — only its code goes into the text.
+  const writeSeq = useRef(0);
   // Since when what was typed waits to be kept.
   const unsavedSince = useRef<number | null>(null);
   // Changes on the visual side whose code is still being written.
@@ -636,10 +644,22 @@ function DocumentEditor({
   const toolbarTarget = useRef<((field: ToolbarField | null) => void) | null>(null);
 
   /** Takes in the document as it now stands — keeping what was typed since. */
-  const adopt = (code: string, document: DocumentText, base: Bases, sent: string) => {
+  /** `sentDoc`: the reading of `sent` — what one's own changes are measured against. */
+  const adopt = (code: string, document: DocumentText, base: Bases, sent: string, sentDoc: DocumentText | null) => {
     const now = textRef.current ?? sent;
+    const before = sentDoc;
+    const ours = docRef.current;
+    trace("adopt", { theirs: flat(document), before: before && flat(before), ours: ours && flat(ours), typedInCode: now !== sent });
     kept.current = { code, base };
-    if (now === sent) {
+    keptDoc.current = document;
+    // Typed on the visual side meanwhile: merged there, part by part — the
+    // code follows from it. Reading merged code back would race the next
+    // keystroke and lose it.
+    const merged = before && ours && !sameContent(before, ours) ? mergeTyped(before, ours, document) : null;
+    trace("adopt-merged", merged && flat(merged));
+    if (merged) {
+      changeDoc(merged);
+    } else if (now === sent) {
       fromVisual.current = true;
       setText(code);
       setDoc(keepTyped(document, docRef.current));
@@ -654,6 +674,7 @@ function DocumentEditor({
       .documentOpen(world.id, article.id)
       .then((r) => {
         kept.current = { code: r.code, base: r.base };
+        keptDoc.current = r.document;
         fromVisual.current = true;
         setText(r.code);
         setDoc(r.document);
@@ -670,10 +691,12 @@ function DocumentEditor({
       return;
     }
     let gone = false;
+    const from = docRef.current;
     api
       .documentRead(world.id, article.id, text, docRef.current)
       .then((r) => {
-        if (gone) return;
+        // Changed on the visual side meanwhile: that is newer than this reading.
+        if (gone || docRef.current !== from) return;
         setErrors(r.errors);
         setDoc(r.document);
       })
@@ -687,10 +710,17 @@ function DocumentEditor({
   const save = async () => {
     const sending = textRef.current;
     const sentDoc = docRef.current;
-    if (busy.current || sending === null || !kept.current || sending === kept.current.code) return;
+    if (sending === null || !kept.current || sending === kept.current.code) return;
+    if (busy.current) {
+      // Typed on while one is on its way: kept once it is back.
+      again.current = true;
+      return;
+    }
     busy.current = true;
     unsavedSince.current = null;
     setStatus("saving");
+    trace("save", sentDoc && flat(sentDoc));
+    const started = Date.now();
     try {
       const saving = api.documentSave(world.id, article.id, sending, kept.current.base, session);
       pending.current = saving.catch(() => {});
@@ -703,19 +733,30 @@ function DocumentEditor({
       const meant = await api.documentRead(world.id, article.id, sending, r.document).catch(() => null);
       if (meant && meant.errors.length === 0 && sameContent(meant.document, r.document)) {
         kept.current = { code: sending, base: r.base };
+        keptDoc.current = r.document;
         // Typed on meanwhile — perhaps not yet in the code: the field stays as it is.
         const untouched = writing.current === 0 && docRef.current === sentDoc && textRef.current === sending;
         if (untouched) setDoc(keepTyped(r.document, docRef.current));
       } else {
-        adopt(r.code, r.document, r.base, sending);
+        adopt(r.code, r.document, r.base, sending, meant && meant.errors.length === 0 ? meant.document : null);
       }
       setStatus("saved");
       setProblem(null);
+      trace("saved", { ms: Date.now() - started, same: !!(meant && sameContent(meant.document, r.document)) });
     } catch (e) {
+      trace("save-failed", { ms: Date.now() - started, error: String(e) });
       setStatus("failed");
       setProblem(String(e));
     } finally {
       busy.current = false;
+    }
+    // What was typed meanwhile, and what others wrote meanwhile.
+    if (again.current || (textRef.current !== null && kept.current && textRef.current !== kept.current.code)) {
+      again.current = false;
+      setTimeout(() => void save(), 50);
+    } else if (missed.current) {
+      missed.current = false;
+      lookAgain();
     }
   };
 
@@ -787,37 +828,68 @@ function DocumentEditor({
 
   // What others wrote arrives while one writes: it comes in, what one typed
   // stays.
-  useEffect(() => {
-    if (!kept.current || busy.current || writing.current > 0) return;
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Passed over now: looked at again in a moment, whatever else happens. */
+  const later = () => {
+    missed.current = true;
+    if (retry.current) return;
+    retry.current = setTimeout(() => {
+      retry.current = null;
+      if (missed.current) {
+        missed.current = false;
+        lookAgain();
+      }
+    }, 700);
+  };
+  useEffect(() => () => void (retry.current && clearTimeout(retry.current)), []);
+  const lookAgain = () => {
+    if (!kept.current) return;
+    if (busy.current || writing.current > 0) {
+      later();
+      return;
+    }
     const sent = kept.current.code;
     api
       .documentOpen(world.id, article.id)
       .then((r) => {
-        if (busy.current || writing.current > 0 || !kept.current || kept.current.code !== sent) return;
+        if (busy.current || writing.current > 0 || !kept.current || kept.current.code !== sent) {
+          later();
+          return;
+        }
         if (r.code === sent) {
           kept.current = { code: sent, base: r.base };
           return;
         }
-        adopt(r.code, r.document, r.base, sent);
+        adopt(r.code, r.document, r.base, sent, keptDoc.current);
       })
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [article]);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(lookAgain, [article]);
 
   // Visual change → the code follows.
   const changeDoc = (next: DocumentText) => {
     setDoc(next);
     docRef.current = next;
     writing.current++;
+    const seq = ++writeSeq.current;
     api
       .documentWrite(next)
       .then((code) => {
+        // A later change's code is on its way — it holds this one.
+        if (seq !== writeSeq.current) return;
         fromVisual.current = true;
         setText(code);
         setErrors([]);
       })
       .catch(onError)
-      .finally(() => writing.current--);
+      .finally(() => {
+        writing.current--;
+        if (writing.current === 0 && missed.current && !busy.current) {
+          missed.current = false;
+          lookAgain();
+        }
+      });
   };
 
   if (text === null || doc === null) return <p className="note">Opening …</p>;
@@ -3408,3 +3480,18 @@ function PartFlow({
 function mayEditPart(article: ArticleView, key: string): boolean {
   return article.layers.some((l) => l.section === key && l.mayEdit);
 }
+
+/** A trace of the editor's saves and merges, for tests: on with `localStorage.awTrace = "1"`. */
+function trace(what: string, data: unknown) {
+  try {
+    if (localStorage.getItem("awTrace") !== "1") return;
+    const all = ((window as unknown as { __awTrace?: unknown[] }).__awTrace ??= []);
+    all.push([Date.now() % 100000, what, data]);
+    if (all.length > 400) all.shift();
+  } catch {
+    // No trace — nothing else changes.
+  }
+}
+
+/** The parts' texts, one after the other — for the trace. */
+const flat = (d: DocumentText) => d.blocks.flatMap((b) => b.parts.map((p) => p.text)).join("|");

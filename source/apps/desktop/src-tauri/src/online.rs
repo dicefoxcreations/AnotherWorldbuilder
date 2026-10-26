@@ -311,9 +311,13 @@ impl Session {
             if digest != self.remote {
                 came |= self.read_missing(world, transport, &mark).await?;
             }
-            self.mark = mark;
+            self.mark = mark.clone();
         }
-        if digest != self.remote || came {
+        // The digest alone does not tell: after one's own commit it is the
+        // server's — with what others wrote meanwhile, not read here yet.
+        // The server's order further on than this session's says that.
+        let behind = same_order && mark.as_ref().zip(self.mark.as_ref()).is_some_and(|(there, here)| there.at > here.at);
+        if digest != self.remote || came || behind {
             came |= self.read_since(world, transport).await?;
         }
         if came || !self.prepared {
