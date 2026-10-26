@@ -32,6 +32,8 @@ pub const FORMAT: u32 = 5;
 pub const FILE: &str = "world.sqlite";
 /// The pictures' folder in a world's folder.
 pub const MEDIA: &str = "media";
+/// Versions kept per document when the game master has not said otherwise.
+pub const VERSION_LIMIT: u32 = 50;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS world(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -58,11 +60,12 @@ const SCHEMA: &str = "
         UNIQUE(document, session));
     CREATE INDEX IF NOT EXISTS versions_document ON versions(document, ended);
     CREATE TABLE IF NOT EXISTS images(
-        id TEXT PRIMARY KEY, file TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '',
-        mime TEXT NOT NULL, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0,
-        view TEXT NOT NULL, edit TEXT NOT NULL, caption TEXT NOT NULL DEFAULT '');
+        id TEXT PRIMARY KEY, file TEXT NOT NULL, preview TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+        folder TEXT NOT NULL DEFAULT '', mime TEXT NOT NULL, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0,
+        size INTEGER NOT NULL DEFAULT 0, uploaded INTEGER NOT NULL DEFAULT 0, uploaded_by TEXT NOT NULL DEFAULT '',
+        defaults TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS folders(id TEXT PRIMARY KEY, name TEXT NOT NULL, parent TEXT NOT NULL DEFAULT '');
-    CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, name TEXT NOT NULL, verify_key TEXT NOT NULL, at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, name TEXT NOT NULL, verify_key TEXT NOT NULL, seal_key TEXT NOT NULL DEFAULT '', at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS invited(id TEXT PRIMARY KEY);
 ";
 
@@ -175,6 +178,14 @@ impl Reader {
         self.gm
     }
 
+    /// What tells two readers apart: two with the same key see the same.
+    pub fn key(&self) -> String {
+        if self.gm {
+            return "gm".into();
+        }
+        self.held.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(" ")
+    }
+
     /// Whether a rule lets this reader in. What does not read is the game
     /// master's alone.
     pub fn allows(&self, rule: &str) -> bool {
@@ -270,11 +281,19 @@ pub struct Version {
     pub signature: String,
 }
 
-/// What a version holds: the layers it changed, whole.
+/// What a version holds: the layers it changed, whole — as it left them,
+/// and as they were before it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct VersionContent {
+    /// As the session left them; a layer it removed is not here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<Layer>,
+    /// As they were the first time the session touched them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub before: Vec<Layer>,
+    /// The layers it made, by id — there was nothing before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<String>,
 }
 
 impl Version {
@@ -284,14 +303,59 @@ impl Version {
         reader.sees(&document.base()?.access).then_some(())?;
         let mut seen = self.clone();
         seen.content.layers.retain(|l| reader.sees(&l.access));
-        (!seen.content.layers.is_empty()).then_some(seen)
+        seen.content.before.retain(|l| reader.sees(&l.access));
+        let ids: BTreeSet<String> = seen.content.layers.iter().chain(&seen.content.before).map(|l| l.id.clone()).collect();
+        seen.content.added.retain(|id| ids.contains(id));
+        (!ids.is_empty()).then_some(seen)
     }
+}
+
+/// A picture of the world: its file in `media/`, and what the gallery says of it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Image {
+    pub id: String,
+    /// The original, without its metadata — a file name in `media/`.
+    pub file: String,
+    /// A small picture for the gallery — empty where there is none.
+    pub preview: String,
+    pub name: String,
+    pub folder: String,
+    pub mime: String,
+    pub width: u32,
+    pub height: u32,
+    pub size: u64,
+    pub uploaded: u64,
+    pub uploaded_by: String,
+    /// How it is put into a text, as JSON — see `media::ImageDefaults`.
+    pub defaults: serde_json::Value,
+}
+
+/// A folder of the gallery; `parent` empty: at the top.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    pub parent: String,
+}
+
+/// Someone who asked to join, waiting.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Request {
+    pub id: String,
+    pub name: String,
+    /// Their identity's public keys, hex — what their id is made of.
+    pub verify_key: String,
+    pub seal_key: String,
+    pub at: u64,
 }
 
 /// A world's database.
 pub struct WorldDb {
     dir: PathBuf,
     conn: Mutex<Connection>,
+    /// Counts up with every change of a document — for what is worked out
+    /// from all of them and kept until something changes.
+    revision: std::sync::atomic::AtomicU64,
 }
 
 fn now() -> u64 {
@@ -341,7 +405,7 @@ impl WorldDb {
     fn open_at(dir: &Path) -> Result<Self> {
         let conn = Connection::open(dir.join(FILE))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;")?;
-        Ok(WorldDb { dir: dir.to_path_buf(), conn: Mutex::new(conn) })
+        Ok(WorldDb { dir: dir.to_path_buf(), conn: Mutex::new(conn), revision: Default::default() })
     }
 
     fn conn(&self) -> MutexGuard<'_, Connection> {
@@ -350,6 +414,15 @@ impl WorldDb {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// How far the documents are — counts up with every change of one.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn changed(&self) {
+        self.revision.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     // --- The world's own settings -------------------------------------------
@@ -497,15 +570,63 @@ impl WorldDb {
         Ok(Some(doc))
     }
 
-    /// Every document as `reader` may see it.
-    pub fn documents_for(&self, reader: &Reader) -> Result<Vec<Document>> {
-        let mut out = Vec::new();
-        for id in self.document_ids()? {
-            if let Some(seen) = self.document(&id)?.and_then(|d| d.seen_by(reader)) {
-                out.push(seen);
+    /// Every document, whole — read in two queries, not one per document.
+    pub fn documents(&self) -> Result<Vec<Document>> {
+        let conn = self.conn();
+        let mut q = conn.prepare("SELECT id, type, slug, created, created_by, changed, changed_by, proposed FROM documents ORDER BY created, id")?;
+        let mut docs: Vec<Document> = q
+            .query_map([], |r| {
+                Ok(Document {
+                    id: r.get(0)?,
+                    doc_type: r.get(1)?,
+                    slug: r.get(2)?,
+                    layers: Vec::new(),
+                    created: r.get(3)?,
+                    created_by: r.get(4)?,
+                    changed: r.get(5)?,
+                    changed_by: r.get(6)?,
+                    proposed: r.get(7)?,
+                })
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        let at: std::collections::HashMap<String, usize> = docs.iter().enumerate().map(|(i, d)| (d.id.clone(), i)).collect();
+        let mut q = conn.prepare(
+            "SELECT document, id, base, section, title, view, edit, level, text, fields, images FROM layers ORDER BY document, base DESC, position",
+        )?;
+        let rows = q.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                Layer {
+                    id: r.get(1)?,
+                    base: r.get(2)?,
+                    section: r.get(3)?,
+                    title: r.get(4)?,
+                    access: Access { view: r.get(5)?, edit: r.get(6)?, level: r.get(7)? },
+                    text: r.get(8)?,
+                    fields: from_json(&r.get::<_, String>(9)?),
+                    images: from_json(&r.get::<_, String>(10)?),
+                },
+            ))
+        })?;
+        for row in rows {
+            let (doc, layer) = row?;
+            if let Some(&i) = at.get(&doc) {
+                docs[i].layers.push(layer);
             }
         }
-        Ok(out)
+        Ok(docs)
+    }
+
+    /// Writes what the write-ahead log holds into the database file — so a
+    /// copy of the folder is the world as it stands.
+    pub fn checkpoint(&self) -> Result<()> {
+        self.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
+    /// Every document as `reader` may see it.
+    pub fn documents_for(&self, reader: &Reader) -> Result<Vec<Document>> {
+        Ok(self.documents()?.into_iter().filter_map(|d| d.seen_by(reader)).collect())
     }
 
     /// Writes a document whole, as it is now — made or changed.
@@ -531,6 +652,8 @@ impl WorldDb {
             )?;
         }
         tx.commit()?;
+        drop(conn);
+        self.changed();
         Ok(())
     }
 
@@ -538,7 +661,29 @@ impl WorldDb {
         let conn = self.conn();
         conn.execute("DELETE FROM documents WHERE id = ?1", [id])?;
         conn.execute("DELETE FROM versions WHERE document = ?1", [id])?;
+        drop(conn);
+        self.changed();
         Ok(())
+    }
+
+    /// Id, name and type of each document `reader` may see — from their
+    /// bases alone, without the rest of them.
+    pub fn names_for(&self, reader: &Reader) -> Result<Vec<(String, String, String)>> {
+        let conn = self.conn();
+        let mut q = conn.prepare(
+            "SELECT d.id, l.title, d.type, l.view, l.edit, l.level FROM documents d JOIN layers l ON l.document = d.id AND l.base = 1 ORDER BY d.created, d.id",
+        )?;
+        let rows = q.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, Access { view: r.get(3)?, edit: r.get(4)?, level: r.get(5)? }))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, name, kind, access) = row?;
+            if reader.sees(&access) {
+                out.push((id, name, kind));
+            }
+        }
+        Ok(out)
     }
 
     /// What `reader` wrote over a document's layers, merged into it as it stands.
@@ -599,6 +744,122 @@ impl WorldDb {
         Ok(doc)
     }
 
+    // --- Pictures -----------------------------------------------------------
+
+    pub fn images(&self) -> Result<Vec<Image>> {
+        let conn = self.conn();
+        let mut q = conn.prepare(
+            "SELECT id, file, preview, name, folder, mime, width, height, size, uploaded, uploaded_by, defaults FROM images ORDER BY uploaded, id",
+        )?;
+        let rows = q.query_map([], |r| {
+            Ok(Image {
+                id: r.get(0)?,
+                file: r.get(1)?,
+                preview: r.get(2)?,
+                name: r.get(3)?,
+                folder: r.get(4)?,
+                mime: r.get(5)?,
+                width: r.get(6)?,
+                height: r.get(7)?,
+                size: r.get(8)?,
+                uploaded: r.get(9)?,
+                uploaded_by: r.get(10)?,
+                defaults: serde_json::from_str(&r.get::<_, String>(11)?).unwrap_or_default(),
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn image(&self, id: &str) -> Result<Option<Image>> {
+        Ok(self.images()?.into_iter().find(|i| i.id == id))
+    }
+
+    pub fn put_image(&self, i: &Image) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO images(id, file, preview, name, folder, mime, width, height, size, uploaded, uploaded_by, defaults)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(id) DO UPDATE SET file = excluded.file, preview = excluded.preview, name = excluded.name,
+                folder = excluded.folder, mime = excluded.mime, width = excluded.width, height = excluded.height,
+                size = excluded.size, defaults = excluded.defaults",
+            params![i.id, i.file, i.preview, i.name, i.folder, i.mime, i.width, i.height, i.size, i.uploaded, i.uploaded_by, json(&i.defaults)?],
+        )?;
+        Ok(())
+    }
+
+    /// Takes a picture out, its files too.
+    pub fn delete_image(&self, id: &str) -> Result<()> {
+        if let Some(image) = self.image(id)? {
+            for file in [image.file, image.preview].into_iter().filter(|f| !f.is_empty()) {
+                let path = self.dir.join(MEDIA).join(file);
+                if path.exists() {
+                    std::fs::remove_file(path)?;
+                }
+            }
+        }
+        self.conn().execute("DELETE FROM images WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn folders(&self) -> Result<Vec<Folder>> {
+        let conn = self.conn();
+        let mut q = conn.prepare("SELECT id, name, parent FROM folders ORDER BY rowid")?;
+        let rows = q.query_map([], |r| Ok(Folder { id: r.get(0)?, name: r.get(1)?, parent: r.get(2)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn save_folders(&self, folders: &[Folder]) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM folders", [])?;
+        for f in folders {
+            tx.execute("INSERT INTO folders(id, name, parent) VALUES(?1, ?2, ?3)", params![f.id, f.name, f.parent])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    // --- Who would come in -----------------------------------------------------
+
+    pub fn requests(&self) -> Result<Vec<Request>> {
+        let conn = self.conn();
+        let mut q = conn.prepare("SELECT id, name, verify_key, seal_key, at FROM requests ORDER BY at")?;
+        let rows = q.query_map([], |r| Ok(Request { id: r.get(0)?, name: r.get(1)?, verify_key: r.get(2)?, seal_key: r.get(3)?, at: r.get(4)? }))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn put_request(&self, r: &Request) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO requests(id, name, verify_key, seal_key, at) VALUES(?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name, verify_key = excluded.verify_key, seal_key = excluded.seal_key",
+            params![r.id, r.name, r.verify_key, r.seal_key, r.at],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_request(&self, id: &str) -> Result<()> {
+        self.conn().execute("DELETE FROM requests WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Ids let in ahead of time: whoever proves one becomes a member without asking.
+    pub fn invited(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut q = conn.prepare("SELECT id FROM invited ORDER BY rowid")?;
+        let rows = q.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn set_invited(&self, ids: &[String]) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM invited", [])?;
+        for id in ids {
+            tx.execute("INSERT OR IGNORE INTO invited(id) VALUES(?1)", [id])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     // --- Versions -----------------------------------------------------------
 
     /// Keeps an editing session as a version — or, while it goes on, its newest state.
@@ -631,6 +892,18 @@ impl WorldDb {
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// One version goes.
+    pub fn delete_version(&self, document: &str, session: &str) -> Result<()> {
+        self.conn().execute("DELETE FROM versions WHERE document = ?1 AND session = ?2", [document, session])?;
+        Ok(())
+    }
+
+    /// Every version of a document goes.
+    pub fn delete_versions(&self, document: &str) -> Result<()> {
+        self.conn().execute("DELETE FROM versions WHERE document = ?1", [document])?;
+        Ok(())
     }
 
     /// Keeps the newest `keep` versions of a document, the others go.
@@ -847,7 +1120,7 @@ mod tests {
             ended: 2,
             arrived: 2,
             review: "counted".into(),
-            content: VersionContent { layers: vec![doc.layers[2].clone()] },
+            content: VersionContent { layers: vec![doc.layers[2].clone()], ..Default::default() },
             signature: String::new(),
         };
         db.put_version(&v).unwrap();

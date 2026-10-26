@@ -160,15 +160,7 @@ fn claim(at: &Locations, lock_root: &Path) -> Result<(), Refused> {
             Err(std::fs::TryLockError::Error(_)) => locks.push((path, file)),
         }
     }
-    // A profile taken up anew: what it held only while online goes — it
-    // was held for the last time the app ran.
-    let fresh = slot.as_ref().is_none_or(|u| u.at.profile != at.profile);
     *slot = Some(InUse { at: at.clone(), _locks: locks });
-    drop(slot);
-    if fresh {
-        at.store().forget_fleeting();
-        crate::online::purge_sessions(&at.store());
-    }
     Ok(())
 }
 
@@ -292,8 +284,6 @@ pub fn storage_choose(app: tauri::AppHandle, choice: Choice) -> Answer<StorageVi
     std::fs::create_dir_all(&at.worlds)?;
     claim(&at, &app.path().app_local_data_dir()?.join("storage-locks"))?;
     remember(&app, &at)?;
-    // The network may be switched on in a profile found there.
-    network::start(&app)?;
     Ok(view(&app, Some(&at), "ready", None))
 }
 
@@ -369,7 +359,6 @@ pub fn storage_move(app: tauri::AppHandle, choice: Choice, carry: bool) -> Answe
     std::fs::create_dir_all(&at.worlds)?;
     claim(&at, &app.path().app_local_data_dir()?.join("storage-locks"))?;
     remember(&app, &at)?;
-    network::start(&app)?;
     Ok(view(&app, Some(&at), "ready", None))
 }
 
@@ -389,7 +378,6 @@ pub fn storage_locations(app: tauri::AppHandle, paths: Vec<String>) -> Answer<St
     at.additional = additional;
     claim(&at, &app.path().app_local_data_dir()?.join("storage-locks"))?;
     remember(&app, &at)?;
-    network::republish();
     Ok(view(&app, Some(&at), "ready", None))
 }
 

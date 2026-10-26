@@ -63,6 +63,11 @@ impl Format {
         }
     }
 
+    /// The kind a file's ending names.
+    pub fn of_extension(extension: &str) -> Option<Format> {
+        [Format::Jpeg, Format::Png, Format::Webp, Format::Gif].into_iter().find(|f| f.extension().eq_ignore_ascii_case(extension))
+    }
+
     /// The usual ending of a file of this kind.
     pub fn extension(self) -> &'static str {
         match self {

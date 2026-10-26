@@ -1,10 +1,10 @@
 //! The Tauri commands.
 //!
-//! The frontend only ever sees plaintext, never keys. Rust decrypts on load
-//! and encrypts on save; key material never leaves this process.
-//!
-//! In particular there is no visibility check here that the frontend could
-//! bypass: `view` simply tries to open every layer and returns what opened.
+//! Every world is held by one: this app's own server, or a server
+//! elsewhere. Whoever holds it decides what each member sees — the `Reader`
+//! of `aw_store::db` — and nothing leaves it that the member may not see.
+//! There is no check here the frontend could bypass: `view` gives out what
+//! the reader sees, and nothing else.
 
 // The server (`--no-default-features`) uses less of it than the app.
 #![cfg_attr(not(feature = "gui"), allow(dead_code, unused_imports))]
@@ -15,31 +15,14 @@ mod document;
 mod window_state;
 mod store;
 mod profile;
-mod network;
 mod media;
-mod transfer;
-mod host;
-mod keys;
-mod backup;
-mod online;
-#[cfg(feature = "gui")]
-mod browser;
-mod readable;
-pub mod server;
-mod keeper;
+mod live;
 
 use aw_crypto::{Identity, IdentityPublic};
-use aw_model::{
-    editor, markdown, names, template_text, types, ArticleId, Attribute, LayerId, Policy, Level, Template,
-    WorldCalendar, WorldDate,
-};
-use aw_policy::{HeldKeys, Keyring};
-use aw_store::journal::{Access, Plain};
+use aw_model::{editor, markdown, names, template_text, types, Attribute, Policy, Template, WorldCalendar, WorldDate};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use store::{
-    fields_map, LayerContent, Member, NewPart, Role, Store, StoredArticle, StoredLayer, WorldMeta,
-};
+use store::{Access, Document, Layer, Member, Reader, Role, Store, WorldMeta};
 #[cfg(feature = "gui")]
 use tauri::Manager;
 
@@ -80,6 +63,7 @@ pub struct MemberInfo {
     pub id: String,
     pub name: String,
     pub fingerprint: String,
+    /// `gm`, `supporter` or `player`.
     pub role: String,
     pub attributes: Vec<String>,
     /// Their writing counts without waiting for the game master.
@@ -91,10 +75,8 @@ pub struct WorldInfo {
     pub id: String,
     pub name: String,
     pub icon: String,
-    pub public_key: String,
-    pub token_file: String,
     pub folder: String,
-    /// `gm` or `player` — decides what the interface offers.
+    /// `gm`, `supporter` or `player` — decides what the interface offers.
     pub role: String,
     pub is_gm: bool,
     pub attributes: Vec<String>,
@@ -102,41 +84,27 @@ pub struct WorldInfo {
     pub article_count: usize,
     /// Id of the home page, empty if there is none yet.
     pub home: String,
-    /// Requests to join, waiting for the GM.
+    /// Requests to join, waiting.
     pub requests: usize,
-    /// Ids let in ahead of time, not seen on the network yet.
+    /// Ids let in ahead of time, not seen yet.
     pub invited: Vec<String>,
     /// New ids that take a player's place once let in: new id → old id.
     pub takeovers: std::collections::BTreeMap<String, String>,
     /// Members' colours by the terms that name them — `player:<name>`, `doc:…`.
     pub colours: std::collections::BTreeMap<String, String>,
-    /// The member the GM hands the world over to, once they show up.
-    pub handover: Option<String>,
     /// Whether players' writing waits for the GM before the others see it.
     pub moderated: bool,
     /// Versions waiting: for the GM, what players wrote; for a player, their own.
     pub waiting: usize,
-    /// Changes that reach no one: for the GM all, for a player their own.
-    pub conflicts: usize,
     /// How many versions of each document stay.
     pub version_limit: u32,
-    /// Encrypted: views and rights count. Without, whoever has the world
-    /// reads and edits all of it.
-    pub encrypted: bool,
-    /// Where this device keeps the readable copy — empty: nowhere.
-    pub readable: String,
-    /// The copy lies in the world's folder (GM, unencrypted): always on.
-    pub readable_in_world: bool,
-    /// The GM's: whether players of this encrypted world get a copy, or
-    /// work online with the GM's device as host.
-    pub copies: bool,
-    /// Held here only while online — it goes when the app starts again.
-    pub fleeting: bool,
+    /// Worked on online: a server elsewhere holds it.
+    pub online: bool,
     /// The server it lives on, by code — empty: this device.
     pub server: String,
-    /// Hosting identity survives address changes and a removed server entry.
+    /// Hosting identity even when its address has been removed.
     pub server_id: String,
-    /// The GM's: offered to players over the network.
+    /// Offered by this app's server to its members over the network.
     pub offered: bool,
     /// The dice the world rolls with, by sides — empty for the usual set.
     pub dice: Vec<u32>,
@@ -144,17 +112,11 @@ pub struct WorldInfo {
     pub listed: bool,
     /// How the world counts its days.
     pub calendar: WorldCalendar,
-    /// Who supports the world, by id: the players the GM chose (`chosen`)
-    /// and the admins of its server.
+    /// The world's supporters, by id.
     pub supporters: Vec<String>,
-    /// The GM's choice among them.
-    pub chosen: Vec<String>,
-    /// The admins of its server, as the GM's device knows them, by name.
-    pub admins: Vec<String>,
-    /// This device's member supports it: lets players in, and may take the
-    /// GM's place — with the keys sealed for them (`can_take_over`).
+    /// The one this app acts as supports the world: lets players in, gives
+    /// and takes their roles, may take the GM's place.
     pub supporter: bool,
-    pub can_take_over: bool,
     /// The roles there are to give — the GM's and a supporter's.
     pub roles: Vec<String>,
 }
@@ -190,10 +152,6 @@ pub struct ArticleView {
     pub layer_total: usize,
     /// The order of its own sections, by key — see `document::own_order`.
     pub order: Vec<String>,
-    /// Asked of the GM's device and not made yet: only here, on the device
-    /// of the player who asked (`pending_views`).
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub pending: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -248,154 +206,77 @@ fn effective_policies(inputs: &[NewLayer]) -> Result<Vec<Policy>, AppError> {
 
 #[cfg(feature = "gui")]
 fn store(app: &tauri::AppHandle) -> Result<Store, AppError> {
-    if let Some(store) = online::command_store() {
-        return Ok(store);
-    }
     profile::store(app)
-}
-
-fn level_from(text: &str) -> Level {
-    match text {
-        "open" => Level::Open,
-        "sealed" => Level::Sealed,
-        _ => Level::GmOnly,
-    }
-}
-
-fn level_text(level: &Level) -> &'static str {
-    match level {
-        Level::Open => aw_model::template::LEVEL_OPEN,
-        Level::Sealed => aw_model::template::LEVEL_SEALED,
-        Level::GmOnly => aw_model::template::LEVEL_GM,
-    }
 }
 
 fn role_text(role: Role) -> &'static str {
     match role {
         Role::Gm => "gm",
+        Role::Supporter => "supporter",
         Role::Player => "player",
     }
 }
 
-/// Whether the attributes at hand satisfy the edit rule.
-///
-/// Separate from seeing: whoever may read a section may not therefore change
-/// it. This tells the interface what to offer; what holds is the write key —
-/// a change without it is refused by every device it reaches.
-fn may_edit(rule: &str, held: &HeldKeys) -> bool {
-    match rule.parse::<Policy>() {
-        Ok(policy) => policy.satisfied_by(&held.attributes()),
-        // Without a rule the game master decides.
-        Err(_) => held.attributes().contains(&Attribute::Gm),
+/// A rule as the interface shows it: parsed and written again, or as it stands.
+fn shown_rule(rule: &str) -> String {
+    rule.parse::<Policy>().map(|p| p.to_string()).unwrap_or_else(|_| rule.to_string())
+}
+
+/// A layer as the interface gets it — for one who may see it.
+fn layer_view(layer: &Layer, reader: &Reader) -> LayerView {
+    LayerView {
+        id: layer.id.clone(),
+        title: layer.title.clone(),
+        section: layer.section.clone(),
+        may_edit: reader.may_edit(&layer.access),
+        text: layer.text.clone(),
+        fields: fields_value(&layer.fields),
+        policy: shown_rule(&layer.access.view),
+        edit: shown_rule(&layer.access.edit),
+        level: layer.access.level.clone(),
+        epoch: 0,
     }
 }
 
-/// Opens whatever opens with these keys. Nothing more happens — there is no
-/// second check that could be forgotten.
-fn open_layer(layer: &StoredLayer, held: &HeldKeys) -> Option<LayerView> {
-    let content = layer.content(held)?;
-    Some(LayerView {
-        id: layer.id.to_string(),
-        title: content.title,
-        section: content.section,
-        // Unencrypted, there are no rights: everyone edits.
-        may_edit: (layer.plain && host::acting().is_none()) || may_edit(&content.edit, held),
-        text: content.text,
-        fields: content.fields,
-        // The header names no one; who may see it stands in the layer itself.
-        policy: content.own.parse::<Policy>().map(|p| p.to_string()).unwrap_or_else(|_| content.own.clone()),
-        edit: content.edit.parse::<Policy>().map(|p| p.to_string()).unwrap_or_else(|_| content.edit.clone()),
-        level: level_text(&layer.level).to_string(),
-        epoch: layer.header.epoch,
+/// Fields as the views know them: none at all is `null`.
+pub(crate) fn fields_value(fields: &serde_json::Map<String, serde_json::Value>) -> serde_json::Value {
+    if fields.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::Value::Object(fields.clone())
+    }
+}
+
+/// Fields as a layer holds them.
+pub(crate) fn fields_map(value: &serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    value.as_object().cloned().unwrap_or_default()
+}
+
+/// A document as `reader` sees it — `None` where it is not there for them.
+pub(crate) fn article_view(doc: &Document, reader: &Reader) -> Option<ArticleView> {
+    let seen = doc.seen_by(reader)?;
+    let base = seen.base()?;
+    Some(ArticleView {
+        id: seen.id.clone(),
+        article_type: seen.doc_type.clone(),
+        slug: seen.slug.clone(),
+        name: base.title.clone(),
+        visibility: shown_rule(&base.access.view),
+        edit: shown_rule(&base.access.edit),
+        order: document::own_order(&fields_value(&base.fields)),
+        layers: seen.layers.iter().filter(|l| !l.base).map(|l| layer_view(l, reader)).collect(),
+        layer_total: doc.layers.iter().filter(|l| !l.base).count(),
     })
 }
 
-/// What each document showed the last time a page asked — by world and by
-/// who looks (a preview is someone else), with what it was opened from. A
-/// document whose layers are the same is not opened again: with ten
-/// thousand of them, one edit should not cost them all.
-type ViewCache = std::collections::HashMap<(String, String), std::collections::HashMap<ArticleId, (u64, Option<ArticleView>)>>;
-static VIEWS: std::sync::OnceLock<std::sync::Mutex<ViewCache>> = std::sync::OnceLock::new();
-
-pub(crate) fn forget_world_views(world: &str) {
-    if let Some(all) = VIEWS.get() {
-        if let Ok(mut all) = all.lock() { all.retain(|(id, _), _| id != world); }
-    }
-}
-
-fn fingerprint(a: &StoredArticle) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    a.article_type.hash(&mut h);
-    a.slug.hash(&mut h);
-    for l in &a.layers {
-        l.id.to_string().hash(&mut h);
-        l.sealed.hash(&mut h);
-        l.is_base.hash(&mut h);
-    }
-    h.finish()
-}
-
-fn cached_view(world: &str, who: &str, articles: &[StoredArticle], held: &HeldKeys) -> Vec<ArticleView> {
-    let Ok(mut all) = VIEWS.get_or_init(Default::default).lock() else {
-        return build_view(articles, held);
-    };
-    let cache = all.entry((world.to_string(), who.to_string())).or_default();
-    let mut fresh = std::collections::HashMap::with_capacity(articles.len());
-    let mut out = Vec::with_capacity(articles.len());
-    for a in articles {
-        let print = fingerprint(a);
-        let view = match cache.remove(&a.id) {
-            Some((p, view)) if p == print => view,
-            _ => build_view(std::slice::from_ref(a), held).into_iter().next(),
-        };
-        if let Some(v) = &view {
-            out.push(v.clone());
-        }
-        fresh.insert(a.id, (print, view));
-    }
-    *cache = fresh;
-    out
-}
-
-fn build_view(articles: &[StoredArticle], held: &HeldKeys) -> Vec<ArticleView> {
-    let mut out = Vec::new();
-    for a in articles {
-        // The base layer decides about the article as a whole. If it does not
-        // open, the article does not appear — not even when single sections
-        // would be readable. A section without an article name would make no
-        // sense anyway, and mere existence is already information.
-        let Some((name, visibility, edit, order)) = a
-            .layers
-            .iter()
-            .find(|l| l.is_base)
-            .and_then(|layer| open_layer(layer, held))
-            .map(|opened| (opened.title, opened.policy, opened.edit, document::own_order(&opened.fields)))
-        else {
-            continue;
-        };
-
-        let visible: Vec<LayerView> = a
-            .layers
-            .iter()
-            .filter(|l| !l.is_base)
-            .filter_map(|l| open_layer(l, held))
-            .collect();
-
-        out.push(ArticleView {
-            id: a.id.to_string(),
-            article_type: a.article_type.clone(),
-            slug: a.slug.clone(),
-            name,
-            visibility,
-            edit,
-            layers: visible,
-            layer_total: a.layers.iter().filter(|l| !l.is_base).count(),
-            order,
-            pending: false,
-        });
-    }
-    out
+/// What the one a command runs for reads in a world — or, as its game
+/// master, what a player holding `preview_as` would.
+pub(crate) fn reader_in(store: &Store, world: &str, preview_as: Option<Vec<String>>) -> Answer<Reader> {
+    let reader = store.reader(world)?;
+    Ok(match preview_as {
+        Some(names) if reader.is_gm() => Reader::holding(&names),
+        _ => reader,
+    })
 }
 
 fn info_from(store: &Store, identity: &Identity) -> IdentityInfo {
@@ -410,117 +291,107 @@ fn info_from(store: &Store, identity: &Identity) -> IdentityInfo {
     }
 }
 
-/// A world as the list of worlds shows it. A big world takes seconds to read:
-/// until it is, the list shows it as it was last seen and reads it meanwhile.
-fn summary(store: &Store, id: &str, me: &str) -> Answer<Option<serde_json::Value>> {
-    use std::collections::{HashMap, HashSet};
-    use std::sync::{Mutex, OnceLock};
-    static WRITTEN: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
-    static READING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let id = id.to_string();
-    let file = store.private_world_dir(&id).join("summary.json");
-    if !store.journal_is_open(&id) {
-        if let Some(known) = std::fs::read(&file).ok().and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok()) {
-            if READING.get_or_init(Default::default).lock().map_err(AppError::from)?.insert(id.clone()) {
-                let (store, world) = (store.clone(), id.clone());
-                std::thread::spawn(move || {
-                    let _ = store.article_count(&world);
-                    if let Ok(mut reading) = READING.get_or_init(Default::default).lock() {
-                        reading.remove(&world);
-                    }
-                });
-            }
-            return Ok(Some(known));
-        }
-    }
-    let Ok(meta) = store.load_world_meta(&id) else { return Ok(None) };
-    let info = serde_json::to_value(world_info(store, &meta, me)?)?;
-    let bytes = serde_json::to_vec(&info)?;
-    let mut written = WRITTEN.get_or_init(Default::default).lock().map_err(AppError::from)?;
-    if written.get(&id) != Some(&bytes) {
-        aw_store::durable::replace(&file, &bytes)?;
-        written.insert(id, bytes);
-    }
-    Ok(Some(info))
+/// A short form of an id for display next to a name — as a player id's.
+fn fingerprint_of(id: &str) -> String {
+    let body = id.split_once(':').map(|(_, b)| b).unwrap_or(id);
+    let short = &body[..body.len().min(8)];
+    if short.len() == 8 { format!("{}-{}", &short[..4], &short[4..]) } else { short.to_string() }
 }
 
-fn world_info(store: &Store, meta: &WorldMeta, me: &str) -> Result<WorldInfo, AppError> {
-    let id = meta.public.world_id.to_string();
-    // The game master is whoever is listed as such *and* holds the world
-    // token. Without the token the entry is useless — the keys are missing.
-    let is_gm = store.is_gm(&id) && meta.role_of(me) == Role::Gm;
-    let (supporters, sealed) = store.with_journal(&id, |j| Ok((j.supporters(), j.keys_for(me).is_some())))?;
-    let supporter = supporters.iter().any(|s| s == me);
-    // A supporter sees the members as the GM does — from the GM's keys sealed for them.
-    let roster = if is_gm || (supporter && sealed) { store.roster(&id).ok() } else { None };
-    let members = match &roster {
-        Some(r) if !is_gm => &r.members,
-        _ => &meta.members,
-    };
-    let attributes = if is_gm {
-        store
-            .load_keyring(&id)?
-            .attributes()
-            .map(|a| a.to_string())
-            .collect()
-    } else {
-        meta.member(me)
-            .map(|m| m.attributes.clone())
-            .unwrap_or_default()
-    };
-
+/// A world as the interface gets it, for the one a command runs for.
+fn world_info(store: &Store, meta: &WorldMeta) -> Result<WorldInfo, AppError> {
+    let id = meta.id.clone();
+    let me = store.actor()?;
+    let mine = meta.member(&me);
+    let role = mine.map(|m| m.role).unwrap_or_default();
+    let is_gm = role == Role::Gm;
+    let supporter = role == Role::Supporter;
+    let manages = is_gm || supporter;
+    let db = store.db(&id)?;
+    let network = store.load_network()?;
+    let waiting = document::waiting_in(store, &id)?.len();
     Ok(WorldInfo {
-        name: meta.public.name.clone(),
+        name: meta.name.clone(),
         icon: meta.icon.clone(),
-        public_key: meta.public.owner_key.clone(),
-        token_file: store.private_world_dir(&id).join("owner.key").display().to_string(),
         folder: store.world_dir(&id).display().to_string(),
-        role: role_text(if is_gm { Role::Gm } else { Role::Player }).to_string(),
+        role: role_text(role).to_string(),
         is_gm,
-        attributes,
-        members: members
+        attributes: mine.map(|m| m.attributes.clone()).unwrap_or_default(),
+        // A player knows of the members only themselves.
+        members: meta
+            .members
             .iter()
-            .map(|m| {
-                Ok(MemberInfo {
-                    id: m.identity.id.to_string(),
-                    name: m.identity.name.clone(),
-                    fingerprint: m.identity.fingerprint(),
-                    role: role_text(m.role).to_string(),
-                    attributes: m.attributes.clone(),
-                    trusted: store.trusted(&id, m.identity.id.as_str())?,
-                })
+            .filter(|m| manages || m.id == me)
+            .map(|m| MemberInfo {
+                id: m.id.clone(),
+                name: m.name.clone(),
+                fingerprint: fingerprint_of(&m.id),
+                role: role_text(m.role).to_string(),
+                attributes: m.attributes.clone(),
+                trusted: m.trusted,
             })
-            .collect::<Result<_, AppError>>()?,
-        article_count: store.article_count(&id)?,
+            .collect(),
+        article_count: db.document_ids()?.len(),
         home: meta.home.clone(),
-        requests: if is_gm || supporter { store.load_requests(&id)?.len() } else { 0 },
-        invited: if is_gm { meta.invited.clone() } else { Vec::new() },
-        takeovers: if is_gm { store.takeovers(&id)? } else { Default::default() },
+        requests: if manages { db.requests()?.len() } else { 0 },
+        invited: if manages { meta.invited.clone() } else { Vec::new() },
+        takeovers: if is_gm { store.setting(&id, "takeovers", Default::default())? } else { Default::default() },
         colours: store.colours(&id)?,
-        handover: if is_gm { store.handing_to(&id)? } else { None },
         moderated: store.moderated(&id)?,
+        waiting,
         version_limit: store.version_limit(&id)?,
-        encrypted: store.is_encrypted(&id)?,
-        readable: readable::place(store, &id)?.map(|p| p.display().to_string()).unwrap_or_default(),
-        readable_in_world: readable::in_world(store, &id)?,
-        copies: store.copies(&id)?,
-        fleeting: store.is_fleeting(&id),
-        server: store.load_network()?.home_of(&id).cloned().unwrap_or_default(),
-        server_id: store.load_network()?.homes.get(&id).cloned().unwrap_or_default(),
-        offered: is_gm && store.load_network()?.shared.contains(&id),
+        online: false,
+        server: String::new(),
+        server_id: String::new(),
+        offered: network.shared.contains(&id),
         dice: store.dice(&id)?,
         listed: store.on_the_list(&id)?,
-        waiting: store.waiting(&id)?.len(),
-        conflicts: store.conflicts(&id)?.len(),
         calendar: meta.calendar.clone(),
-        chosen: if is_gm { meta.supporters.clone() } else { Vec::new() },
-        admins: if is_gm { store.server_admins(&id)?.into_iter().map(|a| a.name).collect() } else { Vec::new() },
-        can_take_over: supporter && sealed && !is_gm,
-        roles: roster.map(|r| r.ring.attributes().map(|a| a.to_string()).collect()).unwrap_or_default(),
+        supporters: meta.members.iter().filter(|m| m.role == Role::Supporter).map(|m| m.id.clone()).collect(),
         supporter,
-        supporters,
+        roles: if manages { roles_of(store, &id)? } else { Vec::new() },
         id,
     })
+}
+
+/// The roles there are to give: those made, and those members hold.
+fn roles_of(store: &Store, world: &str) -> Answer<Vec<String>> {
+    let mut all: Vec<String> = store.setting(world, "roles", Vec::<String>::new())?;
+    for m in store.db(world)?.members()? {
+        for a in m.attributes {
+            if !all.contains(&a) {
+                all.push(a);
+            }
+        }
+    }
+    for base in ["gm", "players", "all"] {
+        if !all.iter().any(|a| a == base) {
+            all.push(base.to_string());
+        }
+    }
+    all.sort();
+    Ok(all)
+}
+
+/// The world, after a command changed it, as the one it ran for sees it now.
+fn world_now(store: &Store, world: &str) -> Answer<WorldInfo> {
+    world_info(store, &store.load_world_meta(world)?)
+}
+
+/// Whether the one a command runs for is the world's game master — or says why not.
+fn must_be_gm(store: &Store, world: &str, what: &str) -> Answer<()> {
+    if store.is_gm(world) {
+        Ok(())
+    } else {
+        Err(AppError(format!("Only the GM {what}.")))
+    }
+}
+
+/// Whether the one a command runs for lets players in and gives roles: the
+/// GM or a supporter.
+fn manages(store: &Store, world: &str) -> Answer<bool> {
+    let me = store.actor()?;
+    Ok(store.db(world)?.member(&me)?.is_some_and(|m| matches!(m.role, Role::Gm | Role::Supporter)))
 }
 
 // --- Identity -----------------------------------------------------------
@@ -546,13 +417,21 @@ fn identity_create(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> 
 }
 
 #[cfg(feature = "gui")]
-/// Renaming does not change the id — access hangs on the key.
+/// Renaming does not change the id — access hangs on the key. The worlds
+/// this device holds show the new name.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_rename(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> {
     let store = store(&app)?;
     let mut identity = store.load_identity()?;
     identity.rename(name);
     store.save_identity(&identity)?;
+    for world in store.held_worlds()? {
+        let db = store.db(&world)?;
+        if let Some(mut me) = db.member(identity.id().as_str())? {
+            me.name = identity.name().to_string();
+            db.put_member(&me)?;
+        }
+    }
     Ok(info_from(&store, &identity))
 }
 
@@ -624,31 +503,18 @@ fn avatar_remove(app: tauri::AppHandle) -> Answer<()> {
 #[cfg(feature = "gui")]
 // Off the main thread: while the store works, the window keeps drawing and taking keys.
 #[cfg_attr(feature = "gui", tauri::command(async))]
-fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<serde_json::Value>> {
-    let store = store(&app)?.for_sync();
-    let me = store.load_identity()?.id().to_string();
+fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<WorldInfo>> {
+    let store = store(&app)?;
     let mut out = Vec::new();
     for id in store.held_worlds()? {
-        if unfinished_copy(&store, &id) {
+        let Ok(meta) = store.load_world_meta(&id) else { continue };
+        // A world this device holds for others, without being a member of it.
+        if meta.member(&store.actor()?).is_none() {
             continue;
         }
-        let Some(mut info) = summary(&store, &id, &me)? else { continue };
-        if online::is_server_world(&store, &id) {
-            info["online"] = true.into();
-        }
-        out.push(info);
+        out.push(world_info(&store, &meta)?);
     }
-    out.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    // Worked on online: as their host last showed them — and where it is.
-    let settings = store.load_network()?;
-    out.extend(network::online_worlds(&store).into_iter().filter(|w| !store.holds(&w.world)).map(|mut w| {
-        // The server as it is listed now — its addresses may have changed since.
-        let endpoint = w.server.as_deref().and_then(|c| c.split('@').next()).unwrap_or_default();
-        let code = settings.servers.iter().find(|c| !endpoint.is_empty() && c.split('@').next() == Some(endpoint));
-        w.info["server"] = code.cloned().unwrap_or_default().into();
-        w.info["server_id"] = endpoint.to_string().into();
-        w.info
-    }));
+    out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
 
@@ -656,154 +522,130 @@ fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<serde_json::Value>> {
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum Destination {
     Local { path: String },
-    /// On a server, by its code: it lives there; this device keeps the GM's copy.
+    /// On a server, by its code: it lives there alone.
     Server { server: String },
 }
 
-#[cfg(feature = "gui")]
-/// Creates a world at the chosen location — a folder here, or one a cloud drive mounts.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-async fn world_create(app: tauri::AppHandle, name: String, destination: Destination) -> Answer<WorldInfo> {
-    let store = store(&app)?.for_sync();
-    tauri::async_runtime::spawn_blocking(move || match destination {
-        Destination::Local { path } => {
-            let store = store.destination(Path::new(&path))?;
-            let identity = store.load_identity()?;
-            let meta = new_world(&store, &identity, name)?;
-            world_info(&store, &meta, identity.id().as_str())
-        }
-        Destination::Server { server } => {
-            let identity = store.load_identity()?;
-            let meta = new_world(&store, &identity, name)?;
-            network::live_on(&store, meta.public.world_id.as_str(), Some(server))?;
-            world_info(&store, &meta, identity.id().as_str())
-        }
-    }).await.map_err(AppError::from)?
+/// Servers are reached again once the network is built on the new world format.
+fn no_servers_yet() -> AppError {
+    AppError("Worlds on a server are not available in this build yet.".into())
 }
 
 #[cfg(feature = "gui")]
-/// Copies a world — into a folder here (none: the usual one), or onto a
-/// server: a world of its own, with the types, documents and images, without
-/// its players and versions. Tells how far it is (`copy-progress`). Broken
-/// off, the half copy goes again — at once, or at the next start.
+/// Creates a world at the chosen location — a folder here.
 #[cfg_attr(feature = "gui", tauri::command(async))]
-async fn world_copy(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
-    use tauri::Emitter;
+async fn world_create(app: tauri::AppHandle, name: String, destination: Destination) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let home = profile::store(&app)?.for_sync();
-    tauri::async_runtime::spawn_blocking(move || {
-        if !store.is_gm(&world) {
-            return Err(AppError("Only the GM copies a world.".into()));
+    tauri::async_runtime::spawn_blocking(move || match destination {
+        Destination::Local { path } => {
+            let store = if path.is_empty() { store } else { store.destination(Path::new(&path))? };
+            let identity = store.load_identity()?;
+            let meta = new_world(&store, &identity, name)?;
+            world_info(&store, &meta)
         }
-        let identity = store.load_identity()?;
-        let (target, server) = match destination {
-            Destination::Local { path } if path.is_empty() => (home.clone(), None),
-            Destination::Local { path } => (home.destination(Path::new(&path))?, None),
-            Destination::Server { server } => (home.clone(), Some(server)),
-        };
-        let meta = new_world(&target, &identity, copy_name(&store, &store.load_world_meta(&world)?.public.name)?)?;
-        let id = meta.public.world_id.to_string();
-        let _copying = Copying::start(&id);
-        if let Some(server) = server {
-            network::live_on(&target, &id, Some(server))?;
-        }
-        // Everything, through a package — kept among the copy's own files meanwhile.
-        let types: Vec<String> = store.load_templates(&world)?.into_iter().map(|t| t.id).collect();
-        let choice = transfer::Choice {
-            name: meta.public.name.clone(),
-            types: types.clone(),
-            documents_of: types,
-            documents: store.load_articles(&world)?.iter().map(|a| a.id.to_string()).collect(),
-        };
-        let path = target.private_world_dir(&id).join("copying.awpack");
-        let packing = |what: &str, done: usize, total: usize| {
-            let _ = app.emit("copy-progress", (what, done, total));
-        };
-        let copied = transfer::export(&store, &identity, &world, &choice, &path, &packing).and_then(|_| {
-            let (folder, package) = transfer::read(&path)?;
-            let tell = |done: usize, total: usize| {
-                let _ = app.emit("copy-progress", ("writing", done, total));
-            };
-            transfer::import(&target, &identity, &id, &folder, &package, &tell)
-        });
-        if copied.is_err() {
-            let _ = target.delete_world(&id);
-        }
-        let _ = std::fs::remove_dir_all(&path);
-        copied?;
-        world_info(&target, &target.load_world_meta(&id)?, identity.id().as_str())
+        Destination::Server { .. } => Err(no_servers_yet()),
     })
     .await
     .map_err(AppError::from)?
 }
 
 #[cfg(feature = "gui")]
-/// Moves a GM's world: into another folder here — off its server, if it was
-/// on one — or onto a server, which keeps it for the players; the GM's copy
-/// stays in its folder then. Tells how far a folder is (`copy-progress`).
+/// Copies a world into a folder here (none: the usual one): a world of its
+/// own, with the types, documents and pictures, without its players and
+/// versions. Tells how far it is (`copy-progress`).
+#[cfg_attr(feature = "gui", tauri::command(async))]
+async fn world_copy(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
+    use tauri::Emitter;
+    let store = store(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        must_be_gm(&store, &world, "copies a world")?;
+        let target = match destination {
+            Destination::Local { path } if path.is_empty() => store.clone(),
+            Destination::Local { path } => store.destination(Path::new(&path))?,
+            Destination::Server { .. } => return Err(no_servers_yet()),
+        };
+        let name = copy_name(&store, &store.load_world_meta(&world)?.name)?;
+        let tell = |done: usize, total: usize| {
+            let _ = app.emit("copy-progress", ("writing", done, total));
+        };
+        let meta = copy_world(&store, &target, &world, &name, &tell)?;
+        world_info(&target, &meta)
+    })
+    .await
+    .map_err(AppError::from)?
+}
+
+/// A copy of a world as a world of its own: a new id, its name, the game
+/// master alone — no players, no versions, nobody asking or let in ahead.
+fn copy_world(from: &Store, to: &Store, world: &str, name: &str, tell: &dyn Fn(usize, usize)) -> Answer<WorldMeta> {
+    let id = store::new_world_id()?;
+    let source = from.world_dir(world);
+    let target = to.world_dir(&id);
+    // Written to the disk first: what is copied is the world as it stands.
+    from.db(world)?.checkpoint()?;
+    store::copy_dir(&source, &target, tell)?;
+    let made = (|| -> Answer<WorldMeta> {
+        let db = store::WorldDb::open(&target)?;
+        db.set("id", &id)?;
+        db.set("name", name.trim())?;
+        db.set_json("takeovers", &serde_json::json!({}))?;
+        db.set_invited(&[])?;
+        for request in db.requests()? {
+            db.remove_request(&request.id)?;
+        }
+        for member in db.members()? {
+            if member.role != Role::Gm {
+                db.remove_member(&member.id)?;
+            }
+        }
+        for doc in db.document_ids()? {
+            db.delete_versions(&doc)?;
+        }
+        drop(db);
+        let mut meta = to.load_world_meta(&id)?;
+        // The world's page names the world.
+        if !meta.home.is_empty() {
+            document::rename_document(to, &id, &meta.home, name.trim())?;
+        }
+        meta = to.load_world_meta(&id)?;
+        Ok(meta)
+    })();
+    if made.is_err() {
+        let _ = to.delete_world(&id);
+    }
+    made
+}
+
+#[cfg(feature = "gui")]
+/// Moves a GM's world into another folder here. Tells how far it is
+/// (`copy-progress`).
 #[cfg_attr(feature = "gui", tauri::command(async))]
 async fn world_move(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
     use tauri::Emitter;
-    let store = store(&app)?.for_sync();
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM moves a world.".into()));
-    }
+    let store = store(&app)?;
+    must_be_gm(&store, &world, "moves a world")?;
     match destination {
-        Destination::Server { server } => network::rehome(&store, &world, Some(server)).await?,
+        Destination::Server { .. } => return Err(no_servers_yet()),
         Destination::Local { path } => {
-            network::rehome(&store, &world, None).await?;
-            if path.is_empty() {
-                return world_info(&store, &store.load_world_meta(&world)?, store.load_identity()?.id().as_str());
+            if !path.is_empty() {
+                let (moving, world) = (store.clone(), world.clone());
+                tauri::async_runtime::spawn_blocking(move || {
+                    let tell = |done: usize, total: usize| {
+                        let _ = app.emit("copy-progress", ("moving", done, total));
+                    };
+                    moving.move_world(&world, Path::new(&path), &tell)
+                })
+                .await
+                .map_err(AppError::from)??;
             }
-            let (moving, world) = (store.clone(), world.clone());
-            tauri::async_runtime::spawn_blocking(move || {
-                let tell = |done: usize, total: usize| {
-                    let _ = app.emit("copy-progress", ("moving", done, total));
-                };
-                moving.move_world(&world, Path::new(&path), &tell)
-            })
-            .await
-            .map_err(AppError::from)??;
         }
     }
-    let identity = store.load_identity()?;
-    world_info(&store, &store.load_world_meta(&world)?, identity.id().as_str())
-}
-
-/// Copies being made in this run, by the new world's id.
-fn copying() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
-    static COPYING: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
-    COPYING.get_or_init(Default::default)
-}
-
-struct Copying(String);
-
-impl Copying {
-    fn start(id: &str) -> Self {
-        if let Ok(mut all) = copying().lock() {
-            all.insert(id.to_string());
-        }
-        Copying(id.to_string())
-    }
-}
-
-impl Drop for Copying {
-    fn drop(&mut self) {
-        if let Ok(mut all) = copying().lock() {
-            all.remove(&self.0);
-        }
-    }
-}
-
-/// A copy left half made — the app closed while copying: it goes.
-fn unfinished_copy(store: &Store, world: &str) -> bool {
-    let left = store.private_world_dir(world).join("copying.awpack").exists() && !copying().lock().is_ok_and(|c| c.contains(world));
-    left && store.delete_world(world).is_ok()
+    world_now(&store, &world)
 }
 
 /// "Name (copy)" — or with a number, where that is taken.
 fn copy_name(store: &Store, name: &str) -> Answer<String> {
-    let taken: Vec<String> = store.list_worlds()?.iter().map(|m| m.public.name.trim().to_lowercase()).collect();
+    let taken: Vec<String> = store.list_worlds()?.iter().map(|m| m.name.trim().to_lowercase()).collect();
     let mut n = 1;
     loop {
         let name = if n == 1 { format!("{} (copy)", name.trim()) } else { format!("{} (copy {n})", name.trim()) };
@@ -814,49 +656,20 @@ fn copy_name(store: &Store, name: &str) -> Answer<String> {
     }
 }
 
-/// Creates a world with its token, keyring and its own page.
+/// Creates a world with its own page.
 fn new_world(store: &Store, identity: &Identity, name: String) -> Answer<WorldMeta> {
     let name = name.trim().to_string();
-    if name.is_empty() { return Err(AppError("Enter a world name.".into())); }
+    if name.is_empty() {
+        return Err(AppError("Enter a world name.".into()));
+    }
     // No two worlds of one name — in the menu they could not be told apart.
-    if store.list_worlds()?.iter().any(|m| m.public.name.trim().eq_ignore_ascii_case(name.trim())) {
-        return Err(AppError(format!("A world called “{}” already exists.", name.trim())));
+    if store.list_worlds()?.iter().any(|m| m.name.trim().eq_ignore_ascii_case(&name)) {
+        return Err(AppError(format!("A world called “{name}” already exists.")));
     }
-    let token = aw_crypto::WorldToken::create(name)?;
-    let id = token.world_id().to_string();
-
-    let mut ring = Keyring::new();
-    for a in ["gm", "players", "all"] {
-        ring.ensure(&a.parse::<Attribute>().map_err(AppError::from)?)?;
-    }
-
-    // The creator is listed as game master — with every attribute a world
-    // has from the start.
-    let gm = Member {
-        identity: identity.public(),
-        role: Role::Gm,
-        attributes: vec!["gm".into(), "players".into(), "all".into()],
-    };
-
-    let meta = WorldMeta {
-        public: token.public(),
-        calendar: WorldCalendar::default(),
-        icon: store::WORLD_ICON.to_string(),
-        owner: identity.id().to_string(),
-        home: String::new(),
-        members: vec![gm],
-        invited: Vec::new(),
-        supporters: Vec::new(),
-    };
-
-    store.save_token(&token)?;
-    store.save_keyring(&id, &ring)?;
-    store.save_world_meta(&meta)?;
-
+    let mut meta = store.create_world(&name, identity)?;
     // The world is a document too — its page is the first thing one sees
     // inside it. It comes into being with the world, not on request.
-    let mut meta = meta;
-    meta.home = create_page(store, &id, "home", &meta.public.name.clone(), String::new())?;
+    meta.home = store::acting_for(identity.id().as_str(), || create_page(store, &meta.id, "home", &name, String::new()))?;
     store.save_world_meta(&meta)?;
     Ok(meta)
 }
@@ -891,98 +704,63 @@ fn create_type_page(store: &Store, world: &str, template: &Template) -> Answer<S
     create_page(store, world, &format!("{}-page", template.id), &template.name, text)
 }
 
-/// A world as a file — for handing it over without a network: the records
-/// the member may have, exactly as they were signed.
-#[derive(Serialize, Deserialize)]
-struct WorldFile {
-    world: String,
-    member: String,
-    records: Vec<String>,
-}
-
-#[cfg(feature = "gui")]
-/// Takes in a world the game master handed over — or what is new in it.
-///
-/// Every record is checked as if it came over the network: a forged world
-/// leaves nothing behind.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn world_open(app: tauri::AppHandle, path: String, location: String) -> Answer<WorldInfo> {
-    let store = store(&app)?.destination(Path::new(&location))?;
-    let identity = store.load_identity()?;
-    let raw = std::fs::read(&path).map_err(AppError::from)?;
-    // A world handed over: from now on this device is its game master.
-    if let Ok(package) = serde_json::from_slice::<store::HandoverPackage>(&raw) {
-        if online::requires_online(&store, &package.world) {
-            return Err(AppError("This is an online world. A handover file cannot replace its server session.".into()));
-        }
-        let world = store.handover_take(&package, &identity)?;
-        network::offer_taken_over(&store, &world)?;
-        return world_info(&store, &store.load_world_meta(&world)?, identity.id().as_str());
-    }
-    let file: WorldFile = serde_json::from_slice(&raw).map_err(AppError::from)?;
-    if file.member != identity.id().as_str() {
-        return Err(AppError("This world file was made out to someone else.".into()));
-    }
-    if online::requires_online(&store, &file.world) {
-        return Err(AppError("This is already an online world. Make an explicit local copy to open it separately.".into()));
-    }
-    store.receive(&file.world, &file.records)?;
-    let meta = store.load_world_meta(&file.world)?;
-    world_info(&store, &meta, identity.id().as_str())
-}
+// --- Members ------------------------------------------------------------
 
 #[cfg(feature = "gui")]
 /// Admits a player to the world — from their player card.
 #[cfg_attr(feature = "gui", tauri::command(async))]
-fn member_add(
-    app: tauri::AppHandle,
-    world: String,
-    path: String,
-    attributes: Vec<String>,
-) -> Answer<WorldInfo> {
+fn member_add(app: tauri::AppHandle, world: String, path: String, attributes: Vec<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
     let raw = std::fs::read(&path).map_err(AppError::from)?;
     let card: IdentityPublic = serde_json::from_slice(&raw).map_err(AppError::from)?;
-    let meta = admit(&store, &world, card, attributes)?;
-    world_info(&store, &meta, me.id().as_str())
+    admit(&store, &world, card, attributes)?;
+    world_now(&store, &world)
 }
 
-/// Takes a player in — however they came: a file, an id let in ahead of
-/// time, a request on the network. They get `players` and `all`, plus what
-/// is asked for. The game master's, or a supporter's.
-pub(crate) fn admit(
-    store: &Store,
-    world: &str,
-    card: IdentityPublic,
-    attributes: Vec<String>,
-) -> Answer<WorldMeta> {
+/// Takes a player in — however they came: a card, an id let in ahead of
+/// time, a request. They get what is asked for besides `players` and `all`,
+/// which every member holds. The game master's, or a supporter's.
+pub(crate) fn admit(store: &Store, world: &str, card: IdentityPublic, attributes: Vec<String>) -> Answer<()> {
     if !card.is_genuine() {
         return Err(AppError("This player id does not match its keys.".into()));
     }
-    let gm = store.is_gm(world);
-    if !gm && !store.supports(world)? {
+    if !manages(store, world)? {
         return Err(AppError("Only the GM or a supporter lets players in.".into()));
     }
-    if !gm && attributes.iter().any(|a| a == "gm") {
+    let gm = store.is_gm(world);
+    if !gm && attributes.iter().any(|a| a.trim() == "gm") {
         return Err(AppError("Only the GM makes someone GM.".into()));
     }
-    let before = store.roster(world)?;
-    let mut after = before.clone();
+    let db = store.db(world)?;
     let id = card.id.to_string();
+    let mut member = db.member(&id)?.unwrap_or_else(|| store::member_of(&card, Role::Player));
+    member.name = card.name.clone();
+    member.verify_key = card.verify_key.clone();
+    for a in attributes.into_iter().filter(|a| !["players", "all", "gm"].contains(&a.trim())) {
+        if !member.attributes.contains(&a) {
+            member.attributes.push(a);
+        }
+    }
     // Taking someone's place: what was theirs is theirs now, and the old id leaves.
-    let replaced = if gm { store.takeovers(world)?.get(&id).and_then(|old| before.member(old)).filter(|m| m.role == Role::Player).cloned() } else { None };
-    let mut attributes = attributes;
-    if let Some(old) = &replaced {
-        attributes.extend(old.attributes.iter().cloned());
-        after.remove(old.identity.id.as_str())?;
+    let mut takeovers: std::collections::BTreeMap<String, String> = store.setting(world, "takeovers", Default::default())?;
+    if let Some(old) = takeovers.remove(&id) {
+        if let Some(gone) = db.member(&old)?.filter(|m| m.role == Role::Player) {
+            for a in gone.attributes {
+                if !member.attributes.contains(&a) {
+                    member.attributes.push(a);
+                }
+            }
+            member.colour = gone.colour;
+            member.trusted = gone.trusted;
+            db.remove_member(&old)?;
+        }
+        store.set_setting(world, "takeovers", &takeovers)?;
     }
-    after.admit(card, &attributes)?;
-    store.keep_roster(world, &before, &after)?;
-    if gm && store.takeovers(world)?.contains_key(&id) {
-        store.set_takeover(world, &id, None)?;
-    }
-    Ok(store.load_world_meta(world)?)
+    db.put_member(&member)?;
+    db.remove_request(&id)?;
+    let invited: Vec<String> = db.invited()?.into_iter().filter(|i| *i != id).collect();
+    db.set_invited(&invited)?;
+    Ok(())
 }
 
 #[cfg(feature = "gui")]
@@ -990,70 +768,52 @@ pub(crate) fn admit(
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_colour_set(app: tauri::AppHandle, world: String, colour: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    store.set_badge(&world, &colour)?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
+    let db = store.db(&world)?;
+    let me = store.actor()?;
+    let mut member = db.member(&me)?.ok_or_else(|| AppError("You are not a member of this world.".into()))?;
+    member.colour = colour.chars().take(32).collect();
+    db.put_member(&member)?;
+    world_now(&store, &world)
 }
 
 #[cfg(feature = "gui")]
 /// A player's new id takes the place of their old one — for someone whose
 /// device was set up anew without their keys. What was assigned to the old
-/// id goes to the new one, and the old one leaves: its keys turn over. A
-/// new id not let in yet takes over as soon as it is.
+/// id goes to the new one, and the old one leaves. A new id not let in yet
+/// takes over as soon as it is.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_replace(app: tauri::AppHandle, world: String, old: String, new: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    let meta = replace_member(&store, &world, &old, &new)?;
-    world_info(&store, &meta, me.id().as_str())
+    replace_member(&store, &world, &old, &new)?;
+    world_now(&store, &world)
 }
 
-pub(crate) fn replace_member(store: &Store, world: &str, old: &str, new: &str) -> Answer<WorldMeta> {
-    if !store.is_gm(world) {
-        return Err(AppError("Only the GM gives a player a new id.".into()));
-    }
+pub(crate) fn replace_member(store: &Store, world: &str, old: &str, new: &str) -> Answer<()> {
+    must_be_gm(store, world, "gives a player a new id")?;
     let new = new.trim();
     let valid = new.strip_prefix("id:").is_some_and(|body| body.len() == 16 && body.chars().all(|c| c.is_ascii_hexdigit()));
     if !valid {
         return Err(AppError("That is no player id. It is the whole id — id: and 16 characters.".into()));
     }
-    let mut meta = store.load_world_meta(world)?;
-    if new == old || !meta.member(old).is_some_and(|m| m.role == Role::Player) {
+    let db = store.db(world)?;
+    if new == old || !db.member(old)?.is_some_and(|m| m.role == Role::Player) {
         return Err(AppError("There is no such player.".into()));
     }
-    store.set_takeover(world, new, Some(old))?;
-    // Let in already, or asking: at once.
-    if let Some(member) = meta.member(new).cloned() {
-        return admit(store, world, member.identity, member.attributes);
-    }
-    if let Some(request) = store.load_requests(world)?.into_iter().find(|r| r.identity.id.as_str() == new) {
-        return admit(store, world, request.identity, Vec::new());
+    let mut takeovers: std::collections::BTreeMap<String, String> = store.setting(world, "takeovers", Default::default())?;
+    takeovers.insert(new.to_string(), old.to_string());
+    store.set_setting(world, "takeovers", &takeovers)?;
+    // Asking already: at once.
+    if let Some(request) = db.requests()?.into_iter().find(|r| r.id == new) {
+        let card: IdentityPublic = serde_json::from_value(serde_json::json!({ "id": request.id, "name": request.name, "verify_key": request.verify_key, "seal_key": request.seal_key }))?;
+        return admit(store, world, card, Vec::new());
     }
     // Otherwise once it shows up, as anyone let in ahead of time.
-    if !meta.invited.iter().any(|i| i == new) {
-        meta.invited.push(new.to_string());
-        store.save_world_meta(&meta)?;
+    let mut invited = db.invited()?;
+    if !invited.iter().any(|i| i == new) {
+        invited.push(new.to_string());
+        db.set_invited(&invited)?;
     }
-    Ok(meta)
-}
-
-#[cfg(feature = "gui")]
-/// Ties up the world file for a member.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn world_share(
-    app: tauri::AppHandle,
-    world: String,
-    member: String,
-    path: String,
-) -> Answer<String> {
-    let store = store(&app)?;
-    if store.load_world_meta(&world)?.member(&member).is_none() {
-        return Err(AppError("Only a member gets the world.".into()));
-    }
-    let file = WorldFile { records: store.all_records(&world)?, world, member };
-    let path = with_extension(&path, "awworld");
-    std::fs::write(&path, serde_json::to_vec(&file).map_err(AppError::from)?).map_err(AppError::from)?;
-    Ok(path.display().to_string())
+    Ok(())
 }
 
 #[cfg(feature = "gui")]
@@ -1061,9 +821,28 @@ fn world_share(
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_remove(app: tauri::AppHandle, world: String, id: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    let meta = store.remove_member(&world, &id)?;
-    world_info(&store, &meta, me.id().as_str())
+    remove_member(&store, &world, &id)?;
+    world_now(&store, &world)
+}
+
+/// Takes a member out — the GM's, or a supporter's for players. Nobody but
+/// the GM takes a supporter out, and the GM stays.
+pub(crate) fn remove_member(store: &Store, world: &str, id: &str) -> Answer<()> {
+    if !manages(store, world)? {
+        return Err(AppError("Only the GM or a supporter takes players out.".into()));
+    }
+    let db = store.db(world)?;
+    let invited: Vec<String> = db.invited()?;
+    if invited.iter().any(|i| i == id) {
+        db.set_invited(&invited.into_iter().filter(|i| i != id).collect::<Vec<_>>())?;
+        return Ok(());
+    }
+    match db.member(id)? {
+        Some(m) if m.role == Role::Gm => Err(AppError("The GM stays. Hand the world over first.".into())),
+        Some(m) if m.role == Role::Supporter && !store.is_gm(world) => Err(AppError("Only the GM takes a supporter out.".into())),
+        Some(_) => Ok(db.remove_member(id)?),
+        None => Err(AppError("There is no such member.".into())),
+    }
 }
 
 #[cfg(feature = "gui")]
@@ -1071,12 +850,9 @@ fn member_remove(app: tauri::AppHandle, world: String, id: String) -> Answer<Wor
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_moderation_set(app: tauri::AppHandle, world: String, on: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM decides about review.".into()));
-    }
-    store.set_moderation(&world, on)?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
+    must_be_gm(&store, &world, "decides about review")?;
+    store.set_setting(&world, "moderated", &on)?;
+    world_now(&store, &world)
 }
 
 #[cfg(feature = "gui")]
@@ -1084,12 +860,16 @@ fn world_moderation_set(app: tauri::AppHandle, world: String, on: bool) -> Answe
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_versions_set(app: tauri::AppHandle, world: String, max: u32) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM decides how many versions stay.".into()));
+    must_be_gm(&store, &world, "decides how many versions stay")?;
+    if max == 0 {
+        return Err(AppError("At least one version stays.".into()));
     }
-    store.set_version_limit(&world, max)?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
+    store.set_setting(&world, "version_limit", &max)?;
+    let db = store.db(&world)?;
+    for doc in db.document_ids()? {
+        db.trim_versions(&doc, max as usize)?;
+    }
+    world_now(&store, &world)
 }
 
 #[cfg(feature = "gui")]
@@ -1123,54 +903,17 @@ fn app_restart(app: tauri::AppHandle) {
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_listed_set(app: tauri::AppHandle, world: String, listed: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM decides who sees the world.".into()));
-    }
-    store.set_listed(&world, listed)?;
-    world_info(&store, &store.load_world_meta(&world)?, store.load_identity()?.id().as_str())
+    must_be_gm(&store, &world, "decides who sees the world")?;
+    store.set_setting(&world, "listed", &listed)?;
+    world_now(&store, &world)
 }
 
 #[cfg(feature = "gui")]
-/// Lets go of what newer records replaced — the GM's. How many went.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn world_tidy(app: tauri::AppHandle, world: String) -> Answer<usize> {
-    let store = store(&app)?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM tidies the world.".into()));
-    }
-    Ok(store.tidy(&world)?)
-}
-
-#[cfg(feature = "gui")]
-/// How far switching the world's encryption is — asked while it runs.
+/// How far moving the world is — asked while it runs.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_switch_progress(app: tauri::AppHandle, world: String) -> Answer<Option<store::SwitchProgress>> {
     let _ = store(&app)?;
     Ok(store::switch_progress(&world))
-}
-
-#[cfg(feature = "gui")]
-/// Keeps a readable copy of the world beside the profile, or not.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn world_readable_set(app: tauri::AppHandle, world: String, on: bool) -> Answer<WorldInfo> {
-    let store = store(&app)?;
-    let me = store.load_identity()?;
-    if on && store.is_fleeting(&world) {
-        return Err(AppError("This world is held only while online.".into()));
-    }
-    readable::set_own(&store, &world, on)?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
-}
-
-#[cfg(feature = "gui")]
-/// Encrypts the world or keeps it as it is — the GM's. Every part begins
-/// anew in the other form, which takes its while in a big world.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn world_encryption_set(app: tauri::AppHandle, world: String, on: bool) -> Answer<WorldInfo> {
-    let store = store(&app)?;
-    let me = store.load_identity()?;
-    store.set_encrypted(&world, on)?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
 }
 
 #[cfg(feature = "gui")]
@@ -1179,39 +922,38 @@ fn world_encryption_set(app: tauri::AppHandle, world: String, on: bool) -> Answe
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_dice_set(app: tauri::AppHandle, world: String, sides: Vec<u32>) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM chooses the world's dice.".into()));
-    }
+    must_be_gm(&store, &world, "chooses the world's dice")?;
     let mut kept: Vec<u32> = Vec::new();
     for n in sides.into_iter().filter(|n| (2..=1000).contains(n)) {
         if !kept.contains(&n) {
             kept.push(n);
         }
     }
-    store.set_dice(&world, kept)?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
+    store.set_setting(&world, "dice", &kept)?;
+    world_now(&store, &world)
 }
 
 #[cfg(feature = "gui")]
-/// The side bar's entries as far as this device may see them — `None` while
-/// the game master has set none.
+/// The side bar's entries — `None` while the game master has set none.
 // Off the main thread: while the store works, the window keeps drawing and taking keys.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn navigation_load(app: tauri::AppHandle, world: String) -> Answer<Option<Vec<aw_model::navigation::NavEntry>>> {
     navigation_load_in(&store(&app)?, world)
 }
 
-/// `navigation_load` for whom the store is given — the host, acting for a player.
+/// `navigation_load` for whom the store is given.
 pub(crate) fn navigation_load_in(store: &Store, world: String) -> Answer<Option<Vec<aw_model::navigation::NavEntry>>> {
-    Ok(store.clone().navigation(&world)?)
+    store.reader(&world)?;
+    Ok(store.navigation(&world)?)
 }
 
 #[cfg(feature = "gui")]
 /// Sets the side bar's entries — the GM's.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn navigation_set(app: tauri::AppHandle, world: String, entries: Vec<aw_model::navigation::NavEntry>) -> Answer<()> {
-    store(&app)?.set_navigation(&world, &entries)?;
+    let store = store(&app)?;
+    must_be_gm(&store, &world, "sets the side bar")?;
+    store.set_navigation(&world, &entries)?;
     Ok(())
 }
 
@@ -1220,101 +962,93 @@ fn navigation_set(app: tauri::AppHandle, world: String, entries: Vec<aw_model::n
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_trust_set(app: tauri::AppHandle, world: String, member: String, trusted: bool) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM decides about review.".into()));
-    }
-    let meta = store.load_world_meta(&world)?;
-    if meta.member(&member).is_none() {
-        return Err(AppError("There is no such member.".into()));
-    }
-    store.set_trust(&world, &member, trusted)?;
-    world_info(&store, &meta, me.id().as_str())
+    must_be_gm(&store, &world, "decides about review")?;
+    let db = store.db(&world)?;
+    let mut m = db.member(&member)?.ok_or_else(|| AppError("There is no such member.".into()))?;
+    m.trusted = trusted;
+    db.put_member(&m)?;
+    world_now(&store, &world)
 }
 
 #[cfg(feature = "gui")]
-/// Makes these players the world's supporters — the GM's.
+/// Makes these players the world's supporters — the GM's. Supporters not
+/// named any more are players again.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_supporters_set(app: tauri::AppHandle, world: String, ids: Vec<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    let meta = store.set_supporters(&world, ids)?;
-    world_info(&store, &meta, me.id().as_str())
+    must_be_gm(&store, &world, "names supporters")?;
+    let db = store.db(&world)?;
+    for mut m in db.members()? {
+        let role = match (m.role, ids.contains(&m.id)) {
+            (Role::Gm, _) => Role::Gm,
+            (_, true) => Role::Supporter,
+            (_, false) => Role::Player,
+        };
+        if role != m.role {
+            m.role = role;
+            db.put_member(&m)?;
+        }
+    }
+    world_now(&store, &world)
 }
 
 #[cfg(feature = "gui")]
-/// Takes the GM's place, as a supporter — with the keys the GM sealed for
-/// this device's member. Everyone sees it.
+/// Takes the GM's place, as a supporter. Everyone sees it: the world names
+/// the new GM, and the old one is a player of it.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_take_over(app: tauri::AppHandle, world: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    if !store.supports(&world)? {
+    let me = store.actor()?;
+    let db = store.db(&world)?;
+    if !db.member(&me)?.is_some_and(|m| m.role == Role::Supporter) {
         return Err(AppError("Only a supporter of the world can take the GM's place.".into()));
     }
-    store.take_over(&world, &me)?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
+    hand_world(&store, &world, &me)?;
+    world_now(&store, &world)
 }
 
 #[cfg(feature = "gui")]
-/// Hands the world over to a member — their device takes it over with the
-/// keys sealed for them, as soon as it reads the world — or, without
-/// `member`, takes that back.
+/// Hands the world over to another member: they are its GM from now on, and
+/// the one who was is a player of it.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn gm_handover(app: tauri::AppHandle, world: String, member: Option<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    let meta = store.load_world_meta(&world)?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM can hand the world over.".into()));
+    must_be_gm(&store, &world, "can hand the world over")?;
+    let Some(member) = member else { return world_now(&store, &world) };
+    if member == store.actor()? || store.db(&world)?.member(&member)?.is_none() {
+        return Err(AppError("The world goes only to another member.".into()));
     }
-    if let Some(member) = &member {
-        if member == me.id().as_str() || meta.member(member).is_none() {
-            return Err(AppError("The world goes only to another member.".into()));
-        }
-    }
-    store.hand_over(&world, member.as_deref())?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
+    hand_world(&store, &world, &member)?;
+    world_now(&store, &world)
 }
 
-#[cfg(feature = "gui")]
-/// Hands the world over as a file, sealed for the member alone. This device
-/// steps down at once — keep the file safe until it has arrived.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn gm_handover_file(app: tauri::AppHandle, world: String, member: String, path: String) -> Answer<String> {
-    let store = store(&app)?;
-    let meta = store.load_world_meta(&world)?;
-    let to = meta
-        .member(&member)
-        .filter(|m| m.role != Role::Gm)
-        .ok_or_else(|| AppError("The world goes only to another member.".into()))?;
-    let package = store.handover_pack(&world, &to.identity)?;
-    let path = with_extension(&path, "awworld");
-    std::fs::write(&path, serde_json::to_vec(&package).map_err(AppError::from)?).map_err(AppError::from)?;
-    store.step_down(&world)?;
-    network::republish();
-    Ok(path.display().to_string())
+/// `to` is the world's GM now; whoever was is a player.
+fn hand_world(store: &Store, world: &str, to: &str) -> Answer<()> {
+    let db = store.db(world)?;
+    for mut m in db.members()? {
+        if m.role == Role::Gm && m.id != to {
+            m.role = Role::Player;
+            db.put_member(&m)?;
+        }
+    }
+    let mut new = db.member(to)?.ok_or_else(|| AppError("There is no such member.".into()))?;
+    new.role = Role::Gm;
+    db.put_member(&new)?;
+    Ok(())
 }
 
 #[cfg(feature = "gui")]
 /// Deletes a world for good.
 ///
 /// `confirmation` has to be the world's name. The check deliberately lives
-/// here too and not only in the interface: what deletes the world token,
-/// nobody brings back.
+/// here too and not only in the interface: what is deleted, nobody brings back.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_delete(app: tauri::AppHandle, world: String, confirmation: String) -> Answer<()> {
     let store = store(&app)?;
-    // Worked on online: only this device's note of it goes; the world stays with its host.
-    if !store.holds(&world) && network::online_worlds(&store).iter().any(|w| w.world == world) {
-        return network::forget_online(&store, &world);
-    }
+    must_be_gm(&store, &world, "deletes a world")?;
     let meta = store.load_world_meta(&world)?;
-    if confirmation.trim() != meta.public.name.trim() {
-        return Err(AppError(format!(
-            "To delete, the name has to match exactly: {:?}",
-            meta.public.name
-        )));
+    if confirmation.trim() != meta.name.trim() {
+        return Err(AppError(format!("To delete, the name has to match exactly: {:?}", meta.name)));
     }
     store.delete_world(&world)?;
     Ok(())
@@ -1325,12 +1059,12 @@ fn world_delete(app: tauri::AppHandle, world: String, confirmation: String) -> A
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_icon_set(app: tauri::AppHandle, world: String, icon: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
+    must_be_gm(&store, &world, "sets the world's icon")?;
     let mut meta = store.load_world_meta(&world)?;
     // A few characters are enough for any emoji including variation selectors.
     meta.icon = icon.chars().take(4).collect();
     store.save_world_meta(&meta)?;
-    world_info(&store, &meta, me.id().as_str())
+    world_info(&store, &meta)
 }
 
 #[cfg(feature = "gui")]
@@ -1339,83 +1073,82 @@ fn world_icon_set(app: tauri::AppHandle, world: String, icon: String) -> Answer<
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn calendar_set(app: tauri::AppHandle, world: String, calendar: WorldCalendar) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM sets the calendar.".into()));
-    }
+    must_be_gm(&store, &world, "sets the calendar")?;
     calendar.validate().map_err(AppError::from)?;
     let mut meta = store.load_world_meta(&world)?;
     meta.calendar = calendar;
     store.save_world_meta(&meta)?;
-    world_info(&store, &meta, me.id().as_str())
+    world_info(&store, &meta)
 }
 
-#[cfg(feature = "gui")]
-/// Checks whether the world token is still there and matches the public key.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn world_token_check(app: tauri::AppHandle, world: String) -> Answer<bool> {
-    let store = store(&app)?;
-    let meta = store.load_world_meta(&world)?;
-    let token = store.load_token(&world)?;
-    Ok(token.public() == meta.public)
-}
-
-// --- Attributes ---------------------------------------------------------
+// --- Roles --------------------------------------------------------------
 
 #[cfg(feature = "gui")]
+/// A role to give — `class:rogue`, `knowledge:crypt`. The GM's or a supporter's.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn attribute_create(app: tauri::AppHandle, world: String, attribute: String) -> Answer<Vec<String>> {
     let store = store(&app)?;
-    let mut ring = store.load_keyring(&world)?;
+    if !manages(&store, &world)? {
+        return Err(AppError("Only the GM or a supporter makes roles.".into()));
+    }
     let parsed: Attribute = attribute.parse().map_err(AppError::from)?;
-    ring.ensure(&parsed)?;
-    store.save_keyring(&world, &ring)?;
-    Ok(ring.attributes().map(|a| a.to_string()).collect())
+    let mut made: Vec<String> = store.setting(&world, "roles", Vec::new())?;
+    if !made.contains(&parsed.to_string()) {
+        made.push(parsed.to_string());
+        store.set_setting(&world, "roles", &made)?;
+    }
+    roles_of(&store, &world)
+}
+
+#[cfg(feature = "gui")]
+/// Takes a role away from everyone, and out of the roles to give.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+fn attribute_revoke(app: tauri::AppHandle, world: String, attribute: String) -> Answer<u32> {
+    let store = store(&app)?;
+    must_be_gm(&store, &world, "takes roles away")?;
+    let made: Vec<String> = store.setting(&world, "roles", Vec::<String>::new())?;
+    store.set_setting(&world, "roles", &made.into_iter().filter(|a| *a != attribute).collect::<Vec<_>>())?;
+    let db = store.db(&world)?;
+    for mut m in db.members()? {
+        if m.attributes.contains(&attribute) {
+            m.attributes.retain(|a| *a != attribute);
+            db.put_member(&m)?;
+        }
+    }
+    Ok(0)
 }
 
 #[cfg(feature = "gui")]
 /// What a player is assigned to — documents (`doc:…`: their character, a
-/// class) and attributes — and so what they may see. The game master's, or
-/// a supporter's for players. An attribute taken away is rotated: what is
-/// written from then on is closed to them; what they had, they keep.
+/// class) and roles — and so what they may see. The game master's, or a
+/// supporter's for players.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_attributes_set(app: tauri::AppHandle, world: String, member: String, attributes: Vec<String>) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    member_attributes_set_in(&store, world, member, attributes, me.id().as_str())
+    member_attributes_set_in(&store, &world, &member, attributes)?;
+    world_now(&store, &world)
 }
 
-/// `member_attributes_set` for whom the store is given — the host, acting
-/// for a supporter: `me`.
-pub(crate) fn member_attributes_set_in(store: &Store, world: String, member: String, attributes: Vec<String>, me: &str) -> Answer<WorldInfo> {
-    let gm = store.is_gm(&world);
-    if !gm && !store.supports(&world)? {
+pub(crate) fn member_attributes_set_in(store: &Store, world: &str, member: &str, attributes: Vec<String>) -> Answer<()> {
+    if !manages(store, world)? {
         return Err(AppError("Only the GM or a supporter assigns players.".into()));
     }
-    let before = store.roster(&world)?;
+    let gm = store.is_gm(world);
+    let db = store.db(world)?;
+    let mut m = db.member(member)?.ok_or_else(|| AppError("There is no such member.".into()))?;
     // The GM too may note whom they play: they see everything anyway, but
     // handing the world over, what they play stays theirs as a player.
-    if !gm && (before.member(&member).is_some_and(|m| m.role == Role::Gm) || attributes.iter().any(|a| a.trim() == "gm")) {
-        return Err(AppError("Only the GM assigns the GM.".into()));
+    if !gm && (m.role != Role::Player || attributes.iter().any(|a| a.trim() == "gm")) {
+        return Err(AppError("Only the GM assigns the GM and supporters.".into()));
     }
-    let mut after = before.clone();
-    after.assign(&member, &attributes)?;
-    store.keep_roster(&world, &before, &after)?;
-    world_info(store, &store.load_world_meta(&world)?, me)
+    for a in &attributes {
+        a.trim().parse::<Attribute>().map_err(AppError::from)?;
+    }
+    m.attributes = attributes.into_iter().map(|a| a.trim().to_string()).filter(|a| !["players", "all", "gm"].contains(&a.as_str())).collect();
+    m.attributes.dedup();
+    db.put_member(&m)?;
+    Ok(())
 }
-
-#[cfg(feature = "gui")]
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn attribute_revoke(app: tauri::AppHandle, world: String, attribute: String) -> Answer<u32> {
-    let store = store(&app)?;
-    let mut ring = store.load_keyring(&world)?;
-    let parsed: Attribute = attribute.parse().map_err(AppError::from)?;
-    let epoch = ring.rotate(&parsed)?;
-    store.save_keyring(&world, &ring)?;
-    store.reseal(&world)?;
-    Ok(epoch)
-}
-
 // --- Templates ----------------------------------------------------------
 
 #[cfg(feature = "gui")]
@@ -1425,9 +1158,10 @@ fn templates_load(app: tauri::AppHandle, world: String) -> Answer<Vec<Template>>
     templates_load_in(&store(&app)?, world)
 }
 
-/// `templates_load` for whom the store is given — the host, acting for a player.
+/// `templates_load` for whom the store is given.
 pub(crate) fn templates_load_in(store: &Store, world: String) -> Answer<Vec<Template>> {
-    Ok(store.clone().load_templates(&world)?)
+    store.reader(&world)?;
+    Ok(store.load_templates(&world)?)
 }
 
 #[cfg(feature = "gui")]
@@ -1437,9 +1171,7 @@ fn template_save(
     world: String,
     template: Template,
 ) -> Answer<Vec<Template>> {
-    let store = store(&app)?;
-    let identity = store.load_identity()?;
-    save_template(&store, &identity, &world, template)
+    save_template(&store(&app)?, &world, template)
 }
 
 /// The default of a property that picks documents names them — by name as
@@ -1472,7 +1204,8 @@ fn default_documents(template: &mut Template, known: &document::Known, to_ids: b
 
 /// Saves a type — a new one together with its page. A renamed one takes its
 /// page and every text that names it along: the name is one.
-fn save_template(store: &Store, identity: &Identity, world: &str, mut template: Template) -> Answer<Vec<Template>> {
+fn save_template(store: &Store, world: &str, mut template: Template) -> Answer<Vec<Template>> {
+    must_be_gm(store, world, "changes types")?;
     // Normalise before checking: a new type gets its id here.
     template.normalize();
     template.validate().map_err(AppError::from)?;
@@ -1481,7 +1214,7 @@ fn save_template(store: &Store, identity: &Identity, world: &str, mut template: 
     // its own properties as this very template now has them.
     let mut with_this: Vec<Template> = all.iter().filter(|t| t.id != template.id).cloned().collect();
     with_this.push(template.clone());
-    let known = document::known(&store.load_articles(world)?, &store.view_keys(world, identity)?, with_this);
+    let known = document::known_from(view_with(store, world, &store.reader(world)?)?, with_this);
     for part in template.blocks.iter_mut().flat_map(|b| b.parts.iter_mut()) {
         part.text = names::stored(&part.text, &known, &template.id);
     }
@@ -1532,7 +1265,7 @@ fn save_template(store: &Store, identity: &Identity, world: &str, mut template: 
     // stores the type's id.
     if let Some((_, new, page)) = renamed {
         if !page.is_empty() {
-            document::rename_document(store, identity, world, &page, &new)?;
+            document::rename_document(store, world, &page, &new)?;
         }
     }
     Ok(store.load_templates(world)?)
@@ -1546,6 +1279,7 @@ fn template_delete(app: tauri::AppHandle, world: String, slug: String) -> Answer
 
 /// Deletes a type — and its page with it.
 fn delete_template(store: &Store, world: &str, slug: &str) -> Answer<Vec<Template>> {
+    must_be_gm(store, world, "deletes types")?;
     let mut all = store.load_templates(world)?;
     // A type with subtypes stays: they inherit from it, and without it they
     // would silently lose fields and blocks.
@@ -1571,13 +1305,14 @@ fn delete_template(store: &Store, world: &str, slug: &str) -> Answer<Vec<Templat
     }
     // Its page goes with it — it was the type's, and a page listing a type
     // that no longer exists would only show an error.
-    if let Some(page) = all.iter().find(|t| t.id == slug).and_then(|t| t.page.parse::<ArticleId>().ok()) {
-        store.remove(world, page, None, "")?;
+    if let Some(page) = all.iter().find(|t| t.id == slug).map(|t| t.page.clone()).filter(|p| !p.is_empty()) {
+        store.db(world)?.delete_document(&page)?;
     }
     all.retain(|t| t.id != slug);
     store.save_templates(world, &all)?;
     Ok(all)
 }
+
 
 // --- Articles -----------------------------------------------------------
 
@@ -1591,89 +1326,36 @@ fn article_create(
     slug: String,
     name: String,
     visibility: String,
-    mut layers: Vec<NewLayer>,
+    layers: Vec<NewLayer>,
 ) -> Answer<String> {
     let store = store(&app)?;
-    // Names as written, ids as stored — the same as when a document is saved.
-    let known = known_to_me(&store, &world)?;
+    must_be_gm(&store, &world, "makes documents with access of their own")?;
+    let layers = names_stored(&store, &world, &article_type, layers)?;
+    create_document(&store, &world, article_type, slug, name, visibility, layers)
+}
+
+/// Names as written in new texts, ids as stored — the same as when a
+/// document is saved.
+fn names_stored(store: &Store, world: &str, article_type: &str, mut layers: Vec<NewLayer>) -> Answer<Vec<NewLayer>> {
+    let known = known_to_me(store, world)?;
     for layer in &mut layers {
-        layer.text = names::stored(&layer.text, &known, &article_type);
+        layer.text = names::stored(&layer.text, &known, article_type);
         if let Some(map) = layer.fields.as_object_mut() {
             for value in map.values_mut() {
                 if let serde_json::Value::String(s) = value {
-                    *s = names::stored(s, &known, &article_type);
+                    *s = names::stored(s, &known, article_type);
                 }
             }
         }
     }
-    create_document(&store, &world, article_type, slug, name, visibility, layers)
-}
-
-/// A new document a player asks for — what `article_propose` seals for the
-/// GM's device, which makes it (`answer_proposals`).
-#[derive(Deserialize, Serialize)]
-struct Asked {
-    /// The id the document will have — chosen on the player's device, so it
-    /// is theirs to open and link to before the GM's device made it.
-    #[serde(default)]
-    article: String,
-    #[serde(default)]
-    article_type: String,
-    #[serde(default)]
-    slug: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    layers: Vec<NewLayer>,
-    /// Or who sees parts of `article`, as one who may edit them asks it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    shown: Vec<Shown>,
-}
-
-/// Who sees a part, as an editor asks it — see `propose_shown`.
-#[derive(Clone, Deserialize, Serialize)]
-pub(crate) struct Shown {
-    pub(crate) layer: String,
-    pub(crate) view: String,
-}
-
-/// Who sees parts of a document, asked by one who may edit them and is not
-/// the GM: the GM's device holds the keys and sets it when it has it
-/// (`answer_proposals`), if they still may edit them.
-pub(crate) fn propose_shown(store: &Store, me: &Identity, world: &str, article: &str, shown: Vec<Shown>) -> Answer<()> {
-    let asked = Asked { article: article.to_string(), article_type: String::new(), slug: String::new(), name: String::new(), layers: Vec::new(), shown };
-    store.propose(world, me, &serde_json::to_vec(&asked)?)?;
-    Ok(())
-}
-
-/// A view asked for by an editor, set — where they still may edit the part
-/// and who edits it stays as it is. Whether it was set.
-fn set_shown(store: &Store, world: &str, member: &store::Member, article: &str, shown: &Shown) -> Answer<bool> {
-    let held = store.view_keys(world, &store.load_identity()?)?;
-    let all = store.load_articles(world)?;
-    let Some(target) = all.iter().find(|a| a.id.to_string() == article) else { return Ok(false) };
-    let Some(entry) = target.layers.iter().find(|l| l.id.to_string() == shown.layer) else { return Ok(false) };
-    let content = layer_content(entry, &held)?;
-    let mut theirs: std::collections::BTreeSet<Attribute> = member.granted_attributes().iter().filter_map(|a| a.parse().ok()).collect();
-    theirs.extend(["players", "all"].iter().filter_map(|a| a.parse().ok()));
-    if !content.edit.parse::<Policy>().is_ok_and(|p| p.satisfied_by(&theirs)) {
-        return Ok(false);
-    }
-    let view = own_view(&shown.view, article, &target.article_type);
-    let wanted: Policy = view.parse().map_err(AppError::from)?;
-    store.ensure_attributes(world, &wanted)?;
-    store.rekey(world, entry.id, &wanted, Access { section: content.section, own: view, edit: content.edit }, entry.level, "")?;
-    Ok(true)
+    Ok(layers)
 }
 
 #[cfg(feature = "gui")]
-/// A new document, by a player: sent to the GM's device, which makes it
-/// when it has it — if the type lets this player make its documents
-/// (`create=`). Names are stored as ids here already, as when one saves.
-///
-/// `article`: the document asked for again, changed — a fresh one without.
-/// Returns its id.
-// Off the main thread: while the store works, the window keeps drawing and taking keys.
+/// A new document, by a player — made at once where the type lets this
+/// player make its documents (`create=`), with the type's access: the base,
+/// the properties and every part as the type sets them out; a part the type
+/// does not know is left out. Returns its id.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn article_propose(
     app: tauri::AppHandle,
@@ -1685,193 +1367,50 @@ fn article_propose(
     layers: Vec<NewLayer>,
 ) -> Answer<String> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    propose_document(&store, &me, &world, article, article_type, slug, name, layers)
+    let _ = article;
+    propose_document(&store, &world, article_type, slug, name, layers)
 }
 
 /// What `article_propose` does — without Tauri, for the tests too.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn propose_document(
-    store: &Store,
-    me: &Identity,
-    world: &str,
-    article: Option<String>,
-    article_type: String,
-    slug: String,
-    name: String,
-    mut layers: Vec<NewLayer>,
-) -> Answer<String> {
-    let article = match article {
-        Some(id) => serde_json::from_value::<ArticleId>(serde_json::Value::String(id)).map_err(|_| AppError("Not a document's id.".into()))?,
-        None => ArticleId::new(),
-    };
-    // Names as written, ids as stored — documents waiting on the GM among them.
-    let known = known_to_me(store, world)?;
-    for layer in &mut layers {
-        layer.text = names::stored(&layer.text, &known, &article_type);
-        if let Some(map) = layer.fields.as_object_mut() {
-            for value in map.values_mut() {
-                if let serde_json::Value::String(s) = value {
-                    *s = names::stored(s, &known, &article_type);
-                }
-            }
-        }
-    }
-    let asked = Asked { article: article.to_string(), article_type, slug, name: name.trim().chars().take(200).collect(), layers, shown: Vec::new() };
-    store.propose(world, me, &serde_json::to_vec(&asked)?)?;
-    Ok(article.to_string())
-}
-
-/// The documents this player asked for and the GM's device has not made yet
-/// — on their own device, to open and to link to: the newest proposal of
-/// each, as a document of its type, marked `pending`.
-fn pending_views(store: &Store, world: &str, me: &Identity) -> Answer<Vec<ArticleView>> {
-    if store.is_gm(world) {
-        return Ok(Vec::new());
-    }
-    let stored: std::collections::HashSet<String> = store.load_articles(world)?.iter().map(|a| a.id.to_string()).collect();
+pub(crate) fn propose_document(store: &Store, world: &str, article_type: String, slug: String, name: String, layers: Vec<NewLayer>) -> Answer<String> {
     let templates = store.load_templates(world)?;
-    let mut newest: std::collections::BTreeMap<String, (u64, Asked)> = Default::default();
-    for (_, author, at, content) in store.proposals(world, me)? {
-        if author.id != *me.id() {
-            continue;
-        }
-        let Some(asked) = content.and_then(|c| serde_json::from_slice::<Asked>(&c).ok()) else { continue };
-        if asked.article.is_empty() || stored.contains(&asked.article) {
-            continue;
-        }
-        if newest.get(&asked.article).is_none_or(|(t, _)| at >= *t) {
-            newest.insert(asked.article.clone(), (at, asked));
-        }
+    let own = templates
+        .iter()
+        .find(|t| t.id == article_type && !t.group)
+        .ok_or_else(|| AppError("There is no such type to make a document of.".into()))?;
+    let reader = store.reader(world)?;
+    let allowed = reader.is_gm() || (!own.create.trim().is_empty() && reader.allows(&own.create));
+    if !allowed {
+        return Err(AppError("This type's documents are not yours to make.".into()));
     }
-    Ok(newest
-        .into_values()
-        .map(|(_, asked)| {
-            let visibility = types::find(&templates, &asked.article_type).and_then(|t| t.auth.as_ref().map(|a| a.view.clone())).unwrap_or_else(|| "all".into());
-            let edit = types::find(&templates, &asked.article_type).and_then(|t| t.auth.as_ref().map(|a| a.edit.clone())).unwrap_or_else(|| "gm".into());
-            let layers: Vec<LayerView> = asked
-                .layers
-                .into_iter()
-                .map(|l| LayerView {
-                    id: format!("pending:{}:{}", asked.article, l.section),
-                    title: l.title,
-                    section: l.section,
-                    may_edit: true,
-                    text: l.text,
-                    fields: l.fields,
-                    policy: l.policy,
-                    edit: l.edit,
-                    level: l.level,
-                    epoch: 0,
-                })
-                .collect();
-            ArticleView {
-                id: asked.article,
-                article_type: asked.article_type,
-                slug: asked.slug,
-                name: asked.name,
-                edit,
-                visibility,
-                layer_total: layers.len(),
-                layers,
-                order: Vec::new(),
-                pending: true,
+    let template = types::effective(&templates, own);
+    let auth = template.auth.clone().unwrap_or_default();
+    let layers: Vec<NewLayer> = names_stored(store, world, &article_type, layers)?
+        .into_iter()
+        .filter_map(|mut layer| {
+            if layer.section == document::INFOBOX_SECTION {
+                (layer.policy, layer.edit, layer.level) = (auth.view.clone(), auth.edit.clone(), "open".into());
+            } else if let Some(key) = layer.section.strip_prefix(&format!("{}:", document::INFOBOX_SECTION)) {
+                let access = template.properties.iter().find(|f| f.key == key)?.access.clone()?;
+                (layer.policy, layer.edit, layer.level) = (access.view, access.edit, access.level);
+            } else {
+                let (block, part) = template.blocks.iter().find_map(|b| b.parts.iter().find(|p| p.key == layer.section).map(|p| (b, p)))?;
+                (layer.policy, layer.edit, layer.level, layer.title) = (part.view.clone(), part.edit.clone(), part.level.clone(), block.title.clone());
+                layer.fields = serde_json::Value::Object(Default::default());
             }
+            layer.parent = None;
+            Some(layer)
         })
-        .collect())
+        .collect();
+    let name: String = name.trim().chars().take(200).collect();
+    let slug = if slug.trim().is_empty() { name.to_lowercase() } else { slug };
+    create_document(store, world, own.id.clone(), slug, name, auth.view.clone(), layers)
 }
 
-/// Makes the documents players asked for — on the GM's device, whenever it
-/// has their proposals. Each with its type's access, not the one asked:
-/// the base, the properties and every part as the type sets them out; a
-/// part the type does not know is left out. A proposal not allowed — no
-/// member, no such type, the type not theirs to make — is answered all the
-/// same: it goes, without a document. Returns how many were made.
-pub(crate) fn answer_proposals(store: &Store, world: &str) -> Answer<usize> {
-    if !store.is_gm(world) {
-        return Ok(0);
-    }
-    // What supporters did becomes the GM's own word.
-    store.adopt_support(world)?;
-    let me = store.load_identity()?;
-    let asked = store.proposals(world, &me)?;
-    if asked.is_empty() {
-        return Ok(0);
-    }
-    let meta = store.load_world_meta(world)?;
-    let templates = store.load_templates(world)?;
-    let stored: std::collections::HashSet<String> = store.load_articles(world)?.iter().map(|a| a.id.to_string()).collect();
-    let mut answered = Vec::new();
-    let mut made = 0;
-    // Of a document asked for again, changed, the newest counts.
-    let mut newest: std::collections::BTreeMap<String, (u64, IdentityPublic, Asked)> = Default::default();
-    for (id, author, at, content) in asked {
-        answered.push(id);
-        let Some(asked) = content.and_then(|c| serde_json::from_slice::<Asked>(&c).ok()) else { continue };
-        if !asked.shown.is_empty() {
-            if let Some(member) = meta.member(author.id.as_str()) {
-                for shown in &asked.shown {
-                    made += usize::from(set_shown(store, world, member, &asked.article, shown)?);
-                }
-            }
-            continue;
-        }
-        let key = if asked.article.is_empty() { format!("new:{}", answered.len()) } else { asked.article.clone() };
-        if newest.get(&key).is_none_or(|(t, ..)| at >= *t) {
-            newest.insert(key, (at, author, asked));
-        }
-    }
-    for (_, author, asked) in newest.into_values() {
-        // Made already — asked again meanwhile: what came first stands.
-        if stored.contains(&asked.article) {
-            continue;
-        }
-        let Some(member) = meta.member(author.id.as_str()) else { continue };
-        let Some(own) = templates.iter().find(|t| t.id == asked.article_type && !t.group) else { continue };
-        // Every player holds `players` and `all`, besides what they are assigned.
-        let mut held: std::collections::BTreeSet<Attribute> = member.granted_attributes().iter().filter_map(|a| a.parse().ok()).collect();
-        held.extend(["players", "all"].iter().filter_map(|a| a.parse().ok()));
-        let allowed = member.role == Role::Gm || own.create.parse::<Policy>().is_ok_and(|p| !own.create.trim().is_empty() && p.satisfied_by(&held));
-        if !allowed {
-            continue;
-        }
-        let template = types::effective(&templates, own);
-        let auth = template.auth.clone().unwrap_or_default();
-        let layers: Vec<NewLayer> = asked
-            .layers
-            .into_iter()
-            .filter_map(|mut layer| {
-                if layer.section == document::INFOBOX_SECTION {
-                    (layer.policy, layer.edit, layer.level) = (auth.view.clone(), auth.edit.clone(), "open".into());
-                } else if let Some(key) = layer.section.strip_prefix(&format!("{}:", document::INFOBOX_SECTION)) {
-                    let access = template.properties.iter().find(|f| f.key == key)?.access.clone()?;
-                    (layer.policy, layer.edit, layer.level) = (access.view, access.edit, access.level);
-                } else {
-                    let (block, part) = template.blocks.iter().find_map(|b| b.parts.iter().find(|p| p.key == layer.section).map(|p| (b, p)))?;
-                    (layer.policy, layer.edit, layer.level, layer.title) = (part.view.clone(), part.edit.clone(), part.level.clone(), block.title.clone());
-                    layer.fields = serde_json::Value::Object(Default::default());
-                }
-                layer.parent = None;
-                Some(layer)
-            })
-            .collect();
-        let slug = if asked.slug.trim().is_empty() { asked.name.to_lowercase() } else { asked.slug };
-        let article = serde_json::from_value::<ArticleId>(serde_json::Value::String(asked.article)).unwrap_or_else(|_| ArticleId::new());
-        if create_document_as(store, world, article, own.id.clone(), slug, asked.name, auth.view.clone(), layers).is_ok() {
-            made += 1;
-        }
-    }
-    store.forget_proposals(world, answered)?;
-    Ok(made)
-}
-
-/// What the one using the app knows by name in this world.
-/// With the documents this player asked for and waits on: they may be linked to.
+/// What the one a command runs for knows by name in this world.
 fn known_to_me(store: &Store, world: &str) -> Answer<document::Known> {
-    let identity = store.load_identity()?;
-    let held = store.view_keys(world, &identity)?;
-    let mut views = build_view(&store.load_articles(world)?, &held);
-    views.extend(pending_views(store, world, &identity)?);
+    let reader = store.reader(world)?;
+    let views = view_with(store, world, &reader)?;
     Ok(document::known_from(views, store.load_templates(world)?))
 }
 
@@ -1884,33 +1423,29 @@ fn texts_written(app: tauri::AppHandle, world: String, article_type: String, tex
     texts_written_in(&store(&app)?, world, article_type, texts)
 }
 
-/// `texts_written` for whom the store is given — the host, acting for a player.
+/// `texts_written` for whom the store is given.
 pub(crate) fn texts_written_in(store: &Store, world: String, article_type: String, texts: Vec<String>) -> Answer<Vec<String>> {
-    let known = known_to_me(&store.clone(), &world)?;
+    let known = known_to_me(store, &world)?;
     Ok(texts.iter().map(|t| names::written(t, &known, &article_type)).collect())
 }
 
-/// Encrypts and stores a new document — for the command and for the world's
-/// own page, which comes into being together with the world.
-fn create_document(
-    store: &Store,
-    world: &str,
-    article_type: String,
-    slug: String,
-    name: String,
-    visibility: String,
-    layers: Vec<NewLayer>,
-) -> Answer<String> {
-    create_document_as(store, world, ArticleId::new(), article_type, slug, name, visibility, layers)
+/// Stores a new document — for the commands and for the world's own page,
+/// which comes into being together with the world.
+fn create_document(store: &Store, world: &str, article_type: String, slug: String, name: String, visibility: String, layers: Vec<NewLayer>) -> Answer<String> {
+    create_document_as(store, world, new_document_id(), article_type, slug, name, visibility, layers)
 }
 
-/// The same, under an id chosen beforehand — a player's, whose own device
-/// knew the document under it before the GM's made it.
+/// A fresh document id: `art:<ulid>`.
+pub(crate) fn new_document_id() -> String {
+    aw_model::ArticleId::new().to_string()
+}
+
+/// The same, under an id chosen beforehand.
 #[allow(clippy::too_many_arguments)]
 fn create_document_as(
     store: &Store,
     world: &str,
-    article: ArticleId,
+    id: String,
     article_type: String,
     slug: String,
     name: String,
@@ -1918,7 +1453,6 @@ fn create_document_as(
     mut layers: Vec<NewLayer>,
 ) -> Answer<String> {
     // The id first: a part its type gives `view=self` is the document's own.
-    let id = article.to_string();
     let visibility = own_view(&visibility, &id, &article_type);
     for layer in &mut layers {
         layer.policy = own_view(&layer.policy, &id, &article_type);
@@ -1927,29 +1461,36 @@ fn create_document_as(
     // Nested sections inherit their parents' visibility.
     let effective = effective_policies(&layers)?;
     let view: Policy = visibility.parse().map_err(AppError::from)?;
-    store.ensure_attributes(world, &view)?;
-    for policy in &effective {
-        store.ensure_attributes(world, policy)?;
-    }
-    // The base layer carries the article's name and visibility — and what
-    // the article is, for its readers only.
-    let mut parts = vec![NewPart {
-        is_base: true,
-        level: if view.to_string() == "gm" { Level::GmOnly } else { Level::Open },
-        view,
-        access: Access { section: String::new(), own: visibility, edit: "gm".into() },
-        plain: Plain { title: name, ..Plain::default() },
+    let by = store.actor()?;
+    let at = store::now();
+    let new_id = || aw_model::LayerId::new().to_string();
+    // The base layer carries the article's name and visibility.
+    let mut all = vec![Layer {
+        id: new_id(),
+        base: true,
+        section: String::new(),
+        title: name,
+        access: Access { view: visibility, edit: "gm".into(), level: if view.to_string() == "gm" { "gm-only".into() } else { "open".into() } },
+        text: String::new(),
+        fields: Default::default(),
+        images: Vec::new(),
     }];
     for (input, view) in layers.into_iter().zip(effective) {
-        parts.push(NewPart {
-            is_base: false,
-            level: level_from(&input.level),
-            view,
-            access: Access { section: input.section, own: input.policy, edit: input.edit },
-            plain: Plain { title: input.title, text: input.text, fields: fields_map(&input.fields), ..Plain::default() },
+        let images = store::named_images(&input.text).into_iter().collect();
+        all.push(Layer {
+            id: new_id(),
+            base: false,
+            section: input.section,
+            title: input.title,
+            access: Access { view: view.to_string(), edit: if input.edit.is_empty() { "gm".into() } else { input.edit }, level: input.level },
+            text: input.text,
+            fields: fields_map(&input.fields),
+            images,
         });
     }
-    Ok(store.create_article_as(world, article, article_type, slug, parts, "")?.to_string())
+    let doc = Document { id: id.clone(), doc_type: article_type, slug, layers: all, created: at, created_by: by.clone(), changed: at, changed_by: by, proposed: false };
+    store.db(world)?.put_document(&doc)?;
+    Ok(id)
 }
 
 /// `self` in a view: whoever is assigned to this document — its own
@@ -1982,51 +1523,37 @@ fn attribute_part(text: &str) -> String {
     text.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') { c } else { '-' }).collect()
 }
 
-/// Opens a layer and returns its plaintext.
-fn layer_content(entry: &StoredLayer, held: &HeldKeys) -> Result<LayerContent, AppError> {
-    entry.content(held).ok_or_else(|| AppError("This part cannot be opened here.".into()))
+#[cfg(feature = "gui")]
+/// Sets who may see an article or one of its sections. The GM's — or, for a
+/// part, whoever may edit it.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+fn visibility_set(app: tauri::AppHandle, world: String, article: String, layer: Option<String>, policy: String) -> Answer<()> {
+    visibility_set_in(&store(&app)?, &world, &article, layer.as_deref(), &policy)
 }
 
-#[cfg(feature = "gui")]
-/// Sets who may see an article or one of its sections: a new generation of
-/// the layer, with fresh keys.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn visibility_set(
-    app: tauri::AppHandle,
-    world: String,
-    article: String,
-    layer: Option<String>,
-    policy: String,
-) -> Answer<()> {
-    let store = store(&app)?;
-    if !store.is_gm(&world) {
-        return Err(AppError("Only the GM can hand out views.".into()));
+pub(crate) fn visibility_set_in(store: &Store, world: &str, article: &str, layer: Option<&str>, policy: &str) -> Answer<()> {
+    let reader = store.reader(world)?;
+    let db = store.db(world)?;
+    let mut doc = db.document(article)?.ok_or_else(|| AppError("There is no such article.".into()))?;
+    let policy = own_view(policy, article, &doc.doc_type);
+    policy.parse::<Policy>().map_err(AppError::from)?;
+    let target = doc
+        .layers
+        .iter_mut()
+        .find(|l| match layer {
+            Some(id) => l.id == id,
+            None => l.base,
+        })
+        .ok_or_else(|| AppError("There is no such part.".into()))?;
+    // Who may edit a part may say who sees it; the document as a whole is the GM's.
+    let allowed = reader.is_gm() || (!target.base && reader.may_edit(&target.access));
+    if !allowed {
+        return Err(AppError("Only the GM or who may edit a part sets who sees it.".into()));
     }
-    let identity = store.load_identity()?;
-    let held = store.view_keys(&world, &identity)?;
-    let all = store.load_articles(&world)?;
-    let target = all
-        .iter()
-        .find(|a| a.id.to_string() == article)
-        .ok_or_else(|| AppError("There is no such article.".into()))?;
-    let policy = own_view(&policy, &article, &target.article_type);
-    let wanted: Policy = policy.parse().map_err(AppError::from)?;
-    store.ensure_attributes(&world, &wanted)?;
-    let entry = match &layer {
-        Some(id) => target.layers.iter().find(|l| l.id.to_string() == *id),
-        None => target.layers.iter().find(|l| l.is_base),
-    }
-    .ok_or_else(|| AppError("There is no such part.".into()))?;
-    // The section key and who may edit live in the encrypted part.
-    let content = layer_content(entry, &held)?;
-    store.rekey(
-        &world,
-        entry.id,
-        &wanted,
-        Access { section: content.section, own: policy, edit: content.edit },
-        entry.level,
-        "",
-    )?;
+    target.access.view = policy;
+    doc.changed = store::now();
+    doc.changed_by = store.actor()?;
+    db.put_document(&doc)?;
     Ok(())
 }
 
@@ -2035,39 +1562,41 @@ fn visibility_set(
 /// had the same access as its document; a section with access of its own
 /// keeps it. The game master's. How many documents changed.
 pub(crate) fn type_access_apply_in(store: &Store, world: &str, article_type: &str, articles: &[String], view: Option<String>, edit: Option<String>) -> Answer<usize> {
-    if !store.is_gm(world) {
-        return Err(AppError("Only the GM sets who sees and edits documents.".into()));
-    }
-    let identity = store.load_identity()?;
-    let held = store.view_keys(world, &identity)?;
-    let all = store.load_articles(world)?;
+    must_be_gm(store, world, "sets who sees and edits documents")?;
+    let db = store.db(world)?;
     let same = |a: &str, b: &str| a == b || a.parse::<Policy>().ok().is_some_and(|a| b.parse::<Policy>().ok() == Some(a));
     let mut changed = 0;
-    for article in all.iter().filter(|a| a.article_type == article_type && articles.contains(&a.id.to_string())) {
-        let id = article.id.to_string();
-        let base = article.layers.iter().find(|l| l.is_base).ok_or_else(|| AppError("A document without its base.".into()))?;
-        let base = layer_content(base, &held)?;
-        let view = view.as_deref().map(|v| own_view(v, &id, &article.article_type));
-        let edit = edit.as_deref().map(|e| own_view(e, &id, &article.article_type));
+    for id in articles {
+        let Some(mut doc) = db.document(id)? else { continue };
+        if doc.doc_type != article_type {
+            continue;
+        }
+        let base = doc.base().cloned().ok_or_else(|| AppError("A document without its base.".into()))?;
+        let view = view.as_deref().map(|v| own_view(v, id, &doc.doc_type));
+        let edit = edit.as_deref().map(|e| own_view(e, id, &doc.doc_type));
         let mut touched = false;
-        for layer in &article.layers {
-            let content = layer_content(layer, &held)?;
+        for layer in &mut doc.layers {
             // A section with access of its own — a secret, say — keeps it.
-            if !(same(&content.own, &base.own) && same(&content.edit, &base.edit)) {
+            if !(same(&layer.access.view, &base.access.view) && same(&layer.access.edit, &base.access.edit)) {
                 continue;
             }
-            let own = view.clone().unwrap_or_else(|| content.own.clone());
-            let rule = edit.clone().unwrap_or_else(|| content.edit.clone());
-            if same(&own, &content.own) && same(&rule, &content.edit) {
+            let own = view.clone().unwrap_or_else(|| layer.access.view.clone());
+            let rule = edit.clone().unwrap_or_else(|| layer.access.edit.clone());
+            if same(&own, &layer.access.view) && same(&rule, &layer.access.edit) {
                 continue;
             }
-            let wanted: Policy = own.parse().map_err(AppError::from)?;
-            store.ensure_attributes(world, &wanted)?;
-            store.ensure_attributes(world, &rule.parse().map_err(AppError::from)?)?;
-            store.rekey(world, layer.id, &wanted, Access { section: content.section, own, edit: rule }, layer.level, "")?;
+            own.parse::<Policy>().map_err(AppError::from)?;
+            rule.parse::<Policy>().map_err(AppError::from)?;
+            layer.access.view = own;
+            layer.access.edit = rule;
             touched = true;
         }
-        changed += usize::from(touched);
+        if touched {
+            doc.changed = store::now();
+            doc.changed_by = store.actor()?;
+            db.put_document(&doc)?;
+            changed += 1;
+        }
     }
     Ok(changed)
 }
@@ -2079,59 +1608,64 @@ fn type_access_apply(app: tauri::AppHandle, world: String, article_type: String,
 }
 
 #[cfg(feature = "gui")]
-/// Deletes an article — for good.
+/// Deletes an article — for good. The game master's: a document consists of
+/// sections that different people may see, and whoever sees one of them
+/// should not throw the others away with it.
 ///
-/// Only with the full keyring, so only the game master: an article consists
-/// of sections that different people may see. Whoever can open only one of
-/// them should not be able to throw the others away with it.
-///
-/// `confirmation` has to be the article's name. Deleted is deleted — there is
-/// no trash bin, and without the keys a copy would be worth nothing anyway.
+/// `confirmation` has to be the article's name. Deleted is deleted — there
+/// is no trash bin.
 #[cfg_attr(feature = "gui", tauri::command(async))]
-fn article_delete(
-    app: tauri::AppHandle,
-    world: String,
-    article: String,
-    confirmation: String,
-) -> Answer<()> {
+fn article_delete(app: tauri::AppHandle, world: String, article: String, confirmation: String) -> Answer<()> {
     let store = store(&app)?;
-    let identity = store.load_identity()?;
-    let held = store.view_keys(&world, &identity)?;
-    store
-        .load_keyring(&world)
-        .map_err(|_| AppError("Only the GM can delete articles.".into()))?;
-
+    must_be_gm(&store, &world, "deletes documents")?;
     // A page belongs to its owner and goes only with it: the world's with
     // the world, a type's with the type.
-    let owned = store.load_world_meta(&world)?.home == article
-        || store.load_templates(&world)?.iter().any(|t| t.page == article);
+    let owned = store.load_world_meta(&world)?.home == article || store.load_templates(&world)?.iter().any(|t| t.page == article);
     if owned {
         return Err(AppError("This page belongs to the world or to a type — it goes only with it.".into()));
     }
-
-    let all = store.load_articles(&world)?;
-    let target = all
-        .iter()
-        .find(|a| a.id.to_string() == article)
-        .ok_or_else(|| AppError("There is no such article.".into()))?;
-
-    // The name lives in the base layer, so in the encrypted part.
-    let base = target
-        .layers
-        .iter()
-        .find(|l| l.is_base)
-        .ok_or_else(|| AppError("This article has no base layer.".into()))?;
-    let name = layer_content(base, &held)?.title;
+    let db = store.db(&world)?;
+    let doc = db.document(&article)?.ok_or_else(|| AppError("There is no such article.".into()))?;
+    let name = doc.name().to_string();
     if confirmation.trim() != name.trim() {
-        return Err(AppError(format!(
-            "To delete, the name has to match exactly — expected “{name}”."
-        )));
+        return Err(AppError(format!("To delete, the name has to match exactly — expected “{name}”.")));
     }
-
-    let id = target.id;
-    document::forget_relations(&store, &identity, &world, &article)?;
-    store.remove(&world, id, None, "")?;
+    document::forget_relations(&store, &world, &article)?;
+    db.delete_document(&article)?;
     Ok(())
+}
+
+#[cfg(feature = "gui")]
+/// The view of a world.
+///
+/// As a player always as oneself. As game master without `preview_as` the
+/// full view, with it exactly what a player with those roles sees — `all`
+/// and `players` besides.
+// Off the main thread: a big world takes its time.
+#[cfg_attr(feature = "gui", tauri::command(async))]
+fn view(app: tauri::AppHandle, world: String, preview_as: Option<Vec<String>>) -> Answer<Vec<ArticleView>> {
+    view_in(&store(&app)?, world, preview_as)
+}
+
+/// `view` for whom the store is given.
+pub(crate) fn view_in(store: &Store, world: String, preview_as: Option<Vec<String>>) -> Answer<Vec<ArticleView>> {
+    let reader = reader_in(store, &world, preview_as)?;
+    view_with(store, &world, &reader)
+}
+
+/// Every document `reader` sees, as the interface gets it.
+pub(crate) fn view_with(store: &Store, world: &str, reader: &Reader) -> Answer<Vec<ArticleView>> {
+    let db = store.db(world)?;
+    // What one wrote that waits for the game master stands there for oneself.
+    let own_waiting = !reader.is_gm() && store.moderated(world)?;
+    let mut out = Vec::new();
+    for doc in db.documents()? {
+        let doc = if own_waiting { document::with_own_waiting(store, world, doc)? } else { doc };
+        if let Some(view) = article_view(&doc, reader) {
+            out.push(view);
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(feature = "gui")]
@@ -2288,66 +1822,14 @@ fn markdown_read(text: String) -> Answer<Vec<markdown::Node>> {
 }
 
 #[cfg(feature = "gui")]
-/// The view of a world.
-///
-/// As a player always with one's own keys. As game master without
-/// `preview_as` the full view, with it exactly the keys a player with those
-/// attributes holds — `all` and `players` besides — not a rebuilt simulation
-/// but the same decryption attempt.
-// Off the main thread: a big world takes its time.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn view(app: tauri::AppHandle, world: String, preview_as: Option<Vec<String>>) -> Answer<Vec<ArticleView>> {
-    view_in(&store(&app)?, world, preview_as)
-}
-
-/// `view` for whom the store is given — the host, acting for a player.
-pub(crate) fn view_in(store: &Store, world: String, preview_as: Option<Vec<String>>) -> Answer<Vec<ArticleView>> {
-    let store = store.clone();
-    let identity = store.load_identity()?;
-    let articles = store.load_articles(&world)?;
-
-    let previewing = preview_as.is_some();
-    let preview_key = preview_as.as_ref().map(|names| format!("preview:{}", names.join(",")));
-    let held = match (store.is_gm(&world), preview_as) {
-        // Only the game master can switch the view — they hold the keys.
-        // Every player holds `all` and `players` — a preview as one does too.
-        (true, Some(names)) => {
-            let attributes: Vec<Attribute> = ["all", "players"]
-                .iter()
-                .map(|n| n.to_string())
-                .chain(names)
-                .filter_map(|n| n.parse().ok())
-                .collect();
-            store.load_keyring(&world)?.restrict_to(&attributes)
-        }
-        _ => store.view_keys(&world, &identity)?,
-    };
-    // Acting for a member: their view, cached apart.
-    let who = preview_key.or_else(|| host::acting().map(|a| format!("member:{}", a.member.id))).unwrap_or_default();
-    let mut scope = blake3::Hasher::new();
-    for (at, key) in held.iter() {
-        scope.update(at.to_string().as_bytes());
-        scope.update(key);
-    }
-    let who = format!("{}:{}:{}:{who}", store.profile_dir().display(), identity.id(), scope.finalize().to_hex());
-    let mut views = cached_view(&world, &who, &articles, &held);
-    // What this player asked for and waits on — theirs alone, until made.
-    if !previewing {
-        views.extend(pending_views(&store, &world, &identity)?);
-    }
-    Ok(views)
-}
-
-#[cfg(feature = "gui")]
 // Off the main thread: while the store works, the window keeps drawing and taking keys.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn today_in_world(app: tauri::AppHandle, world: String, day: i64) -> Answer<String> {
     today_in_world_in(&store(&app)?, world, day)
 }
 
-/// `today_in_world` for whom the store is given — the host, acting for a player.
+/// `today_in_world` for whom the store is given.
 pub(crate) fn today_in_world_in(store: &Store, world: String, day: i64) -> Answer<String> {
-    let store = store.clone();
     let meta = store.load_world_meta(&world)?;
     Ok(meta.calendar.format(WorldDate(day)))
 }
@@ -2389,20 +1871,9 @@ pub fn run() {
         // Runs after the plugin has restored things: first the remembered size
         // stands, then it is clamped into the usable area.
         .setup(|app| {
-            online::tell_progress_to(app.handle().clone());
             if let Ok(dir) = profile::config_dir(app.handle()) {
                 applog::set_fallback(dir);
             }
-            // The game master's worlds in shared folders: the next state
-            // once nobody wrote for a while.
-            std::thread::spawn(|| loop {
-                std::thread::sleep(std::time::Duration::from_secs(20));
-                if let Some(store) = profile::store_now() {
-                    store.consolidate_quiet();
-                }
-            });
-            network::start(app.handle()).map_err(|e| std::io::Error::other(e.0))?;
-            browser::start(app.handle());
             if let Some(w) = app.get_webview_window("main") {
                 window_state::on_start(app.handle().clone(), w);
             }
@@ -2419,45 +1890,12 @@ pub fn run() {
         })
         .invoke_handler({
             let commands: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
-            online::world_call,
-            online::world_connect,
-            online::world_disconnect,
             document::article_versions,
             document::version_compare,
             document::version_revert,
             document::version_document,
-            document::version_carry,
-            document::world_conflicts,
             applog::app_log,
             applog::app_log_open,
-            document::conflict_dismiss,
-            document::conflict_rescue,
-            network::network_settings,
-            network::network_enable,
-            network::network_internet,
-            network::network_share,
-            network::network_servers,
-            network::server_manage,
-            network::server_backups,
-            network::server_host_worlds,
-            network::remote_call,
-            network::network_copies_set,
-            network::network_folders,
-            network::network_port,
-            network::network_worlds,
-            network::network_join,
-            network::network_sync,
-            network::presence,
-            network::world_presence,
-            network::dice_roll,
-            network::dice_rolls,
-            network::dice_log,
-            network::dice_log_add,
-            network::dice_log_clear,
-            network::dice_favorites_set,
-            network::join_requests,
-            network::join_answer,
-            network::member_invite,
             profile::storage_status,
             profile::storage_locations,
             profile::storage_choose,
@@ -2474,25 +1912,15 @@ pub fn run() {
             world_create,
             world_copy,
             world_move,
-            network::world_check,
-            world_open,
-            world_share,
-            world_token_check,
             world_icon_set,
             world_delete,
             member_add,
             member_remove,
             member_replace,
             member_colour_set,
-            backup::backup_view,
-            backup::backup_plan_set,
-            backup::backup_now,
-            backup::backup_open,
-            backup::backup_restore,
             gm_handover,
             world_supporters_set,
             world_take_over,
-            gm_handover_file,
             world_moderation_set,
             member_trust_set,
             document::version_verdict,
@@ -2525,6 +1953,14 @@ pub fn run() {
             document::session_end,
             document::image_field_set,
             document::references_set,
+            live::presence,
+            live::world_presence,
+            live::dice_roll,
+            live::dice_rolls,
+            live::dice_log,
+            live::dice_log_add,
+            live::dice_log_clear,
+            live::dice_favorites_set,
             media::image_upload,
             media::image_rename,
             media::image_defaults_set,
@@ -2536,42 +1972,20 @@ pub fn run() {
             media::image_data,
             document::version_delete,
             world_versions_set,
-            world_tidy,
             world_listed_set,
             app_restart,
             world_dice_set,
-            world_encryption_set,
-            world_readable_set,
             world_switch_progress,
-            keys::keys_backup,
-            keys::keys_restore,
             navigation_load,
-            transfer::package_export,
-            browser::browser_settings,
-            browser::browser_enable,
-            browser::browser_pair,
-            browser::browser_forget,
-            transfer::package_read,
-            transfer::package_import,
             navigation_set,
             article_propose,
             document::relations_set,
             ];
-            move |invoke| {
-                if online::gate_invoke(&invoke) { true } else { commands(invoke) }
-            }
+            move |invoke| commands(invoke)
         })
         .build(tauri::generate_context!())
         .expect("the Tauri application could not start")
-        .run(|_, event| {
-            // What was held only while online goes with the app.
-            if let tauri::RunEvent::Exit = event {
-                if let Some(store) = profile::store_now() {
-                    store.forget_fleeting();
-                    online::clear_sessions(&store);
-                }
-            }
-        });
+        .run(|_, _| {});
 }
 
 
@@ -2661,47 +2075,37 @@ mod tests {
         }
     }
 
-    fn keys(attributes: &[&str]) -> HeldKeys {
-        let mut ring = Keyring::new();
-        let mut held = HeldKeys::new();
-        for a in attributes {
-            let parsed: Attribute = a.parse().unwrap();
-            ring.ensure(&parsed).unwrap();
-            let k = ring.current(&parsed).unwrap();
-            held.insert(k.at, k.key);
-        }
-        held
+    fn reader(attributes: &[&str]) -> Reader {
+        Reader::holding(&attributes.iter().map(|a| a.to_string()).collect::<Vec<_>>())
     }
 
     #[test]
     fn editing_is_separate_from_seeing() {
         // Whoever may read may not therefore write.
-        let player = keys(&["players"]);
-        assert!(!may_edit("gm", &player));
-        assert!(may_edit("players", &player));
+        let player = reader(&["players"]);
+        assert!(!player.allows("gm"));
+        assert!(player.allows("players"));
     }
 
     #[test]
     fn edit_can_hold_for_individuals() {
-        let bob = keys(&["players", "player:bob"]);
-        let anna = keys(&["players", "player:anna"]);
-        assert!(may_edit("player:bob", &bob));
-        assert!(!may_edit("player:bob", &anna));
+        let bob = reader(&["player:bob"]);
+        let anna = reader(&["player:anna"]);
+        assert!(bob.allows("player:bob"));
+        assert!(!anna.allows("player:bob"));
     }
 
     #[test]
     fn without_a_rule_the_gm_decides() {
-        // Old content has no rule — then only the game master may touch it.
-        assert!(may_edit("", &keys(&["gm"])));
-        assert!(!may_edit("", &keys(&["players"])));
+        // Content without a rule — then only the game master may touch it.
+        assert!(Reader::gm().allows(""));
+        assert!(!reader(&["players"]).allows(""));
     }
 
     #[test]
     fn edit_understands_and_terms() {
-        let both = keys(&["players", "class:rogue"]);
-        let only_one = keys(&["players"]);
-        assert!(may_edit("players AND class:rogue", &both));
-        assert!(!may_edit("players AND class:rogue", &only_one));
+        assert!(reader(&["class:rogue"]).allows("players AND class:rogue"));
+        assert!(!reader(&[]).allows("players AND class:rogue"));
     }
 
     /// A freshly created type: still without an id and without a name.
@@ -2947,11 +2351,10 @@ mod tests {
 
         let meta = new_world(&store, &identity, "Eldermere".into()).unwrap();
         assert!(!meta.home.is_empty(), "the page exists from the start");
-        assert_eq!(store.load_world_meta(meta.public.world_id.as_str()).unwrap().home, meta.home);
+        assert_eq!(store.load_world_meta(meta.id.as_str()).unwrap().home, meta.home);
 
-        let id = meta.public.world_id.to_string();
-        let held = store.view_keys(&id, &identity).unwrap();
-        let view = build_view(&store.load_articles(&id).unwrap(), &held);
+        let id = meta.id.clone();
+        let view = view_in(&store, id.clone(), None).unwrap();
         assert_eq!(view.len(), 1, "the page is the only document");
         let page = &view[0];
         assert_eq!(page.id, meta.home);
@@ -2972,7 +2375,7 @@ mod tests {
         let identity = Identity::create("Marla").unwrap();
         store.save_identity(&identity).unwrap();
         let meta = new_world(&store, &identity, "Eldermere".into()).unwrap();
-        let id = meta.public.world_id.to_string();
+        let id = meta.id.clone();
         let kind = |name: &str| Template {
             id: String::new(),
             name: name.into(),
@@ -2991,50 +2394,48 @@ mod tests {
             page: String::new(),
             blocks: Vec::new(),
         };
-        let all = save_template(&store, &identity, &id, kind("Characters")).unwrap();
-        save_template(&store, &identity, &id, kind("Places")).unwrap();
+        let all = save_template(&store, &id, kind("Characters")).unwrap();
+        save_template(&store, &id, kind("Places")).unwrap();
         let characters = all[0].clone();
         let tim = create_document(&store, &id, characters.id.clone(), "tim".into(), "Tim".into(), "all".into(), vec![]).unwrap();
-        let home = document::code_of(&store, &identity, &id, &meta.home).unwrap();
+        let home = document::code_of(&store, &id, &meta.home).unwrap();
         let with_link = home.code.replace("<block>\n", "<block>\nMeet @@Characters:Tim@@.\n");
-        document::save_now(&store, &identity, &id, &meta.home, &with_link).unwrap();
-        let held = store.view_keys(&id, &identity).unwrap();
-        let stored = build_view(&store.load_articles(&id).unwrap(), &held);
+        document::save_now(&store, &id, &meta.home, &with_link).unwrap();
+        let stored = view_in(&store, id.clone(), None).unwrap();
         let home_text = &stored.iter().find(|a| a.id == meta.home).unwrap().layers[0].text;
         assert_eq!(home_text, &format!("Meet @@{tim}@@."), "a link is stored by id");
 
         // Renamed as a type: the page follows, and text shows the new name —
         // nothing had to be rewritten for it.
-        save_template(&store, &identity, &id, Template { name: "Heroes".into(), ..characters.clone() }).unwrap();
-        let page = document::code_of(&store, &identity, &id, &characters.page).unwrap();
+        save_template(&store, &id, Template { name: "Heroes".into(), ..characters.clone() }).unwrap();
+        let page = document::code_of(&store, &id, &characters.page).unwrap();
         assert_eq!(page.document.name, "Heroes");
         assert!(page.code.contains("<list type=Heroes columns=2>"), "{}", page.code);
-        let home = document::code_of(&store, &identity, &id, &meta.home).unwrap();
+        let home = document::code_of(&store, &id, &meta.home).unwrap();
         assert!(home.code.contains("@@Heroes:Tim@@"), "{}", home.code);
 
         // A renamed document too.
-        let tim_code = document::code_of(&store, &identity, &id, &tim).unwrap().code;
-        document::save_now(&store, &identity, &id, &tim, &tim_code.replace("<name=Tim>", "<name=Timothy>")).unwrap();
-        let home = document::code_of(&store, &identity, &id, &meta.home).unwrap();
+        let tim_code = document::code_of(&store, &id, &tim).unwrap().code;
+        document::save_now(&store, &id, &tim, &tim_code.replace("<name=Tim>", "<name=Timothy>")).unwrap();
+        let home = document::code_of(&store, &id, &meta.home).unwrap();
         assert!(home.code.contains("@@Heroes:Timothy@@"), "{}", home.code);
 
         // Renamed as a page: the type follows.
         let renamed = page.code.replace("<name=Heroes>", "<name=Villains>");
-        document::save_now(&store, &identity, &id, &characters.page, &renamed).unwrap();
+        document::save_now(&store, &id, &characters.page, &renamed).unwrap();
         let types = store.load_templates(&id).unwrap();
         assert!(types.iter().any(|t| t.id == characters.id && t.name == "Villains"));
 
         // A name is given once.
         let clash = renamed.replace("<name=Villains>", "<name=places>");
-        let err = document::save_now(&store, &identity, &id, &characters.page, &clash).unwrap_err();
+        let err = document::save_now(&store, &id, &characters.page, &clash).unwrap_err();
         assert!(err.0.contains("already exists"), "{}", err.0);
 
         // The world's page names the world.
-        let world_page = document::code_of(&store, &identity, &id, &meta.home).unwrap();
+        let world_page = document::code_of(&store, &id, &meta.home).unwrap();
         let code = world_page.code.replace("<name=Eldermere>", "<name=\"The Mist Lands\">");
-        document::save_now(&store, &identity, &id, &meta.home, &code).unwrap();
-        assert_eq!(store.load_world_meta(&id).unwrap().public.name, "The Mist Lands");
-        assert_eq!(store.load_token(&id).unwrap().name(), "The Mist Lands");
+        document::save_now(&store, &id, &meta.home, &code).unwrap();
+        assert_eq!(store.load_world_meta(&id).unwrap().name, "The Mist Lands");
         assert!(new_world(&store, &identity, "the mist lands".into()).is_err(), "and no second world takes it");
 
         std::fs::remove_dir_all(&dir).ok();
@@ -3048,7 +2449,7 @@ mod tests {
         let identity = Identity::create("Marla").unwrap();
         store.save_identity(&identity).unwrap();
         let meta = new_world(&store, &identity, "Eldermere".into()).unwrap();
-        let id = meta.public.world_id.to_string();
+        let id = meta.id.clone();
 
         let character = Template {
             id: String::new(),
@@ -3068,24 +2469,23 @@ mod tests {
             page: String::new(),
             blocks: Vec::new(),
         };
-        let saved = save_template(&store, &identity, &id, character).unwrap();
+        let saved = save_template(&store, &id, character).unwrap();
         let page = saved[0].page.clone();
         assert!(!page.is_empty(), "the type came with its page");
 
-        let held = store.view_keys(&id, &identity).unwrap();
-        let view = build_view(&store.load_articles(&id).unwrap(), &held);
+        let view = view_in(&store, id.clone(), None).unwrap();
         let text = &view.iter().find(|a| a.id == page).unwrap().layers[0].text;
         assert_eq!(text, &format!("<list type={} columns=2>", saved[0].id), "stored by id");
-        let code = document::code_of(&store, &identity, &id, &page).unwrap().code;
+        let code = document::code_of(&store, &id, &page).unwrap().code;
         assert!(code.contains("<list type=Characters columns=2>"), "written by name: {code}");
 
         // Saving again keeps the page — the editor's copy does not know it.
-        let again = save_template(&store, &identity, &id, Template { page: String::new(), ..saved[0].clone() }).unwrap();
+        let again = save_template(&store, &id, Template { page: String::new(), ..saved[0].clone() }).unwrap();
         assert_eq!(again[0].page, page);
-        assert_eq!(store.load_articles(&id).unwrap().len(), 2, "home and the one page");
+        assert_eq!(store.db(&id).unwrap().document_ids().unwrap().len(), 2, "home and the one page");
 
         delete_template(&store, &id, &saved[0].id).unwrap();
-        assert!(store.load_articles(&id).unwrap().iter().all(|a| a.id.to_string() != page), "the page went with it");
+        assert!(!store.db(&id).unwrap().document_ids().unwrap().contains(&page), "the page went with it");
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3098,7 +2498,7 @@ mod tests {
         let identity = Identity::create("Marla").unwrap();
         store.save_identity(&identity).unwrap();
         let meta = new_world(&store, &identity, "Eldermere".into()).unwrap();
-        let id = meta.public.world_id.to_string();
+        let id = meta.id.clone();
         let blank = |name: &str| Template {
             id: String::new(),
             name: name.into(),
@@ -3120,12 +2520,12 @@ mod tests {
         let number = |key: &str, label: &str| aw_model::template::TemplateField::new(key, label, aw_model::FieldKind::Number { unit: None });
 
         let abilities = Template { group: true, properties: vec![number("str", "Strength")], ..blank("Abilities") };
-        let all = save_template(&store, &identity, &id, abilities).unwrap();
+        let all = save_template(&store, &id, abilities).unwrap();
         let group = all.iter().find(|t| t.name == "Abilities").unwrap().clone();
         assert!(group.page.is_empty(), "a group has no page");
 
         let stats = aw_model::template::TemplateField::new("stats", "Stats", aw_model::FieldKind::Group { group: group.id.clone() });
-        let all = save_template(&store, &identity, &id, Template { properties: vec![stats], ..blank("Characters") }).unwrap();
+        let all = save_template(&store, &id, Template { properties: vec![stats], ..blank("Characters") }).unwrap();
         let characters = all.iter().find(|t| t.name == "Characters").unwrap().clone();
 
         let layer: NewLayer = serde_json::from_value(serde_json::json!({
@@ -3133,37 +2533,36 @@ mod tests {
         }))
         .unwrap();
         let tim = create_document(&store, &id, characters.id.clone(), String::new(), "Tim".into(), "all".into(), vec![layer]).unwrap();
-        let code = document::code_of(&store, &identity, &id, &tim).unwrap().code;
+        let code = document::code_of(&store, &id, &tim).unwrap().code;
         assert!(code.starts_with("---\nStats:\n  Strength: 15\n---"), "{code}");
 
         // The group grows — and the character with it.
         let grown = Template { properties: vec![number("str", "Strength"), number("dex", "Dexterity")], ..group.clone() };
-        save_template(&store, &identity, &id, grown).unwrap();
-        let code = document::code_of(&store, &identity, &id, &tim).unwrap().code;
+        save_template(&store, &id, grown).unwrap();
+        let code = document::code_of(&store, &id, &tim).unwrap().code;
         assert!(code.contains("  Dexterity:\n"), "{code}");
-        document::save_now(&store, &identity, &id, &tim, &code.replace("  Dexterity:", "  Dexterity: 12")).unwrap();
-        let code = document::code_of(&store, &identity, &id, &tim).unwrap().code;
+        document::save_now(&store, &id, &tim, &code.replace("  Dexterity:", "  Dexterity: 12")).unwrap();
+        let code = document::code_of(&store, &id, &tim).unwrap().code;
         assert!(code.contains("  Strength: 15\n  Dexterity: 12\n"), "{code}");
 
         // A layout of its own: stored by keys and ids, so renaming changes
         // nothing stored — and a document shows it with `<view of=…>`.
         let mut layout = aw_model::template::TemplateBlock::fresh("layout", "");
         layout.parts[0].text = "**Strength** %%Strength%%".into();
-        let all = save_template(&store, &identity, &id, Template { blocks: vec![layout], ..store.load_templates(&id).unwrap().into_iter().find(|t| t.id == group.id).unwrap() }).unwrap();
+        let all = save_template(&store, &id, Template { blocks: vec![layout], ..store.load_templates(&id).unwrap().into_iter().find(|t| t.id == group.id).unwrap() }).unwrap();
         let stored = all.iter().find(|t| t.id == group.id).unwrap();
         assert_eq!(stored.blocks[0].parts[0].text, "**Strength** %%str%%");
-        let code = document::code_of(&store, &identity, &id, &tim).unwrap().code;
+        let code = document::code_of(&store, &id, &tim).unwrap().code;
         let with_view = code.replace("<body>\n", "<body>\n<block title=Sheet>\n<view of=Abilities>\n</block>\n");
-        document::save_now(&store, &identity, &id, &tim, &with_view).unwrap();
-        let held = store.view_keys(&id, &identity).unwrap();
-        let view = build_view(&store.load_articles(&id).unwrap(), &held);
+        document::save_now(&store, &id, &tim, &with_view).unwrap();
+        let view = view_in(&store, id.clone(), None).unwrap();
         let texts: Vec<&str> = view.iter().find(|a| a.id == tim).unwrap().layers.iter().map(|l| l.text.as_str()).collect();
         assert!(texts.iter().any(|t| t.contains(&format!("<view of={}>", group.id))), "{texts:?}");
-        let code = document::code_of(&store, &identity, &id, &tim).unwrap().code;
+        let code = document::code_of(&store, &id, &tim).unwrap().code;
         assert!(code.contains("<view of=Abilities>"), "{code}");
 
         // A number of its own per pick: the levels in each class.
-        let all = save_template(&store, &identity, &id, blank("Classes")).unwrap();
+        let all = save_template(&store, &id, blank("Classes")).unwrap();
         let classes = all.iter().find(|t| t.name == "Classes").unwrap().clone();
         let class = |name: &str| create_document(&store, &id, classes.id.clone(), String::new(), name.into(), "all".into(), vec![]).unwrap();
         let fighter = class("Fighter");
@@ -3174,17 +2573,17 @@ mod tests {
             "Classes",
             aw_model::FieldKind::Reference { article_type: classes.id.clone(), multiple: true, parent: false, adds: false, count: "Level".into(), every: false, from: String::new() },
         ));
-        save_template(&store, &identity, &id, hero).unwrap();
-        let code = document::code_of(&store, &identity, &id, &tim).unwrap().code;
+        save_template(&store, &id, hero).unwrap();
+        let code = document::code_of(&store, &id, &tim).unwrap().code;
         let code = code.replace("Classes:", "Classes: @@Classes:Fighter@@ 3, @@Classes:Rogue@@");
-        document::save_now(&store, &identity, &id, &tim, &code).unwrap();
-        let back = document::code_of(&store, &identity, &id, &tim).unwrap().code;
+        document::save_now(&store, &id, &tim, &code).unwrap();
+        let back = document::code_of(&store, &id, &tim).unwrap().code;
         assert!(back.contains("Classes: @@Classes:Fighter@@ 3, @@Classes:Rogue@@\n"), "{back}");
-        let view = build_view(&store.load_articles(&id).unwrap(), &store.view_keys(&id, &identity).unwrap());
+        let view = view_in(&store, id.clone(), None).unwrap();
         let stored = view.iter().find(|a| a.id == tim).unwrap().layers.iter().find_map(|l| l.fields.get("classes").cloned()).unwrap();
         assert_eq!(stored[0], serde_json::json!({ "with": fighter, "count": 3 }));
         let bad = back.replace("Fighter@@ 3", "Fighter@@ three");
-        assert!(document::save_now(&store, &identity, &id, &tim, &bad).unwrap_err().0.contains("no number"));
+        assert!(document::save_now(&store, &id, &tim, &bad).unwrap_err().0.contains("no number"));
 
         // Every class, always: only numbers other than 0 are kept.
         let mut hero = store.load_templates(&id).unwrap().into_iter().find(|t| t.id == characters.id).unwrap();
@@ -3195,10 +2594,10 @@ mod tests {
                 }
             }
         }
-        save_template(&store, &identity, &id, hero).unwrap();
+        save_template(&store, &id, hero).unwrap();
         let code = back.replace("Classes: @@Classes:Fighter@@ 3, @@Classes:Rogue@@", "Classes: @@Classes:Fighter@@ 3, @@Classes:Rogue@@ 0");
-        document::save_now(&store, &identity, &id, &tim, &code).unwrap();
-        let back = document::code_of(&store, &identity, &id, &tim).unwrap().code;
+        document::save_now(&store, &id, &tim, &code).unwrap();
+        let back = document::code_of(&store, &id, &tim).unwrap().code;
         assert!(back.contains("Classes: @@Classes:Fighter@@ 3\n"), "{back}");
 
         // A group in use stays.

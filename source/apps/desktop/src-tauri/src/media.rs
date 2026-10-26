@@ -12,12 +12,11 @@ const MAX_UPLOAD: u64 = 1024 * 1024 * 1024;
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn image_upload(app: tauri::AppHandle, world: String, path: String, name: String, folder: String) -> Answer<String> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
     if std::fs::metadata(&path)?.len() > MAX_UPLOAD {
         return Err(AppError("This file is too large.".into()));
     }
     let raw = std::fs::read(&path)?;
-    Ok(store.upload_image(&world, &raw, &name, &folder, &me)?)
+    Ok(store.upload_image(&world, &raw, &name, &folder)?)
 }
 
 #[cfg(feature = "gui")]
@@ -25,8 +24,7 @@ pub fn image_upload(app: tauri::AppHandle, world: String, path: String, name: St
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn image_rename(app: tauri::AppHandle, world: String, image: String, name: String) -> Answer<()> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    Ok(store.rename_image(&world, &image, &name, &me)?)
+    Ok(store.rename_image(&world, &image, &name)?)
 }
 
 #[cfg(feature = "gui")]
@@ -35,8 +33,7 @@ pub fn image_rename(app: tauri::AppHandle, world: String, image: String, name: S
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn image_defaults_set(app: tauri::AppHandle, world: String, image: String, defaults: aw_store::media::ImageDefaults) -> Answer<()> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    Ok(store.set_image_defaults(&world, &image, defaults, &me)?)
+    Ok(store.set_image_defaults(&world, &image, defaults)?)
 }
 
 #[cfg(feature = "gui")]
@@ -44,8 +41,7 @@ pub fn image_defaults_set(app: tauri::AppHandle, world: String, image: String, d
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn image_move(app: tauri::AppHandle, world: String, image: String, folder: String) -> Answer<()> {
     let store = store(&app)?;
-    let me = store.load_identity()?;
-    Ok(store.move_image(&world, &image, &folder, &me)?)
+    Ok(store.move_image(&world, &image, &folder)?)
 }
 
 #[cfg(feature = "gui")]
@@ -78,11 +74,9 @@ pub fn gallery(app: tauri::AppHandle, world: String) -> Answer<Vec<GalleryImage>
     gallery_in(&store(&app)?, world)
 }
 
-/// `gallery` for whom the store is given — the host, acting for a player.
+/// `gallery` for whom the store is given.
 pub(crate) fn gallery_in(store: &Store, world: String) -> Answer<Vec<GalleryImage>> {
-    let store = store.clone();
-    let me = store.load_identity()?;
-    Ok(store.gallery(&world, &me)?)
+    Ok(store.gallery(&world)?)
 }
 
 #[cfg(feature = "gui")]
@@ -94,9 +88,8 @@ pub fn image_data(app: tauri::AppHandle, world: String, image: String, preview: 
     image_data_in(&store(&app)?, world, image, preview)
 }
 
-/// `image_data` for whom the store is given — the host, acting for a player.
+/// `image_data` for whom the store is given.
 pub(crate) fn image_data_in(store: &Store, world: String, image: String, preview: bool) -> Answer<String> {
-    let store = store.clone();
     let (bytes, mime) = store.image_bytes(&world, &image, preview)?;
     Ok(format!("data:{mime};base64,{}", crate::store::base64(&bytes)))
 }
