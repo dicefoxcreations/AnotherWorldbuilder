@@ -1,9 +1,8 @@
 //! Moving types and documents between worlds: a **package**.
 //!
 //! A package is a folder — `package.json` and the images beside it in
-//! `images/`. It is plain text: exporting opens everything the game master
-//! holds, so that another world can take it in with keys of its own. Whoever
-//! keeps a package keeps the content unencrypted.
+//! `images/`. It is plain text, as the world is: everything the game master
+//! sees goes in.
 //!
 //! Documents keep their ids, and so do types: links between them stay whole,
 //! and taking the same package in twice adds nothing. Images get ids of the
@@ -13,7 +12,6 @@
 
 use super::*;
 use aw_model::Template;
-use aw_store::journal::{Access as LayerAccess, Plain};
 use aw_store::media::{self as store_media, ImageDefaults};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -184,30 +182,24 @@ fn with_needs(all: &[Template], wanted: impl IntoIterator<Item = String>) -> BTr
 }
 
 /// Tells how far it is: `documents`, then `images`, each with done and total.
-pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: &Path, progress: &dyn Fn(&str, usize, usize)) -> Answer<Summary> {
+pub fn export(store: &Store, world: &str, choice: &Choice, path: &Path, progress: &dyn Fn(&str, usize, usize)) -> Answer<Summary> {
     if !store.is_gm(world) {
         return Err(AppError("Only the GM exports.".into()));
     }
     let templates = store.load_templates(world)?;
-    let stored = store.load_articles(world)?;
-    let held = store.load_keyring(world)?.everything();
+    let stored = store.db(world)?.documents()?;
     let is_a = |id: &str, ancestor: &str| aw_model::types::is_a(&templates, id, ancestor);
 
     // The documents, then the types they and the choice need.
     let mut documents: BTreeSet<String> = choice.documents.iter().cloned().collect();
     for a in stored.iter() {
-        if choice.documents_of.iter().any(|t| is_a(&a.article_type, t)) {
-            documents.insert(a.id.to_string());
+        if choice.documents_of.iter().any(|t| is_a(&a.doc_type, t)) {
+            documents.insert(a.id.clone());
         }
     }
     let types = with_needs(
         &templates,
-        choice
-            .types
-            .iter()
-            .chain(&choice.documents_of)
-            .cloned()
-            .chain(stored.iter().filter(|a| documents.contains(&a.id.to_string())).map(|a| a.article_type.clone())),
+        choice.types.iter().chain(&choice.documents_of).cloned().chain(stored.iter().filter(|a| documents.contains(&a.id)).map(|a| a.doc_type.clone())),
     );
     // A type's page goes with it.
     for t in templates.iter().filter(|t| types.contains(&t.id) && !t.page.is_empty()) {
@@ -217,37 +209,35 @@ pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: 
     let mut package = Package { format: FORMAT.into(), version: VERSION, name: choice.name.clone(), ..Package::default() };
     package.types = templates.iter().filter(|t| types.contains(&t.id)).cloned().collect();
     let mut images = BTreeSet::new();
-    let total = stored.iter().filter(|a| documents.contains(&a.id.to_string())).count();
-    for (n, a) in stored.iter().filter(|a| documents.contains(&a.id.to_string())).enumerate() {
+    let total = stored.iter().filter(|a| documents.contains(&a.id)).count();
+    for (n, a) in stored.iter().filter(|a| documents.contains(&a.id)).enumerate() {
         progress("documents", n, total);
         let mut doc: Option<PackedDocument> = None;
         let mut parts = Vec::new();
         for layer in &a.layers {
-            let content = layer_content(layer, &held)?;
-            for text in std::iter::once(content.text.clone()).chain(content.fields.as_object().into_iter().flat_map(|m| m.values().map(|v| v.to_string()))) {
-                images.extend(store::named_images(&text));
-            }
-            let fields: BTreeMap<String, serde_json::Value> = content.fields.as_object().map(|m| m.clone().into_iter().collect()).unwrap_or_default();
-            if layer.is_base {
+            images.extend(layer.images.iter().cloned());
+            images.extend(store::named_images(&layer.text));
+            let fields: BTreeMap<String, serde_json::Value> = layer.fields.clone().into_iter().collect();
+            if layer.base {
                 doc = Some(PackedDocument {
-                    id: a.id.to_string(),
-                    article_type: a.article_type.clone(),
+                    id: a.id.clone(),
+                    article_type: a.doc_type.clone(),
                     slug: a.slug.clone(),
-                    name: content.title,
-                    view: content.own,
-                    edit: content.edit,
+                    name: layer.title.clone(),
+                    view: layer.access.view.clone(),
+                    edit: layer.access.edit.clone(),
                     fields,
                     parts: Vec::new(),
                 });
             } else {
                 parts.push(PackedPart {
-                    section: content.section,
-                    title: content.title,
-                    text: content.text,
+                    section: layer.section.clone(),
+                    title: layer.title.clone(),
+                    text: layer.text.clone(),
                     fields,
-                    view: content.own,
-                    edit: content.edit,
-                    level: level_text(&layer.level).into(),
+                    view: layer.access.view.clone(),
+                    edit: layer.access.edit.clone(),
+                    level: layer.access.level.clone(),
                 });
             }
         }
@@ -269,7 +259,7 @@ pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: 
     package.home = package.documents.iter().any(|d| d.id == home).then_some(home);
     let folder = folder_of(path);
     std::fs::create_dir_all(folder.join(IMAGES))?;
-    let gallery: HashMap<String, store::GalleryImage> = store.gallery(world, me)?.into_iter().map(|g| (g.id.clone(), g)).collect();
+    let gallery: HashMap<String, store::GalleryImage> = store.gallery(world)?.into_iter().map(|g| (g.id.clone(), g)).collect();
     let total = images.len();
     for (n, id) in images.into_iter().enumerate() {
         progress("images", n, total);
@@ -298,11 +288,11 @@ pub fn export(store: &Store, me: &Identity, world: &str, choice: &Choice, path: 
 // --- Import --------------------------------------------------------------
 
 /// What a package would bring into a world.
-pub fn summary(store: &Store, me: &Identity, world: &str, package: &Package) -> Answer<Summary> {
+pub fn summary(store: &Store, world: &str, package: &Package) -> Answer<Summary> {
     let templates = store.load_templates(world)?;
-    let known: BTreeSet<String> = store.load_articles(world)?.iter().map(|a| a.id.to_string()).collect();
-    let images: BTreeSet<String> = store.gallery(world, me)?.into_iter().map(|g| g.id).collect();
-    let me_id = me.id().to_string();
+    let known: BTreeSet<String> = store.db(world)?.document_ids()?.into_iter().collect();
+    let images: BTreeSet<String> = store.gallery(world)?.into_iter().map(|g| g.id).collect();
+    let me_id = store.actor()?;
     let mut out = Summary { name: package.name.clone(), ..Summary::default() };
     for t in &package.types {
         if templates.iter().any(|x| x.id == t.id) { out.types_known += 1 } else { out.types_new += 1 }
@@ -341,15 +331,15 @@ fn renamed_value(value: &serde_json::Value, ids: &BTreeMap<String, String>) -> s
 
 /// Takes a package in: types first (one of the same id is replaced), then
 /// images, then the documents not here yet. Reports what it added.
-pub fn import(store: &Store, me: &Identity, world: &str, folder: &Path, package: &Package, progress: &dyn Fn(usize, usize)) -> Answer<Summary> {
+pub fn import(store: &Store, world: &str, folder: &Path, package: &Package, progress: &dyn Fn(usize, usize)) -> Answer<Summary> {
     if !store.is_gm(world) {
         return Err(AppError("Only the GM imports.".into()));
     }
     if let Some(calendar) = &package.calendar {
         calendar.validate().map_err(AppError::from)?;
     }
-    let before = summary(store, me, world, package)?;
-    let me_id = me.id().to_string();
+    let before = summary(store, world, package)?;
+    let me_id = store.actor()?;
     let ids: BTreeMap<String, String> = package.images.iter().map(|i| (i.id.clone(), store_media::imported_id(&me_id, &i.id))).collect();
     let total = package.images.len() + package.documents.len();
     let mut done = 0;
@@ -368,8 +358,7 @@ pub fn import(store: &Store, me: &Identity, world: &str, folder: &Path, package:
     }
     // Written texts name what the world and the package hold.
     let catalog = if package.written {
-        let held = store.load_keyring(world)?.everything();
-        let mut documents: Vec<(String, String, String)> = build_view(&store.load_articles(world)?, &held).into_iter().map(|a| (a.id, a.name, a.article_type)).collect();
+        let mut documents: Vec<(String, String, String)> = view_with(store, world, &Reader::gm())?.into_iter().map(|a| (a.id, a.name, a.article_type)).collect();
         documents.extend(package.documents.iter().map(|d| (d.id.clone(), d.name.clone(), d.article_type.clone())));
         let known = document::known_of(documents, templates.clone());
         for t in templates.iter_mut().filter(|t| incoming.contains(&t.id)) {
@@ -394,84 +383,90 @@ pub fn import(store: &Store, me: &Identity, world: &str, folder: &Path, package:
     }
 
     // The images.
-    let here: BTreeSet<String> = store.gallery(world, me)?.into_iter().map(|g| g.id).collect();
+    let here: BTreeSet<String> = store.gallery(world)?.into_iter().map(|g| g.id).collect();
     let mut skipped = Vec::new();
-    for some in package.images.chunks(200) {
-        store.batched(world, || -> Answer<()> {
-            for image in some {
-                let id = &ids[&image.id];
-                if !here.contains(id) {
-                    let raw = std::fs::read(folder.join(&image.file))?;
-                    // One picture the app cannot read does not stop the rest.
-                    if store.upload_image_as(world, id, &raw, &image.name, "", me).is_err() {
-                        skipped.push(image.name.clone());
-                        done += 1;
-                        continue;
-                    }
-                    if image.defaults != ImageDefaults::default() {
-                        store.set_image_defaults(world, id, image.defaults.clone(), me)?;
-                    }
-                }
+    for image in &package.images {
+        let id = &ids[&image.id];
+        if !here.contains(id) {
+            let raw = std::fs::read(folder.join(&image.file))?;
+            // One picture the app cannot read does not stop the rest.
+            if store.upload_image_as(world, id, &raw, &image.name, "").is_err() {
+                skipped.push(image.name.clone());
                 done += 1;
-                progress(done, total);
+                continue;
             }
-            Ok(())
-        })?;
+            if image.defaults != ImageDefaults::default() {
+                store.set_image_defaults(world, id, image.defaults.clone())?;
+            }
+        }
+        done += 1;
+        progress(done, total);
     }
 
-    // The documents not here yet — written a few hundred at a time.
-    let known: BTreeSet<String> = store.load_articles(world)?.iter().map(|a| a.id.to_string()).collect();
-    for some in package.documents.chunks(500) {
-        store.batched(world, || -> Answer<()> {
-            for doc in some {
-                done += 1;
-                if known.contains(&doc.id) {
-                    continue;
-                }
-                let article: ArticleId = doc.id.parse().map_err(AppError::from)?;
-                let base_view: Policy = doc.view.parse().map_err(AppError::from)?;
-                store.ensure_attributes(world, &base_view)?;
-                let mut parts = vec![NewPart {
-                    is_base: true,
-                    level: if base_view.to_string() == "gm" { Level::GmOnly } else { Level::Open },
-                    view: base_view,
-                    access: LayerAccess { section: String::new(), own: doc.view.clone(), edit: doc.edit.clone() },
-                    plain: Plain { title: doc.name.clone(), fields: doc.fields.clone(), ..Plain::default() },
-                }];
-                for part in &doc.parts {
-                    let view: Policy = part.view.parse().map_err(AppError::from)?;
-                    store.ensure_attributes(world, &view)?;
-                    let text = renamed(&part.text, &ids);
-                    let plain = Plain {
-                        title: part.title.clone(),
-                        text: match &catalog {
-                            Some(catalog) => names::stored(&text, catalog, &doc.article_type),
-                            None => text,
-                        },
-                        fields: part.fields.iter().map(|(k, v)| (k.clone(), renamed_value(v, &ids))).collect(),
-                        ..Plain::default()
-                    };
-                    // A skipped picture leaves its tag without an image to open.
-                    let plain = store.with_images(world, &Plain::default(), &plain).unwrap_or(plain);
-                    parts.push(NewPart {
-                        is_base: false,
-                        level: level_from(&part.level),
-                        view,
-                        access: LayerAccess { section: part.section.clone(), own: part.view.clone(), edit: part.edit.clone() },
-                        plain,
-                    });
-                }
-                store.create_article_as(world, article, doc.article_type.clone(), doc.slug.clone(), parts, "")?;
-                if done % 50 == 0 {
-                    progress(done, total);
-                }
+    // The documents not here yet.
+    let db = store.db(world)?;
+    let known: BTreeSet<String> = db.document_ids()?.into_iter().collect();
+    let by = store.actor()?;
+    let at = store::now();
+    for doc in &package.documents {
+        done += 1;
+        if known.contains(&doc.id) {
+            continue;
+        }
+        doc.view.parse::<Policy>().map_err(AppError::from)?;
+        let new_id = || aw_model::LayerId::new().to_string();
+        let base_level = if doc.view.parse::<Policy>().map(|p| p.to_string()).as_deref() == Ok("gm") { "gm-only" } else { "open" };
+        let mut layers = vec![store::Layer {
+            id: new_id(),
+            base: true,
+            section: String::new(),
+            title: doc.name.clone(),
+            access: store::Access { view: doc.view.clone(), edit: doc.edit.clone(), level: base_level.into() },
+            text: String::new(),
+            fields: doc.fields.clone().into_iter().collect(),
+            images: Vec::new(),
+        }];
+        for part in &doc.parts {
+            part.view.parse::<Policy>().map_err(AppError::from)?;
+            let text = renamed(&part.text, &ids);
+            let text = match &catalog {
+                Some(catalog) => names::stored(&text, catalog, &doc.article_type),
+                None => text,
+            };
+            let fields: serde_json::Map<String, serde_json::Value> = part.fields.iter().map(|(k, v)| (k.clone(), renamed_value(v, &ids))).collect();
+            let mut images = store::named_images(&text);
+            for value in fields.values() {
+                images.extend(store::named_images(&value.to_string()));
             }
-            Ok(())
+            layers.push(store::Layer {
+                id: new_id(),
+                base: false,
+                section: part.section.clone(),
+                title: part.title.clone(),
+                access: store::Access { view: part.view.clone(), edit: part.edit.clone(), level: part.level.clone() },
+                text,
+                fields,
+                images: images.into_iter().collect(),
+            });
+        }
+        db.put_document(&store::Document {
+            id: doc.id.clone(),
+            doc_type: doc.article_type.clone(),
+            slug: doc.slug.clone(),
+            layers,
+            created: at,
+            created_by: by.clone(),
+            changed: at,
+            changed_by: by.clone(),
+            proposed: false,
         })?;
+        if done % 50 == 0 {
+            progress(done, total);
+        }
     }
     // Every type has its page, as one made in the app: what lacks one gets
     // the plain list.
-    let here: BTreeSet<String> = store.load_articles(world)?.iter().map(|a| a.id.to_string()).collect();
+    let here: BTreeSet<String> = db.document_ids()?.into_iter().collect();
     let mut templates = store.load_templates(world)?;
     let mut paged = false;
     for t in templates.iter_mut().filter(|t| !t.group && !here.contains(&t.page)) {
@@ -507,18 +502,16 @@ fn take_home(store: &Store, world: &str, home: &str) -> Answer<()> {
     if meta.home == home {
         return Ok(());
     }
-    let held = store.load_keyring(world)?.everything();
-    let articles = store.load_articles(world)?;
-    let view = build_view(&articles, &held);
-    let empty = view.iter().find(|a| a.id == meta.home).is_none_or(|a| a.layers.iter().all(|l| l.text.trim().is_empty()));
+    let db = store.db(world)?;
+    let old = db.document(&meta.home)?;
+    let empty = old.as_ref().is_none_or(|d| d.layers.iter().filter(|l| !l.base).all(|l| l.text.trim().is_empty()));
     if !empty {
         return Ok(());
     }
-    let old = articles.iter().find(|a| a.id.to_string() == meta.home).map(|a| a.id);
     meta.home = home.to_string();
     store.save_world_meta(&meta)?;
     if let Some(old) = old {
-        store.remove(world, old, None, "")?;
+        db.delete_document(&old.id)?;
     }
     Ok(())
 }
@@ -530,10 +523,7 @@ fn take_home(store: &Store, world: &str, home: &str) -> Answer<()> {
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub async fn package_export(app: tauri::AppHandle, world: String, path: String, choice: Choice) -> Answer<Summary> {
     let store = store(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let me = store.load_identity()?;
-        export(&store, &me, &world, &choice, Path::new(&path), &|_, _, _| {})
-    })
+    tauri::async_runtime::spawn_blocking(move || export(&store, &world, &choice, Path::new(&path), &|_, _, _| {}))
     .await
     .map_err(AppError::from)?
 }
@@ -544,9 +534,8 @@ pub async fn package_export(app: tauri::AppHandle, world: String, path: String, 
 pub async fn package_read(app: tauri::AppHandle, world: String, path: String) -> Answer<Summary> {
     let store = store(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let me = store.load_identity()?;
         let (_, package) = read(Path::new(&path))?;
-        summary(&store, &me, &world, &package)
+        summary(&store, &world, &package)
     })
     .await
     .map_err(AppError::from)?
@@ -560,12 +549,11 @@ pub async fn package_import(app: tauri::AppHandle, world: String, path: String) 
     use tauri::Emitter;
     let store = store(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let me = store.load_identity()?;
         let (folder, package) = read(Path::new(&path))?;
         let tell = |done: usize, total: usize| {
             let _ = app.emit("package-progress", (done, total));
         };
-        import(&store, &me, &world, &folder, &package, &tell)
+        import(&store, &world, &folder, &package, &tell)
     })
     .await
     .map_err(AppError::from)?
@@ -596,7 +584,7 @@ mod tests {
         let gm = Identity::create(gm).unwrap();
         store.save_identity(&gm).unwrap();
         let meta = new_world(&store, &gm, "World".into()).unwrap();
-        World { id: meta.public.world_id.to_string(), dir, store, gm }
+        World { id: meta.id.clone(), dir, store, gm }
     }
 
     fn png() -> Vec<u8> {
@@ -620,7 +608,7 @@ mod tests {
         let (folder, package) = read(Path::new(&path)).unwrap();
         let started = std::time::Instant::now();
         let last = std::cell::Cell::new(0);
-        import(&to.store, &to.gm, &to.id, &folder, &package, &|done, total| {
+        import(&to.store, &to.id, &folder, &package, &|done, total| {
             if done / 500 != last.get() / 500 || done == total {
                 eprintln!("{done}/{total} after {:?}", started.elapsed());
             }
@@ -629,7 +617,7 @@ mod tests {
         .unwrap();
         eprintln!("import: {:?}", started.elapsed());
         let started = std::time::Instant::now();
-        let n = to.store.load_articles(&to.id).unwrap().len();
+        let n = to.store.db(&to.id).unwrap().document_ids().unwrap().len();
         eprintln!("load: {:?} ({n})", started.elapsed());
     }
 
@@ -646,11 +634,11 @@ mod tests {
         let me = store.load_identity().unwrap();
         let id = match std::env::var("AW_WORLD") {
             Ok(id) => id,
-            Err(_) => new_world(&store, &me, name).unwrap().public.world_id.to_string(),
+            Err(_) => new_world(&store, &me, name).unwrap().id.clone(),
         };
         let (folder, package) = read(&path).unwrap();
         let started = std::time::Instant::now();
-        let done = import(&store, &me, &id, &folder, &package, &|done, total| {
+        let done = import(&store, &id, &folder, &package, &|done, total| {
             if done % 1000 == 0 || done == total {
                 eprintln!("{done}/{total} after {:?}", started.elapsed());
             }
@@ -667,12 +655,12 @@ mod tests {
             "types": [{ "id": "quest", "name": "Quest" }, { "id": "stats", "name": "Stats", "group": true }],
         }))
         .unwrap();
-        import(&to.store, &to.gm, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
+        import(&to.store, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
         let page_of = |id: &str| to.store.load_templates(&to.id).unwrap().into_iter().find(|t| t.id == id).unwrap().page;
         let page = page_of("quest");
-        assert!(to.store.load_articles(&to.id).unwrap().iter().any(|a| a.id.to_string() == page), "the page is there");
+        assert!(to.store.db(&to.id).unwrap().document_ids().unwrap().contains(&page), "the page is there");
         assert_eq!(page_of("stats"), "", "a group has none");
-        import(&to.store, &to.gm, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
+        import(&to.store, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
         assert_eq!(page_of("quest"), page, "and keeps it");
     }
 
@@ -687,9 +675,9 @@ mod tests {
                 "parts": [{ "section": "overview", "title": "", "text": "Welcome.", "fields": {}, "view": "all", "edit": "gm", "level": "open" }] }],
         }))
         .unwrap();
-        import(&to.store, &to.gm, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
+        import(&to.store, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
         assert_eq!(to.store.load_world_meta(&to.id).unwrap().home, page);
-        assert!(!to.store.load_articles(&to.id).unwrap().iter().any(|a| a.id.to_string() == empty), "the empty page went");
+        assert!(!to.store.db(&to.id).unwrap().document_ids().unwrap().contains(&empty), "the empty page went");
     }
 
     #[test]
@@ -705,8 +693,8 @@ mod tests {
                 ] }],
         }))
         .unwrap();
-        import(&to.store, &to.gm, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
-        let opened = crate::document::code_of(&to.store, &to.gm, &to.id, page).unwrap();
+        import(&to.store, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
+        let opened = crate::document::code_of(&to.store, &to.id, page).unwrap();
         let side = opened.document.blocks.iter().find(|b| b.key == "timeline").unwrap();
         assert_eq!((side.place, side.width), (aw_model::template::BlockPlace::Side, 380));
         assert!(opened.code.contains("side width=380"), "{}", opened.code);
@@ -719,7 +707,7 @@ mod tests {
         monster.properties = vec![TemplateField::new("cr", "CR", aw_model::FieldKind::Text { multiline: false })];
         monster.normalize();
         from.store.save_templates(&from.id, &[monster]).unwrap();
-        let image = from.store.upload_image(&from.id, &png(), "Goblin", "", &from.gm).unwrap();
+        let image = from.store.upload_image(&from.id, &png(), "Goblin", "").unwrap();
         let goblin = create_document(&from.store, &from.id, "monster".into(), "goblin".into(), "Goblin".into(), "all".into(), vec![
             part("story", &format!("Small and mean.\n<image src={image}>"), "all"),
             part("secret", "Works for the wizard in the tower.", "gm"),
@@ -729,18 +717,17 @@ mod tests {
         meta.calendar.eras[0].months[0].name = "Hammer".into();
         from.store.save_world_meta(&meta).unwrap();
         let folder = from.dir.join("Goblins.awpack");
-        let exported = export(&from.store, &from.gm, &from.id, &Choice { name: "Goblins".into(), documents_of: vec!["monster".into()], ..Choice::default() }, &folder, &|_, _, _| {}).unwrap();
+        let exported = export(&from.store, &from.id, &Choice { name: "Goblins".into(), documents_of: vec!["monster".into()], ..Choice::default() }, &folder, &|_, _, _| {}).unwrap();
         assert_eq!((exported.types_new, exported.documents_new, exported.images_new), (1, 1, 1));
 
         let to = world("to", "Tim");
         let (folder, package) = read(&folder.join("package.json")).unwrap();
-        let before = summary(&to.store, &to.gm, &to.id, &package).unwrap();
+        let before = summary(&to.store, &to.id, &package).unwrap();
         assert_eq!((before.types_new, before.documents_new, before.images_new), (1, 1, 1));
-        import(&to.store, &to.gm, &to.id, &folder, &package, &|_, _| {}).unwrap();
+        import(&to.store, &to.id, &folder, &package, &|_, _| {}).unwrap();
 
         // The same document, the same access, the image under Tim's id.
-        let held = to.store.load_keyring(&to.id).unwrap().everything();
-        let view = build_view(&to.store.load_articles(&to.id).unwrap(), &held);
+        let view = view_with(&to.store, &to.id, &Reader::gm()).unwrap();
         let doc = view.iter().find(|a| a.id == goblin).expect("the document came");
         let story = doc.layers.iter().find(|l| l.section == "story").unwrap();
         let new_image = store_media::imported_id(&to.gm.id().to_string(), &image);
@@ -753,9 +740,9 @@ mod tests {
         assert_ne!(page, "", "the world keeps a page of its own");
 
         // Twice adds nothing.
-        let again = summary(&to.store, &to.gm, &to.id, &package).unwrap();
+        let again = summary(&to.store, &to.id, &package).unwrap();
         assert_eq!((again.documents_new, again.images_new, again.documents_known, again.images_known), (0, 0, 1, 1));
-        import(&to.store, &to.gm, &to.id, &folder, &package, &|_, _| {}).unwrap();
-        assert_eq!(to.store.load_articles(&to.id).unwrap().iter().filter(|a| a.id.to_string() == goblin).count(), 1);
+        import(&to.store, &to.id, &folder, &package, &|_, _| {}).unwrap();
+        assert_eq!(to.store.db(&to.id).unwrap().document_ids().unwrap().iter().filter(|a| **a == goblin).count(), 1);
     }
 }

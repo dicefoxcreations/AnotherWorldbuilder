@@ -617,6 +617,16 @@ impl WorldDb {
         Ok(docs)
     }
 
+    /// A copy of the database as it stands, whole, in one file — while the
+    /// world goes on being written.
+    pub fn copy_to(&self, file: &Path) -> Result<()> {
+        if file.exists() {
+            std::fs::remove_file(file)?;
+        }
+        self.conn().execute("VACUUM INTO ?1", [file.to_string_lossy()])?;
+        Ok(())
+    }
+
     /// Writes what the write-ahead log holds into the database file — so a
     /// copy of the folder is the world as it stands.
     pub fn checkpoint(&self) -> Result<()> {

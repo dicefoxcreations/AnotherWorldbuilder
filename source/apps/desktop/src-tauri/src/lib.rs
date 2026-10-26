@@ -17,6 +17,8 @@ mod store;
 mod profile;
 mod media;
 mod live;
+mod backup;
+mod transfer;
 
 use aw_crypto::{Identity, IdentityPublic};
 use aw_model::{editor, markdown, names, template_text, types, Attribute, Policy, Template, WorldCalendar, WorldDate};
@@ -1918,6 +1920,11 @@ pub fn run() {
             member_remove,
             member_replace,
             member_colour_set,
+            backup::backup_view,
+            backup::backup_plan_set,
+            backup::backup_now,
+            backup::backup_open,
+            backup::backup_restore,
             gm_handover,
             world_supporters_set,
             world_take_over,
@@ -1978,6 +1985,9 @@ pub fn run() {
             world_switch_progress,
             navigation_load,
             navigation_set,
+            transfer::package_export,
+            transfer::package_read,
+            transfer::package_import,
             article_propose,
             document::relations_set,
             ];

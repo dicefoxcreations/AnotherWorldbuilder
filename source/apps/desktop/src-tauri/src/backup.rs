@@ -1,22 +1,22 @@
 //! Backups of a world: its folder as it was at a time, in a folder of the
 //! GM's choice. On this device they are made by hand and all of them stay;
 //! a server backs up the worlds it holds by itself, daily or weekly, as many
-//! kept as their GM asks for (`server.rs`, with `copy_world` from here).
+//! kept as their GM asks for (with `copy_world` from here).
 //!
-//! The world's files are named by their content and never change, so a file
+//! A backup is the world's database, copied whole while it goes on being
+//! written, and its pictures. A picture never changes under its name, so one
 //! the last backup holds already is a hard link to it there: each backup
-//! takes the room of what is new only. What only this profile keeps — the
-//! world token, the keyring, the members — goes along sealed for the GM's
-//! identity: the backup opens with it alone, and lies no more open than the
-//! world itself.
+//! takes the room of what is new only. Like the world, a backup is readable
+//! without the app.
 
 use super::*;
 use std::collections::BTreeMap;
 
 const FORMAT: &str = "aw-backup";
-/// Describes a backup; its folder holds `world/` and the sealed keys beside it.
+/// The backups of world format 5.
+const VERSION: u32 = 2;
+/// Describes a backup; its folder holds `world/` beside it.
 pub const FILE: &str = "backup.awbackup";
-const KEYS: &str = "keys.sealed";
 /// Where the plan of a world's backups lies, in its private folder.
 const PLAN: &str = "backup.json";
 
@@ -46,17 +46,8 @@ pub(crate) struct About {
     name: String,
     /// Milliseconds since 1970.
     pub(crate) at: u64,
-    /// The GM whose identity opens the keys — empty for a server's backup,
-    /// which holds no keys: the GM's own profile has them.
+    /// Who made it, by id — empty for a server's own.
     gm: String,
-}
-
-/// The keys of a world, sealed: a data key for the GM, the files under it.
-#[derive(Serialize, Deserialize)]
-struct SealedKeys {
-    key: aw_crypto::WrappedKey,
-    /// Hex: the files by name, encrypted with the data key.
-    data: String,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -89,7 +80,7 @@ fn folder(store: &Store, world: &str, plan: &Plan) -> Answer<PathBuf> {
     } else {
         PathBuf::from(plan.folder.trim())
     };
-    let name: String = store.load_world_meta(world)?.public.name.chars().map(|c| if c.is_alphanumeric() || " -_.".contains(c) { c } else { '_' }).collect();
+    let name: String = store.load_world_meta(world)?.name.chars().map(|c| if c.is_alphanumeric() || " -_.".contains(c) { c } else { '_' }).collect();
     Ok(root.join(format!("{} – {}", name.trim(), store::dir_name(world))))
 }
 
@@ -123,17 +114,6 @@ pub(crate) fn set_plan(store: &Store, world: &str, plan: Plan) -> Answer<View> {
     view(store, world)
 }
 
-/// A file named by its content: the same name, the same bytes, for good.
-fn unchanging(path: &Path) -> bool {
-    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    // An image's part, named by its bytes; a state and an update file,
-    // never written again under their names.
-    (stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit()))
-        || (name.starts_with("state-") && name.ends_with(".sqlite"))
-        || name.ends_with(".awu")
-}
-
 /// Backs a world up now — by hand; every backup stays.
 pub(crate) fn backup(store: &Store, world: &str) -> Answer<View> {
     if !store.is_gm(world) {
@@ -144,20 +124,15 @@ pub(crate) fn backup(store: &Store, world: &str) -> Answer<View> {
     }
     let plan = plan(store, world)?;
     let into = folder(store, world, &plan)?;
-    let me = store.load_identity()?;
-    let name = store.load_world_meta(world)?.public.name;
-    copy_world(&store.world_dir(world), &into, world, &name, &me.id().to_string(), None, |partial| {
-        std::fs::write(partial.join(KEYS), serde_json::to_vec(&seal_keys(store, world, &me)?)?)?;
-        Ok(())
-    })?;
+    let name = store.load_world_meta(world)?.name;
+    copy_world(&*store.db(world)?, &into, world, &name, &store.actor()?, None)?;
     view(store, world)
 }
 
-/// A new backup of a world's folder `from` in `into`. A file named by its
-/// content that the last backup holds already is a hard link to it there:
-/// each backup takes the room of what is new only. `beside` writes what goes
-/// along — the keys. `keep`: how many stay, the oldest let go; `None`: all.
-pub(crate) fn copy_world(from: &Path, into: &Path, world: &str, name: &str, gm: &str, keep: Option<u32>, beside: impl FnOnce(&Path) -> Answer<()>) -> Answer<PathBuf> {
+/// A new backup of a world in `into`: its database copied whole, its
+/// pictures beside it — one the last backup holds already is a hard link to
+/// it there. `keep`: how many stay, the oldest let go; `None`: all.
+pub(crate) fn copy_world(db: &store::WorldDb, into: &Path, world: &str, name: &str, gm: &str, keep: Option<u32>) -> Answer<PathBuf> {
     std::fs::create_dir_all(into)?;
     // A backup broken off before lies under a name starting with a dot.
     for e in std::fs::read_dir(into)?.flatten() {
@@ -166,31 +141,22 @@ pub(crate) fn copy_world(from: &Path, into: &Path, world: &str, name: &str, gm: 
         }
     }
     let at = store::now();
-    let last = list(into).into_iter().next().map(|(_, p)| p.join("world"));
+    let last = list(into).into_iter().next().map(|(_, p)| p.join("world").join(aw_store::db::MEDIA));
     let partial = into.join(format!(".partial-{at}"));
-    let mut dirs = vec![from.to_path_buf()];
-    while let Some(dir) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                dirs.push(path);
-                continue;
-            }
-            let rel = path.strip_prefix(from).map_err(|e| AppError(e.to_string()))?;
-            let target = partial.join("world").join(rel);
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let before = last.as_ref().map(|l| l.join(rel)).filter(|b| unchanging(&path) && b.is_file());
-            if before.is_some_and(|b| std::fs::hard_link(&b, &target).is_ok()) {
-                continue;
-            }
-            std::fs::copy(&path, &target)?;
+    let media = partial.join("world").join(aw_store::db::MEDIA);
+    std::fs::create_dir_all(&media)?;
+    db.copy_to(&partial.join("world").join(aw_store::db::FILE))?;
+    for entry in std::fs::read_dir(db.dir().join(aw_store::db::MEDIA))?.flatten() {
+        let path = entry.path();
+        let Some(file) = path.file_name() else { continue };
+        let target = media.join(file);
+        let before = last.as_ref().map(|l| l.join(file)).filter(|b| b.is_file());
+        if before.is_some_and(|b| std::fs::hard_link(&b, &target).is_ok()) {
+            continue;
         }
+        std::fs::copy(&path, &target)?;
     }
-    std::fs::create_dir_all(&partial)?;
-    beside(&partial)?;
-    let about = About { format: FORMAT.into(), version: 1, world: world.into(), name: name.into(), at, gm: gm.into() };
+    let about = About { format: FORMAT.into(), version: VERSION, world: world.into(), name: name.into(), at, gm: gm.into() };
     aw_store::durable::write(&partial.join(FILE), &serde_json::to_vec_pretty(&about)?)?;
     // Two in the same second: the second gets a number.
     let mut stamped = stamp(at);
@@ -208,20 +174,6 @@ pub(crate) fn copy_world(from: &Path, into: &Path, world: &str, name: &str, gm: 
         }
     }
     Ok(done)
-}
-
-fn seal_keys(store: &Store, world: &str, me: &Identity) -> Answer<SealedKeys> {
-    let mut files = BTreeMap::new();
-    for name in keys::KEPT {
-        if let Ok(text) = std::fs::read_to_string(store.private_world_dir(world).join(name)) {
-            files.insert(name.to_string(), text);
-        }
-    }
-    let dek = aw_crypto::ContentKey::generate().map_err(|e| AppError(e.to_string()))?;
-    let data = aw_crypto::encrypt(&dek, &serde_json::to_vec(&files)?).map_err(|e| AppError(e.to_string()))?;
-    let recipient = me.public().seal_public().map_err(|e| AppError(e.to_string()))?;
-    let key = aw_crypto::seal_key(&recipient, &dek).map_err(|e| AppError(e.to_string()))?;
-    Ok(SealedKeys { key, data: hex::encode(data) })
 }
 
 /// `2026-10-23 06-15-00 UTC` — a folder name that sorts by time.
@@ -242,36 +194,20 @@ fn stamp(ms: u64) -> String {
 }
 
 /// Brings a world back from a backup — where it is not here: next to the
-/// other worlds, with its keys, which only the GM who made the backup opens.
+/// other worlds, as it was.
 pub(crate) fn restore(store: &Store, file: &Path) -> Answer<String> {
     let about: About = serde_json::from_slice(&std::fs::read(file)?).map_err(|_| AppError("Not a backup of a world.".into()))?;
-    if about.format != FORMAT || about.version != 1 {
+    if about.format != FORMAT || about.version != VERSION {
         return Err(AppError("Not a backup this version knows.".into()));
     }
     let backup = file.parent().ok_or_else(|| AppError("Not a backup of a world.".into()))?;
-    let me = store.load_identity()?;
-    if me.id().as_str() != about.gm {
-        return Err(AppError("Only the GM who made the backup opens it — restore their keys first.".into()));
-    }
-    if store.holds(&about.world) || crate::online::is_server_world(store, &about.world) {
+    if store.holds(&about.world) {
         return Err(AppError(format!("“{}” is here already. Delete it first to bring the backup back.", about.name)));
     }
-    let sealed: SealedKeys = serde_json::from_slice(&std::fs::read(backup.join(KEYS))?)?;
-    let dek = aw_crypto::unseal_key(me.seal_secret(), &sealed.key).map_err(|_| AppError("The keys of this backup do not open.".into()))?;
-    let plain = aw_crypto::decrypt(&dek, &hex::decode(&sealed.data).map_err(|e| AppError(e.to_string()))?).map_err(|_| AppError("The keys of this backup do not open.".into()))?;
-    let files: BTreeMap<String, String> = serde_json::from_slice(&plain)?;
-
     let target = store.worlds_dir().join(store::dir_name(&about.world));
     let partial = store.worlds_dir().join(format!(".restoring-{}", store::dir_name(&about.world)));
     let _ = std::fs::remove_dir_all(&partial);
     store::copy_dir(&backup.join("world"), &partial, &|_, _| {})?;
-    let private = store.private_world_dir(&about.world);
-    std::fs::create_dir_all(&private)?;
-    for (name, text) in &files {
-        if keys::KEPT.contains(&name.as_str()) {
-            aw_store::durable::write(&private.join(name), text.as_bytes())?;
-        }
-    }
     std::fs::rename(&partial, &target)?;
     Ok(about.world)
 }
@@ -310,8 +246,7 @@ pub fn backup_open(app: tauri::AppHandle, world: String) -> Answer<()> {
 pub fn backup_restore(app: tauri::AppHandle, path: String) -> Answer<WorldInfo> {
     let store = store(&app)?;
     let world = restore(&store, Path::new(&path))?;
-    let me = store.load_identity()?;
-    world_info(&store, &store.load_world_meta(&world)?, me.id().as_str())
+    world_now(&store, &world)
 }
 
 #[cfg(test)]
@@ -319,61 +254,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_backup_holds_the_world_and_brings_it_back_with_its_keys() {
+    fn a_backup_holds_the_world_and_brings_it_back() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path().join("gm"));
         let gm = Identity::create("Marla").unwrap();
         store.save_identity(&gm).unwrap();
         let meta = new_world(&store, &gm, "Eldermere".into()).unwrap();
-        let world = meta.public.world_id.to_string();
-        let page = |s: &Store| document::code_of(s, &gm, &world, &meta.home).unwrap().code;
+        let world = meta.id.clone();
+        store.upload_image(&world, &tiny_png(), "Map", "").unwrap();
+        let page = |s: &Store| document::code_of(s, &world, &meta.home).unwrap().code;
         let before = page(&store);
 
         set_plan(&store, &world, Plan { folder: dir.path().join("safe").display().to_string() }).unwrap();
         let first = backup(&store, &world).unwrap();
         assert_eq!(first.backups.len(), 1);
-        // The next links what did not change: the same file, not a copy.
+        // The next links what did not change: the same picture, not a copy.
         std::thread::sleep(std::time::Duration::from_millis(5));
         let second = backup(&store, &world).unwrap();
-        let record = |b: &Entry| {
-            let mut dirs = vec![PathBuf::from(&b.path).join("world")];
-            while let Some(d) = dirs.pop() {
-                for e in std::fs::read_dir(d).unwrap().flatten() {
-                    if e.path().is_dir() { dirs.push(e.path()) } else if unchanging(&e.path()) { return e.path() }
-                }
-            }
-            panic!("no record");
-        };
-        let (a, b) = (record(&second.backups[0]), record(&second.backups[1]));
+        let picture = |b: &Entry| std::fs::read_dir(PathBuf::from(&b.path).join("world").join(aw_store::db::MEDIA)).unwrap().flatten().next().unwrap().path();
+        let (a, b) = (picture(&second.backups[0]), picture(&second.backups[1]));
         use std::os::unix::fs::MetadataExt;
-        assert_eq!(std::fs::metadata(&a).unwrap().ino(), std::fs::metadata(b.parent().unwrap().join(a.file_name().unwrap())).unwrap().ino());
+        assert_eq!(std::fs::metadata(&a).unwrap().ino(), std::fs::metadata(&b).unwrap().ino());
         // By hand, every one stays.
         std::thread::sleep(std::time::Duration::from_millis(5));
         assert_eq!(backup(&store, &world).unwrap().backups.len(), 3);
 
-        // Lost: the world and its keys. The backup brings both back.
+        // Lost: the world. The backup brings it back.
         let newest = PathBuf::from(&view(&store, &world).unwrap().backups[0].path).join(FILE);
         assert!(restore(&store, &newest).is_err(), "here already");
         store.delete_world(&world).unwrap();
         assert_eq!(restore(&store, &newest).unwrap(), world);
         assert!(store.is_gm(&world));
         assert_eq!(page(&store), before);
+        assert_eq!(store.gallery(&world).unwrap().len(), 1, "the picture came back too");
+    }
 
-        // Someone else's identity does not open it.
-        let other = Store::new(dir.path().join("eve"));
-        other.save_identity(&Identity::create("Eve").unwrap()).unwrap();
-        assert!(restore(&other, &newest).is_err());
+    fn tiny_png() -> Vec<u8> {
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::RgbImage::new(2, 2).write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
     }
 
     #[test]
     fn a_server_keeps_as_many_as_asked_and_lets_go_of_the_oldest() {
         let dir = tempfile::tempdir().unwrap();
-        let from = dir.path().join("world");
-        std::fs::create_dir_all(&from).unwrap();
-        std::fs::write(from.join("a.txt"), "a").unwrap();
+        let gm = store::Member { id: "id:gm".into(), name: "Marla".into(), ..Default::default() };
+        let db = store::WorldDb::create(&dir.path().join("world"), "world:1", "Eldermere", &gm).unwrap();
         let into = dir.path().join("backups");
         for _ in 0..4 {
-            copy_world(&from, &into, "world:1", "Eldermere", "", Some(2), |_| Ok(())).unwrap();
+            copy_world(&db, &into, "world:1", "Eldermere", "", Some(2)).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let left = list(&into);
