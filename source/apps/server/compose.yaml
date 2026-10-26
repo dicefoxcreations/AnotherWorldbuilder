@@ -15,8 +15,7 @@ services:
     volumes:
       - /volume1/docker/aw-server:/data
     environment:
-      # The GM who manages it: their id, under Profile in the app. No keys —
-      # the server holds none.
+      # The GM who manages it: their id, under Profile in the app.
       AW_ADMIN: "id:0000000000000000"
       AW_PORT: "7447"
       # How it is reached, e.g. "nas.example.org:7447" (DynDNS), comma-separated.

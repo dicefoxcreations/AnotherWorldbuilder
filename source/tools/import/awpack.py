@@ -181,8 +181,8 @@ class Package:
             json.dump(package, f, ensure_ascii=False)
 
 
-def part(section, text="", view="all", edit="gm", level="open", fields=None, title=""):
-    return {"section": section, "title": title, "text": text, "fields": fields or {}, "view": view, "edit": edit, "level": level}
+def part(section, text="", view="all", edit="gm", fields=None, title=""):
+    return {"section": section, "title": title, "text": text, "fields": fields or {}, "view": view, "edit": edit}
 
 
 def entry(id_, kind, target="", label="", children=None, gm=False):

@@ -59,7 +59,7 @@ Nothing is wider than its content needs.
 - A page of the options (`.type-page`) is a **column of at most 760 px**, aligned left. Rows, lists and switches do not grow with the window.
 - Only what shows many things side by side – the gallery, an editor – takes the room (`.type-page.wide`, classes of their own).
 - Input fields in a bar have a **fixed, fitting width**: a search about 220 px, not "the rest of the row".
-- The areas of the options stand in three groups: **This world** (World with name, symbol, keys and versions; Players, Types, Images, Calendar, Dice, Transfer), **This device** (Appearance, Shortcuts, Network, Storage) and **App** (About). Dice are in one place: at the top those of the world (GM), below them their look on this device. Without an open world only the device and About.
+- The areas of the options stand in three groups: **This world** (World with name, symbol, where it lives, backups and versions; Players, Types, Images, Calendar, Dice, Transfer), **This device** (Appearance, Shortcuts, Network, Storage) and **App** (About). Dice are in one place: at the top those of the world (GM), below them their look on this device. Without an open world only the device and About.
 - The **options window** is the same size for all areas: as wide as a page of the world (`--page-width` plus navigation) and centred. On a wide screen it does not grow; the gallery fills it, forms stay in their 760 px column.
 - The desktop window is at least 1080 px wide (`tauri.conf.json`), because that is what a document with its version bar needs. Windows showing something apart, and the phone, are narrower.
 
@@ -83,7 +83,7 @@ Checking is done with every new screen through the command `phone_view` (no butt
 
 As long as the GM has set nothing, the start page and all top types stand there. ✎ at the top of the bar switches to arranging: entries can be dragged (before, after, into a group), ＋ creates new ones, a click opens the settings on the right – *Access* (all or GM only), what it shows, *Label*, *Remove*. An entry "GM only" is marked red.
 
-The outline is stored as the control entry `Navigation` in the journal, encrypted like the types: the entries for everyone with `all OR players`, the whole with `gm`. Players therefore never get GM entries in the first place. Which documents stand under a type is decided by their own keyring; entries whose type or document they cannot open are missing. In the preview as a player the GM entries are missing too.
+The outline is stored in the world (`navigation`). Players never get the GM entries: where the world is held, they are left out of what a player receives (`navigation::for_players`). Which documents stand under a type is decided by what the player may see; entries whose type or document they cannot open are missing. In the preview as a player the GM entries are missing too.
 
 The device remembers what is folded open or shut. Wherever one goes, the path there folds open. "Find" filters by name. A type, unfolded, shows the first 60 documents and the one open right now; "… N more" below leads to the type's list. With a whole library (11,000 documents) the bar would otherwise stay at thousands of rows, and every page change would redraw it. Folded entries do not even work out their documents.
 

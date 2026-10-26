@@ -11,10 +11,11 @@
 
 ## Architecture
 
-- [The journal of a world](architecture/journal.md): signed entries, read and write keys, versions, writing together.
+- [World format 5](architecture/world-format.md): a world as a plain SQLite database, the one view check, writing together, versions and review.
+- [The network](architecture/network.md): one place per world, the keeper, servers and the GM's app, finding, joining, moving, the admin.
+- [Mailboxes](architecture/mailboxes.md): worlds without a server, through a cloud folder; switching to and from a server.
 - [Storage locations](architecture/storage.md): profile and worlds, the choice on first start, moving.
-- [World format 4](architecture/world-format.md): a state and updates, one entry per version, drafts in the profile, version limit, deleting.
-- [Images](architecture/images.md): gallery, names, visibility through sections, metadata removed, originals in parts.
+- [Images](architecture/images.md): gallery, names, visibility through sections, metadata removed, originals unchanged.
 - [Windows beside](architecture/windows.md): documents and sections in their own windows, kept in step with each other.
 - [Calendar and timeline](architecture/calendar-timeline.md): world calendar, date with time, `<timeline>`, lists from properties, family trees.
 - [Property groups](architecture/property-groups.md): properties that several types include (`Scores: group Abilities`), nested, with a layout (`<view of=…>`) and computed values (`= [[…]]`, `Class.Hit die`).
@@ -22,14 +23,11 @@
 - [Maps](architecture/maps.md): `<map>` to pan and zoom, pins with a name and a target, layers that switch to the map of another document.
 - [Assigning players](architecture/assignment.md): documents, types and attributes per player, `view=self` for what belongs to the assigned player.
 - [Links](architecture/links.md): `@@Type:Name@@`, a property's value, anchors in the text (`@@#^c70ff9|the inn@@`).
-- [Backups](architecture/backups.md): on this device by hand, its keys sealed for the GM; on a server daily or weekly by itself, how many stay; restoring.
+- [Backups](architecture/backups.md): on this device by hand; on a server daily or weekly by itself, how many stay; restoring.
 
 ## Testing
 
-- [Finding and joining worlds on the LAN](testing/lan-join.md): network switch, join requests, a test run with two profiles.
-- [Local and mounted cloud folders](testing/folder-sync.md): several storage locations and working directly on world folders.
-- [Directly over the internet](testing/internet-direct.md): router port, STUN, meeting through the shared folder, hole punching without a relay.
-- [Host mode](testing/host.md): players work online against the GM's device, without their own copy; the host enforces views and rights.
-- [Server on a NAS](testing/server.md): `aw-server` – a door keeper without keys for the worlds of several GMs, with an admin; Docker image for Synology.
+- [The network by hand](testing/network.md): two copies of the app, a world on the GM's app, a local `aw-server`, moving.
+- [Mailboxes by hand](testing/mailboxes.md): a world without a server through a folder, a player offline, switching to a server.
 - [Players: a new id](testing/players.md): a player's new id takes the old one's place, with what was assigned to them.
 - [Browser test bench](testing/browser-testbench.md): checking the UI with real components and the Rust parser.

@@ -224,7 +224,7 @@ def add(type_id, name, fields=None, texts=None, own=None):
         text = awpack.stored_names(text, names)
         block = section(type_id, title)
         view = "gm" if title == "Secrets" else "all"
-        parts.append(part(block, text, view=view, level="gm" if view == "gm" else "open"))
+        parts.append(part(block, text, view=view))
     for n, (title, text) in enumerate(own or [], 1):
         parts.append(part(f"notes-{n}", text, title=title))
     P.document(doc(name), type_id, name, parts)

@@ -1386,8 +1386,7 @@ function ServerWorlds({ state, busy, order, onDelete }: { state: ServerState; bu
   return (
     <>
       {state.worlds.map((w) => {
-        // A server before 0.1.62 names no supporters.
-        const named = w.supporters ?? [];
+        const named = w.supporters;
         const supporters = w.members.filter((m) => named.includes(m.id));
         const players = w.members.filter((m) => !named.includes(m.id));
         return (

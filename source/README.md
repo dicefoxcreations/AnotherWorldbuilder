@@ -2,7 +2,7 @@
 
 A worldbuilding and campaign wiki for tabletop role-playing games that works locally.
 The application is a Tauri desktop app with a React interface and shared Rust
-libraries for the data model, encryption and persistence.
+libraries for the data model, storage and the network.
 
 ## Running the application
 
@@ -79,14 +79,13 @@ Interactive UI flows are described in the [browser test bench](docs/testing/brow
 
 ## Current scope
 
-There are local identities, worlds, articles and templates, a [world calendar with a timeline](docs/architecture/calendar-timeline.md),
-encrypted layers with separate read and write rights, a signed [journal](docs/architecture/journal.md)
-with automatic saving and versions, [finding, joining and writing together
-on the LAN](docs/testing/lan-join.md) with visible cursors, and
-[several storage locations](docs/architecture/storage.md), including shared folders kept in sync
-by a cloud app – without tying in any provider. Through a shared folder the devices find
-each other and then write [directly over the internet](docs/testing/internet-direct.md).
-Players can also work online against the GM's device ([host mode](docs/testing/host.md))
-or against a [server on a NAS](docs/testing/server.md). Mobile is not built yet.
+Local identities, worlds, documents and types, a [world calendar with a timeline](docs/architecture/calendar-timeline.md),
+sections with separate read and write rights, automatic saving with versions
+and review ([world format 5](docs/architecture/world-format.md)), writing
+together with visible cursors, and [several storage locations](docs/architecture/storage.md).
+A world lies in one place — this device, a [server](docs/server-setup.md) or the GM's
+app offering it on the network ([the network](docs/architecture/network.md)) —
+or, without any server, with the GM and [mailboxes](docs/architecture/mailboxes.md)
+in a cloud folder. Mobile is not built yet.
 
 [Documentation overview](docs/README.md)

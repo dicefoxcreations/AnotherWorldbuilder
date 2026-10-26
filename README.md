@@ -7,7 +7,8 @@
 <p align="center"><a href="../../releases/latest"><b>Download</b></a> · <a href="#try-the-example-world">Example world</a> · <a href="source/docs/server-setup.md">Run a server</a> · <a href="source/docs/README.md">Documentation</a> · <a href="source/README.md">Build it yourself</a></p>
 
 > **In development.** Not meant for real use yet: formats may change,
-> and older worlds are not carried over when they do.
+> and older worlds are not carried over when they do. Worlds of 0.1 come over
+> as a package (*Options → Transfer*).
 
 <p align="center"><img src="source/docs/screenshots/world.png" width="820" alt="A world's start page with a map and its places"></p>
 
@@ -33,49 +34,45 @@
 | --- | --- |
 | <img src="source/docs/screenshots/character.png" alt="A character with a GM-only secret and a family tree"> | <img src="source/docs/screenshots/statblock.png" alt="A stat block with clickable rolls and the dice log"> |
 | A character: links, a section only the GM sees, the family tree | A stat block: the rolls in the text go to the dice log |
-| <img src="source/docs/screenshots/timeline.png" alt="The timeline of the world's events"> | <img src="source/docs/screenshots/worlds.png" alt="The start page: worlds on this device, in a shared folder and on a server"> |
+| <img src="source/docs/screenshots/timeline.png" alt="The timeline of the world's events"> | <img src="source/docs/screenshots/worlds.png" alt="The start page: worlds on this device, with mailboxes and on a server"> |
 | The timeline, in the world's own calendar and moons | Your worlds, and where each one lives |
 
 ## Where your worlds live
 
-A world lives where you make it – and only there, until you move it.
+A world lives in one place – and only there, until you move it.
 
 | Where | What it means | What you need |
 | --- | --- | --- |
-| **This device** | A folder on your computer. Works offline, alone or as the host for your group. | Nothing. |
-| **Another folder** | An external drive, a network drive or a folder your cloud app keeps in step – it counts as local. A shared cloud folder is also how a group can meet without any server: everyone works on the same world folder. | A folder; for a group, a sync app you already use. |
-| **A server** | Always on, so players can work while the GM's computer is off. It holds no keys and is not the GM. | `aw-server` in Docker – on a NAS, a home server or a rented one. [How to run it](source/docs/server-setup.md) |
+| **This device** | A folder on your computer. Works offline. Offered on the network, your app is the host for your group while it runs. | Nothing. |
+| **A server** | Always on, so players can work while the GM's computer is off. Everyone sees and changes what the world allows them – the server checks every request. | `aw-server` in Docker – on a NAS, a home server or a rented one. [How to run it](source/docs/server-setup.md) |
+| **No server: mailboxes** | For a group that plays apart. The world stays with the GM; each player gets a mailbox in a folder your cloud app keeps in step, and works offline in it. | A cloud folder you can share. |
 
 <img src="source/docs/screenshots/move-or-copy.png" width="560" align="right" alt="The Move or copy dialog">
 
 **Move or copy** is one button at the world (*Options → World → Where it lives*),
-for the GM only: to another folder, onto a server, back off it – or as a copy, a new
-world of its own. Bringing a world onto a server shows how far it is and goes on
-after a restart.
+for the GM only: to another folder, onto a server, into mailboxes, back – as often as
+you like – or as a copy, a new world of its own.
 
-**Players** never hold the world itself. They reach it through the GM's device, the
-shared folder or the server, and keep a local copy only if the GM allows it – of an
-encrypted world, where each copy opens only that player's part.
+**Players** never hold a world that lies on a device or a server: they work in it
+there, and see only what they may. Offline play is what mailboxes are for.
 
 **Ways to meet**, all without an account:
 
 - **At home:** with *Local network* switched on, the app finds the GM's worlds in the same
   network by itself.
-- **Over the internet, directly:** the GM's device gets a host code; players enter it.
+- **Over the internet, directly:** the GM's device gets a code; players enter it.
   A forwarded port or IPv6 makes it reliable; often it works without.
-- **Through a shared cloud folder:** devices of a world in such a folder meet there
-  and then connect directly.
 - **Through a server** of your own, as above.
+- **Through a shared cloud folder**, with mailboxes.
 
 <br clear="right">
 
 ## Your data
 
-- Everything lies in folders on your computer; you choose which ones on first start.
+- Everything lies in folders you choose on first start.
+- A world is one SQLite file and a folder of pictures: plain and readable without the app.
 - No account and no server of the maker. The group connects directly or through
   what it runs itself.
-- Encryption can be chosen per world and costs nothing extra. Unencrypted, a world's
-  folder also holds a readable copy: a text file per article, images as files.
 
 ## Try the example world
 

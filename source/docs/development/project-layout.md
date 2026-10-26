@@ -2,7 +2,7 @@
 
 The folders separate product code, development tools, generated intermediate files
 and finished packages for distribution. A change of folders changes neither the
-campaign formats nor identities, encryption or the user's storage locations.
+world format nor identities or the user's storage locations.
 
 The repository is the release repository: three folders at the top.
 
@@ -54,11 +54,10 @@ source/
 │   │       └── browser/            Test bench, scenarios and browser driver
 │   └── server/                     The server's README, Dockerfile and compose file
 ├── crates/
-│   ├── aw-crypto/                  Identities and cryptography
-│   ├── aw-model/                   Campaign and article model and parser
-│   ├── aw-policy/                  Keys and access rules
-│   ├── aw-store/                   Durable journal and CRDT text
-│   └── aw-sync/                    LAN discovery, authenticated transport, shared folder
+│   ├── aw-crypto/                  Identities, ids, the passphrase lock
+│   ├── aw-model/                   Types, documents as text, rules, calendar, parser
+│   ├── aw-store/                   The world's database, merging, images, durable files
+│   └── aw-sync/                    Transport: QUIC, mDNS, router ports, STUN, messages
 ├── tools/
 │   ├── build/                     Shared build call and release collection
 │   ├── import/                    Package writer and the D&D 5e template

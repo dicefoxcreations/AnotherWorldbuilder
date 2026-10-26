@@ -67,7 +67,6 @@ node tests/browser/driver.mjs "http://localhost:5321/?stage=blank" /tmp/aw-pictu
 
 ## What it cannot do
 
-No Tauri, so no saving, no world, no encryption — the test bench stores
-nothing. Everything to do with keys is checked by the Rust tests in
-`aw-policy` and `aw-crypto`. And the window size at start you only see in the
+No Tauri, so no saving and no world — the test bench stores nothing. Who
+may see what is checked by the Rust tests in `aw-store` and `aw-desktop`. And the window size at start you only see in the
 real app.

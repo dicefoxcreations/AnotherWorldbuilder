@@ -129,12 +129,6 @@ cargo test --locked --workspace --exclude aw-sync
 cargo test --locked -p aw-sync --lib
 ```
 
-The online server regression also has a real encrypted loopback transport test (requires
-UDP socket permission, no real profiles or server):
-
-```sh
-cargo test --locked -p aw-desktop --lib encrypted_online_commands_use_a_real_server_and_fail_closed_after_disconnect -- --ignored
-```
 
 The ordinary server tests cover no-copy GM/player sessions, forbidden local fallbacks,
 chunked admission, acknowledged saves, lost connections and acknowledgements, signed

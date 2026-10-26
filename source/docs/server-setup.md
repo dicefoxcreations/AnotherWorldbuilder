@@ -1,8 +1,9 @@
 # Running a server
 
-`aw-server` keeps a group's worlds reachable while the GM's computer is off. It holds
-no keys and is not the GM: everyone proves who they are, and it lets them in where the
-world says they belong. One GM is its **admin** and manages it from the app.
+`aw-server` keeps a group's worlds reachable while the GM's computer is off. Everyone
+proves who they are; the server lets them in where the world says they belong and gives
+each member what their view and rights allow. One GM is its **admin** and manages it
+from the app.
 
 It is a single static program for x86-64 Linux, also as a Docker image. Any machine
 that runs Docker will do – a NAS, a home server, a small rented server.
@@ -68,18 +69,17 @@ or with a port, `worlds.example.org:4001` – or the full code. The admin then s
 **Manage** at the server: which GMs may bring worlds, which worlds are closed, who is
 turned away. A GM brings a world with *Options → World → Where it lives → Move or copy …*.
 
-With 0.1.56, a world on a server lies there and nowhere else: GM and players open and
-edit it through the server, and no device keeps a copy of it — the upload moves the
-GM's world there. Without the server it stays closed. Identity and keys remain on the
-devices; the server cannot decrypt an encrypted world. Backups are the copies there
-are: the server's own, and one taken by hand. Update all apps and the server to 0.1.56
-together.
+A world on a server lies there and nowhere else: GM and players open and edit it
+through the server, and no device keeps a copy of it — moving it there takes it off
+the GM's device. Without the server it stays closed. The server holds the worlds as
+plain files; protect its disk as you would any machine holding your campaign (disk
+encryption on the NAS volume). Update all apps and the server together: 0.2 speaks
+with 0.2 only.
 
 **Backups.** The server backs up each world it holds by itself — daily, the last
 seven kept, until the world's GM changes it under *Options → World → Backups*. They lie
 in `aw-server/backups/` beside the worlds, so the volume holds them too; copy that
-folder elsewhere now and then. A backup holds the world's files encrypted as they are;
-the keys stay with the GM.
+folder elsewhere now and then.
 
 ## On a Synology NAS
 
@@ -95,5 +95,5 @@ Container Manager runs on the x86-64 models (the "+" series).
 **Updating:** pull `latest` again under *Image* and recreate the container – the worlds
 stay in the folder.
 
-More detail – what the server does with encrypted and unencrypted worlds, the admin's
-view, limits – is in [Server on a NAS](testing/server.md).
+How it works – the admin's view, moving worlds, limits – is in
+[the network](architecture/network.md).
