@@ -1,37 +1,21 @@
 //! Images: uploaded once, kept as they came, used wherever someone may.
 //!
-//! An image has three levels, like a document:
+//! An image has an **id** (`img:<author>-<ulid>`), which never changes and
+//! stands in the text (`<image src=img:…>`) or in an image field; a
+//! **name**, which can change and is searched in the gallery; and its
+//! **file**, the original as it came — no scaling, no new encoding — with a
+//! small preview beside it for the gallery. Only what an image says about
+//! its maker goes: see `strip`.
 //!
-//! - its **id** (`img:<author>-<ulid>`), which never changes and stands in
-//!   the text (`<image src=img:…>`) or in an image field;
-//! - its **name**, which can change and is searched in the gallery — sealed,
-//!   since a name can give away what players should not know yet;
-//! - its **files**: the original, cut into parts of at most 4 MiB, each
-//!   encrypted with the image's own key, named by the hash of its bytes —
-//!   or, in an unencrypted world, whole and as it is: an image file any
-//!   viewer opens.
-//!
-//! The original stays as it came — no scaling, no new encoding. Only what an
-//! image says about its maker goes: see `strip`. For the gallery a small
-//! preview is made beside it.
-//!
-//! Who may see an image is decided where it is used: inserted into a part of
-//! a document, its key goes into that part's content (`ImageRef`). Whoever
-//! may read the part can open the image; nobody else.
+//! Who may see an image is decided where it is used: whoever may read a
+//! part that shows it may see it.
 
 pub mod strip;
 
-use aw_crypto::{decrypt, encrypt, ContentKey, Identity, IdentityPublic};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-
-use crate::journal::{record_id, Sealed};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-const IMAGE: &str = "anotherworldbuilder/image/1";
-/// The largest part of an image file.
-pub const PART: usize = 4 * 1024 * 1024;
 /// The longer side of a gallery preview, in pixels.
 pub const PREVIEW: u32 = 256;
 /// More than this is not decoded for a preview — the image itself stays.
@@ -140,32 +124,6 @@ pub fn prepare(raw: &[u8]) -> Result<Prepared> {
     Ok(Prepared { format, original, width, height, preview })
 }
 
-/// Cuts bytes into parts and encrypts each for itself: (name, ciphertext).
-/// Without a key — an unencrypted world — one part, the bytes as they are.
-pub fn seal_parts(key: Option<&ContentKey>, bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
-    let Some(key) = key else {
-        return Ok(vec![(record_id(bytes), bytes.to_vec())]);
-    };
-    let mut out = Vec::new();
-    for chunk in bytes.chunks(PART) {
-        let sealed = encrypt(key, chunk)?;
-        out.push((record_id(&sealed), sealed));
-    }
-    Ok(out)
-}
-
-/// Puts decrypted parts back together.
-pub fn open_parts(key: Option<&ContentKey>, parts: &[Vec<u8>]) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
-    for part in parts {
-        match key {
-            Some(key) => out.extend(decrypt(key, part)?),
-            None => out.extend_from_slice(part),
-        }
-    }
-    Ok(out)
-}
-
 /// A new image id, carrying a mark of its author — so only they and the game
 /// master write about it.
 pub fn new_id(author: &str) -> String {
@@ -200,30 +158,6 @@ pub fn is_id(id: &str) -> bool {
     })
 }
 
-/// What a part of a document needs to show an image: where its bytes lie
-/// and the key. Kept in the part's content, encrypted with it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ImageRef {
-    pub format: Format,
-    pub parts: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub preview: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preview_format: Option<Format>,
-    /// The image's key, hex — empty where it is kept as it is.
-    pub key: String,
-}
-
-impl ImageRef {
-    pub fn key(&self) -> Result<Option<ContentKey>> {
-        if self.key.is_empty() {
-            return Ok(None);
-        }
-        let raw: [u8; 32] = hex::decode(&self.key)?.try_into().map_err(|_| "a key has 32 bytes")?;
-        Ok(Some(ContentKey::from_bytes(raw)))
-    }
-}
-
 /// How an image is put into a text unless one says otherwise there: who
 /// may see and change it, and what the others see in its place. Empty means
 /// nothing of its own — the image takes the access of where it stands.
@@ -238,26 +172,6 @@ pub struct ImageDefaults {
     pub hidden: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub hidden_caption: String,
-}
-
-/// What only the game master and the uploader learn of an image.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ImageMeta {
-    pub name: String,
-    pub width: u32,
-    pub height: u32,
-    /// Bytes of the original.
-    pub size: u64,
-    /// Milliseconds since 1970, when it was uploaded.
-    pub uploaded: u64,
-    /// Everything needed to open it.
-    pub image: ImageRef,
-    #[serde(default)]
-    pub defaults: ImageDefaults,
-    /// The folder it lies in, by id (`FolderNode`). Empty, or a folder that
-    /// is gone: in none.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub folder: String,
 }
 
 /// A folder of the gallery. Folders hang in a tree by `parent`; renaming or
@@ -297,182 +211,9 @@ pub fn check_folders(folders: &[FolderNode]) -> Result<()> {
     Ok(())
 }
 
-/// An image in the gallery: its files, and — sealed for the game master and
-/// the uploader — its name and key. Renaming writes a new entry; the newest
-/// counts.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ImageEntry {
-    pub world: String,
-    pub image: String,
-    pub author: IdentityPublic,
-    /// Milliseconds since 1970, by the author's clock.
-    pub time: u64,
-    /// The parts of the original and of the preview — needed by every device,
-    /// so they stand in the open.
-    pub parts: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub preview: Vec<String>,
-    /// `ImageMeta`.
-    pub sealed: Sealed,
-    pub signature: String,
-}
-
-impl ImageEntry {
-    fn signed_bytes(&self) -> Result<Vec<u8>> {
-        Ok(serde_json::to_vec(&(IMAGE, &self.world, &self.image, &self.author, self.time, &self.parts, &self.preview, &self.sealed))?)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        world: &str,
-        image: &str,
-        author: &Identity,
-        gm: &IdentityPublic,
-        uploader: &IdentityPublic,
-        meta: &ImageMeta,
-        time: u64,
-        encrypted: bool,
-    ) -> Result<Self> {
-        let mut recipients = vec![gm];
-        if uploader.id != gm.id {
-            recipients.push(uploader);
-        }
-        let bytes = serde_json::to_vec(meta)?;
-        let mut entry = ImageEntry {
-            world: world.to_string(),
-            image: image.to_string(),
-            author: author.public(),
-            time,
-            parts: meta.image.parts.clone(),
-            preview: meta.image.preview.clone(),
-            sealed: if encrypted { Sealed::new(&recipients, &bytes)? } else { Sealed::plain(&bytes) },
-            signature: String::new(),
-        };
-        entry.signature = hex::encode(author.sign(&entry.signed_bytes()?));
-        Ok(entry)
-    }
-
-    /// Checks the signature, and that whoever wrote it may: the uploader —
-    /// whose mark the id carries — or the game master.
-    pub fn verify(&self, world: &str, gm: Option<&IdentityPublic>) -> Result<()> {
-        if self.world != world {
-            return Err("a record of another world".into());
-        }
-        if !self.author.is_genuine() {
-            return Err("an author whose id does not match their keys".into());
-        }
-        let signature: [u8; 64] = hex::decode(&self.signature)?.try_into().map_err(|_| "a signature has 64 bytes")?;
-        self.author.verify(&self.signed_bytes()?, &signature)?;
-        let by_gm = gm.is_some_and(|g| g.id == self.author.id);
-        if !by_gm && !id_by(&self.image, self.author.id.as_str()) {
-            return Err("only its uploader or the game master writes about an image".into());
-        }
-        if self.parts.is_empty() || self.parts.iter().chain(&self.preview).any(|p| !is_part(p)) {
-            return Err("an image without proper parts".into());
-        }
-        Ok(())
-    }
-
-    /// What the entry holds, for whoever it is sealed for.
-    pub fn meta(&self, secret: &x25519_dalek::StaticSecret) -> Option<ImageMeta> {
-        serde_json::from_slice(&self.sealed.open(secret)?).ok()
-    }
-}
-
-fn is_part(name: &str) -> bool {
-    name.len() == 64 && name.bytes().all(|b| b.is_ascii_hexdigit())
-}
-
-// --- Parts on disk ----------------------------------------------------------------
-
-/// Where the parts of a world's images lie.
-pub fn parts_dir(world_dir: &Path) -> PathBuf {
-    world_dir.join("media").join("parts")
-}
-
-fn part_path(world_dir: &Path, name: &str) -> Option<PathBuf> {
-    is_part(name).then(|| parts_dir(world_dir).join(format!("{name}.bin")))
-}
-
-/// Keeps many parts at once, as `put_part` each — synced together.
-pub fn put_parts(world_dir: &Path, parts: &[(String, Vec<u8>)]) -> Result<()> {
-    let mut files = Vec::with_capacity(parts.len());
-    for (name, bytes) in parts {
-        let path = part_path(world_dir, name).ok_or("not a part's name")?;
-        if record_id(bytes) != *name {
-            return Err("a part whose bytes do not match its name".into());
-        }
-        files.push((path, bytes.clone()));
-    }
-    crate::durable::write_all(&files)?;
-    Ok(())
-}
-
-pub fn has_part(world_dir: &Path, name: &str) -> bool {
-    part_path(world_dir, name).is_some_and(|p| p.exists())
-}
-
-/// Keeps a part — only if its bytes are what its name says. One lying here
-/// already stays, unless it is no longer whole.
-pub fn put_part(world_dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
-    let path = part_path(world_dir, name).ok_or("not a part's name")?;
-    if record_id(bytes) != name {
-        return Err("a part whose bytes do not match its name".into());
-    }
-    if !path.exists() || read_part(world_dir, name).is_none() {
-        crate::durable::write(&path, bytes)?;
-    }
-    Ok(())
-}
-
-pub fn read_part(world_dir: &Path, name: &str) -> Option<Vec<u8>> {
-    let bytes = std::fs::read(part_path(world_dir, name)?).ok()?;
-    (record_id(&bytes) == name).then_some(bytes)
-}
-
-pub fn remove_part(world_dir: &Path, name: &str) {
-    if let Some(path) = part_path(world_dir, name) {
-        let _ = std::fs::remove_file(path);
-    }
-}
-
-/// The parts that lie here, by name.
-pub fn parts_here(world_dir: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(parts_dir(world_dir)) else { return Vec::new() };
-    entries
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".bin")).map(str::to_string))
-        .filter(|n| is_part(n))
-        .collect()
-}
-
-/// An image, put back together from the parts here.
-pub fn open_image(world_dir: &Path, image: &ImageRef, preview: bool) -> Result<Vec<u8>> {
-    let names = if preview && !image.preview.is_empty() { &image.preview } else { &image.parts };
-    let mut parts = Vec::new();
-    for name in names {
-        parts.push(read_part(world_dir, name).ok_or("a part of this image is not here yet")?);
-    }
-    open_parts(image.key()?.as_ref(), &parts)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_part_no_longer_whole_is_not_read_and_is_replaced() {
-        let dir = tempfile::tempdir().unwrap();
-        let bytes = b"a part of an image".to_vec();
-        let name = record_id(&bytes);
-        put_part(dir.path(), &name, &bytes).unwrap();
-        let path = part_path(dir.path(), &name).unwrap();
-        std::fs::write(&path, b"a part of an imagX").unwrap();
-        assert!(has_part(dir.path(), &name));
-        assert_eq!(read_part(dir.path(), &name), None, "broken: not handed out");
-        put_part(dir.path(), &name, &bytes).unwrap();
-        assert_eq!(read_part(dir.path(), &name), Some(bytes));
-    }
 
     fn png(width: u32, height: u32) -> Vec<u8> {
         let img = image::RgbaImage::from_fn(width, height, |x, y| image::Rgba([(x % 256) as u8, (y % 256) as u8, 90, 255]));
@@ -510,17 +251,6 @@ mod tests {
         assert!(!String::from_utf8_lossy(&ready.original).contains("GPS"));
         assert_eq!(image::load_from_memory(&ready.original).unwrap().to_rgb8(), image::load_from_memory(&jpeg).unwrap().to_rgb8());
         assert!(ready.preview.is_some());
-    }
-
-    #[test]
-    fn parts_go_back_together_and_only_with_the_key() {
-        let key = ContentKey::generate().unwrap();
-        let bytes: Vec<u8> = (0..(PART * 2 + 17)).map(|i| (i % 251) as u8).collect();
-        let parts = seal_parts(Some(&key), &bytes).unwrap();
-        assert_eq!(parts.len(), 3);
-        let raw: Vec<Vec<u8>> = parts.iter().map(|(_, b)| b.clone()).collect();
-        assert_eq!(open_parts(Some(&key), &raw).unwrap(), bytes);
-        assert!(open_parts(Some(&ContentKey::generate().unwrap()), &raw).is_err());
     }
 
     #[test]

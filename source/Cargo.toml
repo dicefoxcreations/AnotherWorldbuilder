@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "crates/aw-crypto",
     "crates/aw-model",
-    "crates/aw-policy",
     "crates/aw-store",
     "crates/aw-sync",
     "apps/desktop/src-tauri",
@@ -18,7 +17,6 @@ rust-version = "1.91"
 [workspace.dependencies]
 aw-crypto = { path = "crates/aw-crypto" }
 aw-model = { path = "crates/aw-model" }
-aw-policy = { path = "crates/aw-policy" }
 aw-store = { path = "crates/aw-store" }
 aw-sync = { path = "crates/aw-sync" }
 
