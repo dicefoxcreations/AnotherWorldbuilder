@@ -64,8 +64,8 @@ export function KeysDialog({
           <>
             <p className="small">
               {backup
-                ? "Your identity and the keys of your worlds. Without them nothing encrypted opens again — not after a new install, not on another device."
-                : "Your identity and world keys from a backup. The worlds themselves come from their folder."}
+                ? "Your identity — what makes you GM or player in your worlds."
+                : "Your identity from a backup."}
             </p>
             <label className="world-name-field">
               Passphrase

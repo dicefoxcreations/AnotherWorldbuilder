@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { StorageArea } from "./Storage";
 import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
 import {
@@ -9,13 +9,11 @@ import {
   type JoinRequest,
   type MemberInfo,
   type WaitingVersion,
-  type Conflict,
   type NetworkView,
   type HeldWorld,
   type Person,
   type ServerOrder,
   type ServerState,
-  type SwitchProgress,
   type Template,
   type WorldInfo,
 } from "../../api/client";
@@ -36,7 +34,6 @@ import { useUpdates } from "../../shared/Updates";
 import { BrowserArea } from "./BrowserArea";
 import { USUAL_DICE } from "../dice/DiceTray";
 import { TransferArea } from "./Transfer";
-import { KeysDialog } from "../../shared/ui/KeysDialog";
 import { BackupArea } from "../worlds/Backups";
 import { PlaceArea, Reach, serverName } from "../worlds/WorldPlace";
 
@@ -45,7 +42,6 @@ import { PlaceArea, Reach, serverName } from "../worlds/WorldPlace";
 const AREAS = [
   { id: "world", icon: "🌍", name: "World", group: "world" },
   { id: "players", icon: "👥", name: "Players", group: "world" },
-  { id: "conflicts", icon: "⚠", name: "Conflicts", group: "world" },
   { id: "types", icon: "📄", name: "Types", group: "world" },
   { id: "images", icon: "🖼", name: "Images", group: "world" },
   { id: "calendar", icon: "◷", name: "Calendar", group: "world" },
@@ -105,7 +101,7 @@ export function Options({
   // The world's basics are the GM's to set.
   // Outside a world: what belongs to the device — the dice's look among it.
   const areas = world
-    ? AREAS.filter((b) => b.id !== "transfer" || world.isGm).filter((b) => b.id !== "conflicts" || world.conflicts > 0 || area === "conflicts")
+    ? AREAS.filter((b) => b.id !== "transfer" || world.isGm)
     : AREAS.filter((b) => b.group !== "world" || b.id === "dice").filter((b) => b.id !== "keys");
   const groupOf = (b: (typeof AREAS)[number]) => (world || b.group !== "world" ? GROUPS[b.group] : GROUPS.device);
 
@@ -137,7 +133,6 @@ export function Options({
                 <span className="nav-icon">{b.icon}</span>
                 {b.name}
                 {b.id === "players" && due > 0 && <span className="badge">{due}</span>}
-                {b.id === "conflicts" && world && world.conflicts > 0 && <span className="badge">{world.conflicts}</span>}
                 {b.id === "updates" && update.kind === "ready" && <span className="badge">1</span>}
               </button>
             </Fragment>
@@ -194,10 +189,8 @@ export function Options({
               <PlaceArea world={world} onChanged={onWorldChanged} onError={onError} />
               <BackupArea world={world} onError={onError} />
               {world.isGm && <BasicsArea world={world} onChanged={onWorldChanged} onError={onError} />}
-              <ReadableCopy world={world} onChanged={onWorldChanged} onError={onError} />
             </>
           )}
-          {world && area === "conflicts" && <Conflicts world={world} onChanged={onWorldChanged} onError={onError} />}
           {world && area === "images" && <GalleryArea world={world} onOpen={onOpen} onError={onError} />}
           {world && area === "keys" && <ShortcutsArea world={world} templates={templates} />}
           {world && area === "calendar" && <CalendarArea world={world} onChanged={onWorldChanged} onError={onError} />}
@@ -262,33 +255,6 @@ function WorldDice({ world, onChanged, onError }: { world: WorldInfo; onChanged:
   );
 }
 
-/** Lets go of what newer records replaced: old key generations of parts nothing was written in. */
-function Tidy({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<number | null>(null);
-  const tidy = async () => {
-    setBusy(true);
-    try {
-      setDone(await api.worldTidy(world.id));
-      onChanged();
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="line backup-plan">
-      <button disabled={busy} onClick={() => void tidy()}>
-        {busy ? "Tidying …" : "Tidy up"}
-      </button>
-      <small className="small muted grow">
-        {done === null ? "Removes what newer entries replaced." : done === 0 ? "Nothing to remove." : `${done.toLocaleString()} old entries removed.`}
-      </small>
-    </div>
-  );
-}
-
 /** What holds for the whole world — the GM's. */
 function BasicsArea({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
   const run = (step: Promise<unknown>) => step.then(onChanged).catch(onError);
@@ -314,159 +280,6 @@ function BasicsArea({ world, onChanged, onError }: { world: WorldInfo; onChanged
           <small className="small">The oldest go once there are more.</small>
         </span>
       </label>
-      <Tidy world={world} onChanged={onChanged} onError={onError} />
-      <Encryption world={world} onChanged={onChanged} onError={onError} />
-    </div>
-  );
-}
-
-/**
- * Encrypted or not. Unencrypted, the world lies in its folder as it is, with
- * a readable copy beside it — no views, no rights. Encrypted, they count;
- * without a backup of one's keys nothing opens on a new device. Switching a
- * big world takes minutes: the dialog shows how far it is.
- */
-function Encryption({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
-  const [asking, setAsking] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [keys, setKeys] = useState(false);
-  const [progress, setProgress] = useState<SwitchProgress | null>(null);
-  const [started, setStarted] = useState(0);
-  const [now, setNow] = useState(0);
-  useEffect(() => {
-    if (!busy) return;
-    const timer = setInterval(() => {
-      setNow(Date.now());
-      api.worldSwitchProgress(world.id).then(setProgress).catch(() => {});
-    }, 500);
-    return () => clearInterval(timer);
-  }, [busy, world.id]);
-  const turn = async (on: boolean) => {
-    setBusy(true);
-    setProgress(null);
-    setStarted(Date.now());
-    setNow(Date.now());
-    try {
-      await api.worldEncryptionSet(world.id, on);
-      setAsking(null);
-      onChanged();
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const seconds = Math.max(0, Math.round((now - started) / 1000));
-  const share = progress ? (progress.step - 1 + (progress.total > 0 ? progress.done / progress.total : 0.5)) / progress.steps : 0;
-  return (
-    <>
-      <label className="switch-row">
-        <input type="checkbox" checked={world.encrypted} disabled={busy} onChange={(e) => setAsking(e.target.checked)} />
-        <span>
-          <strong>Encrypted</strong>
-          <small className="small">
-            {world.encrypted
-              ? "on · views and rights hold everywhere"
-              : world.server
-                ? "off · the server keeps views and rights · it reads everything"
-                : "off · the host keeps views and rights · whoever has the folder reads everything"}
-          </small>
-        </span>
-      </label>
-      {world.readableInWorld && (
-        <div className="line readable-copy">
-          <span className="small muted">Readable copy</span>
-          <code title={world.readable}>{world.readable}</code>
-          <button onClick={() => api.storageOpen(world.readable).catch(onError)}>Show</button>
-        </div>
-      )}
-      {asking !== null && (
-        <div className="dialog-backdrop" onClick={() => !busy && setAsking(null)}>
-          <section className="dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            {asking ? (
-              <>
-                <h2>Encrypt the world?</h2>
-                <p>
-                  <strong>Back up your keys first.</strong> Without them nothing in this world opens again — not after a new install, not on another device.
-                </p>
-                <p className="small">Views and rights count again. The readable copy goes. What lay open until now stays readable to whoever kept a copy.</p>
-                {!busy && <button onClick={() => setKeys(true)}>Back up keys …</button>}
-              </>
-            ) : (
-              <>
-                <h2>Turn encryption off?</h2>
-                <p>Everything lies in the world's folder as it is — GM parts, secrets, all of it. Whoever has the folder reads and edits everything: on a server, the server and its admin; in a shared folder, everyone in it.</p>
-                <p className="small">Players working online still get only what views and rights allow — the host keeps them.</p>
-                <p className="small">A readable copy appears beside it: a text per document, the images as image files.</p>
-              </>
-            )}
-            {busy && (
-              <div className="switch-progress">
-                <div className="progress-bar">
-                  <div style={{ width: `${Math.round(share * 100)}%` }} />
-                </div>
-                <small className="small">
-                  {progress ? `${progress.step} of ${progress.steps} · ${progress.what}${progress.total > 0 ? ` · ${progress.done.toLocaleString()} of ${progress.total.toLocaleString()}` : ""}` : "Starting"} · {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
-                </small>
-              </div>
-            )}
-            <div className="line">
-              <button className={asking ? "primary" : "danger"} disabled={busy} onClick={() => turn(asking)}>
-                {busy ? "Switching …" : asking ? "Encrypt" : "Turn off"}
-              </button>
-              {!busy && <button onClick={() => setAsking(null)}>Cancel</button>}
-            </div>
-          </section>
-        </div>
-      )}
-      {keys && <KeysDialog mode="backup" onClose={() => setKeys(false)} />}
-    </>
-  );
-}
-
-/**
- * A readable copy of one's own, on this device: a text per document, images
- * as files — of an encrypted world, of what this device can read. An
- * unencrypted world has its copy in its folder already.
- */
-function ReadableCopy({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
-  const [busy, setBusy] = useState(false);
-  const turn = async (on: boolean) => {
-    setBusy(true);
-    try {
-      await api.worldReadableSet(world.id, on);
-      onChanged();
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const possible = world.encrypted && !world.online && !world.fleeting;
-  const own = possible && !!world.readable;
-  return (
-    <div className="type-page">
-      <label className={possible ? "switch-row" : "switch-row off"}>
-        <input type="checkbox" checked={own} disabled={busy || !possible} onChange={(e) => void turn(e.target.checked)} />
-        <span>
-          <strong>Readable copy on this device</strong>
-          <small className="small">
-            {!possible
-              ? world.online || world.fleeting
-                ? "not for a world worked on online"
-                : "only for encrypted worlds · unencrypted, the copy lies in the world's folder"
-              : own
-                ? "on · a text per document, images as files, in the clear"
-                : "off"}
-          </small>
-        </span>
-      </label>
-      {own && (
-        <div className="line readable-copy">
-          <code title={world.readable}>{world.readable}</code>
-          <button onClick={() => api.storageOpen(world.readable).catch(onError)}>Show</button>
-        </div>
-      )}
     </div>
   );
 }
@@ -724,12 +537,6 @@ function InfoArea({
   onChanged: () => void;
   onError: (e: unknown) => void;
 }) {
-  const [tokenOk, setTokenOk] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    if (world.isGm) api.worldTokenCheck(world.id).then(setTokenOk).catch(() => setTokenOk(false));
-  }, [world.id, world.isGm]);
-
   return (
     <div className="type-page">
       <h2>{world.name}</h2>
@@ -745,11 +552,7 @@ function InfoArea({
           <span className="small">The world's icon — it shows in the bar and in the main menu.</span>
         </div>
       )}
-      <p className="small">
-        {world.isGm
-          ? "You are the GM of this world."
-          : "You got this world from your GM."}
-      </p>
+      <p className="small">{world.isGm ? "You are the GM of this world." : world.supporter ? "You support this world." : "You play in this world."}</p>
 
       <dl className="keys wide">
         <dt>Name</dt>
@@ -758,10 +561,6 @@ function InfoArea({
         <dd>
           <code className="wrap">{world.id}</code>
         </dd>
-        <dt>Public world key</dt>
-        <dd>
-          <code className="wrap">{world.publicKey}</code>
-        </dd>
         <dt>Folder on this device</dt>
         <dd>
           <code className="wrap">{world.folder}</code>
@@ -769,76 +568,6 @@ function InfoArea({
         <dt>Articles</dt>
         <dd>{world.articleCount}</dd>
       </dl>
-
-      {world.isGm && (
-        <p className={tokenOk === false ? "warning" : "small"}>
-          {tokenOk === false
-            ? "The world token is missing or does not match. Without it this world is lost."
-            : "The world token is stored in your profile. Back up both your profile and your worlds — no server can replace lost keys."}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * Changes that reach no one — written offline to a document removed
- * meanwhile, or waiting for what they build on. Kept as a new document, or
- * discarded (the GM): only the changes go, never a document.
- */
-function Conflicts({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
-  const [all, setAll] = useState<Conflict[]>([]);
-  const [discarding, setDiscarding] = useState<string | null>(null);
-  useEffect(() => {
-    api.worldConflicts(world.id).then(setAll).catch(onError);
-  }, [world.id, world.conflicts]);
-  const run = async (step: Promise<unknown>) => {
-    try {
-      await step;
-      onChanged();
-    } catch (e) {
-      onError(e);
-    }
-  };
-  return (
-    <div className="type-page">
-      <h2>Conflicts</h2>
-      {all.length === 0 && <p className="small muted">None.</p>}
-      <ul className="members large">
-        {all.map((c) => {
-          const key = `${c.article}-${c.session}-${c.why}`;
-          return (
-            <li key={key}>
-              <div>
-                <strong>{c.name || "A document"}</strong>
-                <small className="small">
-                  {c.author} · {when(c.at)} · {c.why === "removed" ? "written after the document was removed" : "waits for changes that have not come"}
-                </small>
-                {discarding === key && <small className="small">Only these changes go; no document is deleted.</small>}
-              </div>
-              <div className="line">
-                {discarding === key ? (
-                  <>
-                    <button className="danger compact" onClick={() => run(api.conflictDismiss(world.id, c.article, c.session).then(() => setDiscarding(null)))}>
-                      Discard
-                    </button>
-                    <button className="compact" onClick={() => setDiscarding(null)}>Cancel</button>
-                  </>
-                ) : (
-                  <>
-                    {c.why === "removed" && (world.isGm || c.mine) && (
-                      <button className="primary compact" onClick={() => run(api.conflictRescue(world.id, c.article, c.session))}>
-                        Keep as new document
-                      </button>
-                    )}
-                    {world.isGm && <button className="compact" onClick={() => setDiscarding(key)}>Discard changes</button>}
-                  </>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
     </div>
   );
 }
@@ -954,19 +683,6 @@ function PlayersArea({
     }
   };
 
-  const handOver = async (id: string, name: string) => {
-    try {
-      const path = await save({
-        defaultPath: `${world.name} for ${name}.awworld`,
-        filters: [{ name: "World file", extensions: ["awworld"] }],
-      });
-      if (!path) return;
-      await api.worldShare(world.id, id, path);
-    } catch (e) {
-      onError(e);
-    }
-  };
-
   const asking = requests.length > 0 && (
     <>
       <h3>Asking to join</h3>
@@ -1057,7 +773,7 @@ function PlayersArea({
         </ul>
         {asking}
         {removeDialog}
-        {world.canTakeOver && (
+        {world.supporter && (
           <>
             <h3>Emergency</h3>
             {takingOver ? (
@@ -1077,7 +793,7 @@ function PlayersArea({
     );
 
   const chooseSupporter = (id: string, on: boolean) =>
-    run(api.worldSupportersSet(world.id, on ? [...world.chosen, id] : world.chosen.filter((c) => c !== id)));
+    run(api.worldSupportersSet(world.id, on ? [...world.supporters, id] : world.supporters.filter((c) => c !== id)));
 
   return (
     <div className="type-page">
@@ -1140,9 +856,6 @@ function PlayersArea({
                   />
                 )}
                 {!world.isGm && extra.length > 0 && <small className="small">{extra.join(", ")}</small>}
-                {world.handover === m.id && (
-                  <small className="accent">Becomes GM as soon as they connect.</small>
-                )}
                 {Object.entries(takes).filter(([, old]) => old === m.id).map(([fresh]) => (
                   <small key={fresh} className="accent">Moves to {fresh} as soon as it connects.</small>
                 ))}
@@ -1161,19 +874,14 @@ function PlayersArea({
                   )}
                   {m.role !== "gm" && (
                     <button
-                      className={world.chosen.includes(m.id) ? "compact on" : "compact"}
+                      className={supports(m.id) ? "compact on" : "compact"}
                       title="Lets players in; may become GM if you are gone"
-                      onClick={() => chooseSupporter(m.id, !world.chosen.includes(m.id))}
+                      onClick={() => chooseSupporter(m.id, !supports(m.id))}
                     >
                       Supporter
                     </button>
                   )}
-                  {world.handover === m.id ? (
-                    <button className="compact" onClick={() => run(api.gmHandover(world.id, null))}>Keep GM</button>
-                  ) : (
-                    <button className="compact" onClick={() => setHandover(m)}>Make GM</button>
-                  )}
-                  <button className="compact" onClick={() => handOver(m.id, m.name)}>World file</button>
+                  <button className="compact" onClick={() => setHandover(m)}>Make GM</button>
                   {m.role !== "gm" && (
                     <button className="compact" title="For a device set up anew without its keys" onClick={() => setNewId(m)}>
                       New ID
@@ -1195,10 +903,6 @@ function PlayersArea({
           </li>
         ))}
       </ul>
-
-      {world.admins.length > 0 && (
-        <p className="small muted">Server admins support every world there: {world.admins.join(", ")}</p>
-      )}
 
       <h3>Add a player</h3>
       <div className="line">
@@ -1245,12 +949,6 @@ function PlayersArea({
   );
 }
 
-/**
- * Handing the world over: the member gets all of it — token, keys,
- * members — and this device keeps playing in it as a player. Over the
- * network it happens when they next connect; a file is sealed for them
- * alone, and this device steps down at once.
- */
 /**
  * One's own colour in this world — on one's name and the characters
  * assigned to one, for everyone. Signed by oneself; no GM needed.
@@ -1324,20 +1022,6 @@ function HandoverDialog({
   const [input, setInput] = useState("");
   const matches = input.trim() === world.name.trim();
 
-  const asFile = async () => {
-    try {
-      const path = await save({
-        defaultPath: `${world.name} — GM for ${member.name}.awworld`,
-        filters: [{ name: "World file", extensions: ["awworld"] }],
-      });
-      if (!path) return;
-      await api.gmHandoverFile(world.id, member.id, path);
-      onDone();
-    } catch (e) {
-      onError(e);
-    }
-  };
-
   return (
     <div className="dialog-backdrop" onClick={onCancel}>
       <div className="delete-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -1364,10 +1048,7 @@ function HandoverDialog({
             disabled={!matches}
             onClick={() => api.gmHandover(world.id, member.id).then(onDone).catch(onError)}
           >
-            Over the network
-          </button>
-          <button disabled={!matches} onClick={asFile}>
-            As a file
+            Make GM
           </button>
           <button onClick={onCancel}>Cancel</button>
         </div>

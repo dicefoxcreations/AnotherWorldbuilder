@@ -39,7 +39,6 @@ export function VersionsPanel({
   gm,
   onChosen,
   onRevert,
-  onCarry,
   onVerdict,
   onDelete,
   onError,
@@ -58,7 +57,6 @@ export function VersionsPanel({
   gm: boolean;
   onChosen: (session: string | null) => void;
   onRevert: (session: string) => void;
-  onCarry: (session: string) => void;
   onVerdict: (session: string, accepted: boolean) => void;
   onDelete: (session: string) => void;
   onError: (e: unknown) => void;
@@ -110,11 +108,6 @@ export function VersionsPanel({
                 </button>
                 {chosen === v.session && (
                   <div className="version-actions">
-                    {v.stale && (
-                      <button className="compact" onClick={() => onCarry(v.session)} title="Takes what this version wrote into the text.">
-                        ↷ Into the text
-                      </button>
-                    )}
                     {gm && v.review === "waiting" && (
                       <>
                         <button className="primary compact" onClick={() => onVerdict(v.session, true)}>

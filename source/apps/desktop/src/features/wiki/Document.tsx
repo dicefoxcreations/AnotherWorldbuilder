@@ -346,7 +346,6 @@ export function DocumentPage({
       gm={world.isGm}
       onChosen={setChosen}
       onRevert={(s) => act(api.versionRevert(world.id, article.id, s, session))}
-      onCarry={(s) => act(api.versionCarry(world.id, article.id, s))}
       onVerdict={(s, accepted) => act(api.versionVerdict(world.id, article.id, s, accepted))}
       onDelete={(s) => act(api.versionDelete(world.id, article.id, s))}
       onError={onError}

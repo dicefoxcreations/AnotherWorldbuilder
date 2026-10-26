@@ -1,18 +1,15 @@
 //! A backup of one's keys, for another device or a new start: the identity
-//! and, of every world, what only this profile keeps — the game master's
-//! world token and keyring, the members and invitations. The worlds
-//! themselves are not in it; they come from their folder.
+//! — what proves to every world one is its GM, a supporter or a player. The
+//! worlds themselves are not in it; they come from their folder.
 //!
 //! Locked with a passphrase (`aw_crypto::passphrase`): whoever finds the
 //! file needs it, and nobody can bring it back without.
 
 use super::*;
-use std::collections::BTreeMap;
 
 const FORMAT: &str = "aw-keys";
-/// What of a world's private folder goes along: what cannot be had again.
-/// Drafts and the index are this device's own work in progress.
-pub(crate) const KEPT: [&str; 6] = ["owner.key", "keyring.json", "state.json", "requests.json", crate::store::SEALED_FOR, crate::store::TAKEOVERS];
+/// The identity alone — worlds keep no keys of their own any more.
+const VERSION: u32 = 2;
 /// Short passphrases are guessed, however slow each guess.
 const SHORTEST: usize = 10;
 
@@ -22,8 +19,6 @@ struct Backup {
     version: u32,
     /// `identity.json` as it lies.
     identity: String,
-    /// World folder name → file name → contents.
-    worlds: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[cfg(feature = "gui")]
@@ -42,28 +37,12 @@ fn backup(store: &Store, passphrase: &str) -> Answer<Vec<u8>> {
         return Err(AppError(format!("The passphrase needs at least {SHORTEST} characters.")));
     }
     let identity = std::fs::read_to_string(store.identity_path())?;
-    let mut worlds = BTreeMap::new();
-    if let Ok(dirs) = std::fs::read_dir(store.profile_dir().join("worlds")) {
-        for dir in dirs.filter_map(|d| d.ok()).filter(|d| d.path().is_dir()) {
-            let mut files = BTreeMap::new();
-            for name in KEPT {
-                if let Ok(text) = std::fs::read_to_string(dir.path().join(name)) {
-                    files.insert(name.to_string(), text);
-                }
-            }
-            if !files.is_empty() {
-                worlds.insert(dir.file_name().to_string_lossy().into_owned(), files);
-            }
-        }
-    }
-    let backup = Backup { format: FORMAT.into(), version: 1, identity, worlds };
+    let backup = Backup { format: FORMAT.into(), version: VERSION, identity };
     Ok(aw_crypto::passphrase::lock(passphrase, &serde_json::to_vec(&backup)?)?)
 }
 
 #[cfg(feature = "gui")]
-/// Brings the keys back: the identity where this profile has none yet, and
-/// of each world what is not here. What is here stays — a newer keyring is
-/// never overwritten by an older one.
+/// Brings the identity back, where this profile has none yet.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn keys_restore(app: tauri::AppHandle, path: String, passphrase: String) -> Answer<IdentityInfo> {
     let store = store(&app)?;
@@ -74,7 +53,7 @@ pub fn keys_restore(app: tauri::AppHandle, path: String, passphrase: String) -> 
 pub(crate) fn restore(store: &Store, locked: &[u8], passphrase: &str) -> Answer<()> {
     let plain = aw_crypto::passphrase::unlock(passphrase, locked).map_err(|_| AppError("Wrong passphrase — or not a key backup.".into()))?;
     let backup: Backup = serde_json::from_slice(&plain)?;
-    if backup.format != FORMAT || backup.version != 1 {
+    if backup.format != FORMAT || backup.version != VERSION {
         return Err(AppError("Not a key backup this version knows.".into()));
     }
     // Checked before anything is kept: keys that do not make their id are no identity.
@@ -91,20 +70,6 @@ pub(crate) fn restore(store: &Store, locked: &[u8], passphrase: &str) -> Answer<
     } else {
         store.save_identity(&theirs)?;
     }
-    for (dir, files) in &backup.worlds {
-        // Only world folders by their own name: nothing written outside.
-        if !dir.starts_with("world-") || dir.contains(['/', '\\', '.']) {
-            continue;
-        }
-        let into = store.profile_dir().join("worlds").join(dir);
-        std::fs::create_dir_all(&into)?;
-        for (name, text) in files.iter().filter(|(n, _)| KEPT.contains(&n.as_str())) {
-            let target = into.join(name);
-            if !target.exists() {
-                aw_store::durable::write(&target, text.as_bytes())?;
-            }
-        }
-    }
     Ok(())
 }
 
@@ -113,12 +78,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keys_come_back_into_a_new_profile_and_open_the_world() {
+    fn the_identity_comes_back_into_a_new_profile_and_is_the_worlds_gm() {
         let dir = tempfile::tempdir().unwrap();
         let here = Store::new(dir.path().join("here"));
         let gm = Identity::create("Marla").unwrap();
         here.save_identity(&gm).unwrap();
-        let world = new_world(&here, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        let world = new_world(&here, &gm, "Eldermere".into()).unwrap().id;
         assert!(backup(&here, "short").is_err(), "a short passphrase is refused");
         let locked = backup(&here, "a long passphrase").unwrap();
 
@@ -127,8 +92,8 @@ mod tests {
         assert!(restore(&there, &locked, "the wrong passphrase").is_err());
         restore(&there, &locked, "a long passphrase").unwrap();
         assert_eq!(there.load_identity().unwrap().id(), gm.id());
-        assert!(there.is_gm(&world), "the world token came back");
-        assert!(!there.load_articles(&world).unwrap().is_empty());
+        assert!(there.is_gm(&world), "the world knows them as its GM");
+        assert!(!there.db(&world).unwrap().document_ids().unwrap().is_empty());
 
         // Someone else's profile is not taken over.
         let other = Store::at(dir.path().join("other"), here.worlds_dir());

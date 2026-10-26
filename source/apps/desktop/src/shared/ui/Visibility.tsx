@@ -331,8 +331,6 @@ export function AccessLine({
   onView?: (fresh: string) => void;
   onEdit?: (fresh: string) => void;
 }) {
-  // Unencrypted, no view or right counts — nothing to show.
-  if (!world.encrypted) return null;
   // The same who see it change it: one group, eye and pen.
   if (view !== undefined && edit !== undefined && samePolicy(view, edit) && !onView && !onEdit)
     return (
@@ -387,7 +385,6 @@ export function RegionAccess({
   docEdit: string;
   onClick?: () => void;
 }) {
-  if (!world.encrypted) return null;
   const line = (
     <AccessLine
       world={world}

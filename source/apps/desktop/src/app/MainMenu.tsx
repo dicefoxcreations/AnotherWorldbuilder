@@ -122,17 +122,6 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
     setCode(s ? s.code.split("@")[1]?.split(",")[0] ?? s.code : "");
     setDialog("server");
   };
-  const importWorld = async () => {
-    setBusy("import");
-    try {
-      const path = await open({ multiple: false, filters: [{ name: "World file", extensions: ["awworld", "json"] }] });
-      if (typeof path !== "string") return;
-      const world = await api.worldOpen(path, localPath);
-      onChanged(); opened(world.id);
-    } catch (e) { onError(e); }
-    finally { setBusy(null); }
-  };
-
   const restoreBackup = async () => {
     setBusy("import");
     try {
@@ -147,7 +136,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   const serverOf = (code: string) => servers.find(s => s.code === code);
   const worldButton = (w: WorldInfo) => {
     const place = placed(w);
-    const note = serverOf(w.server)?.waiting_worlds.includes(w.id) ? "waits for its admin" : uploadText(network?.uploads[w.id]) || (w.online || w.fleeting ? "online" : "");
+    const note = serverOf(w.server)?.waiting_worlds.includes(w.id) ? "waits for its admin" : uploadText(network?.uploads[w.id]) || (w.online ? "online" : "");
     return <button className="world-card" onClick={() => opened(w.id)}>
     <span className="world-icon">{w.icon}</span><strong>{w.name}</strong>
     <span className="world-location" title={place.title}>
@@ -240,7 +229,6 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
           </>}
         {dialog === "open" && <>
           <div className="world-grid">{worlds.map(w => <div key={w.id}>{worldButton(w)}</div>)}</div>
-          <button disabled={!!busy || !localPath} onClick={importWorld}>Import a world file …</button>
           <button disabled={!!busy} onClick={restoreBackup}>Restore a backup …</button>
         </>}
         {dialog === "new" && <button className="primary" disabled={!!busy || !fresh.trim() || (!toServer && (!localPath || !storage?.locations.some(l => l.path === localPath && l.available)))} onClick={create}>{busy === "create" ? "Creating …" : "Create world"}</button>}

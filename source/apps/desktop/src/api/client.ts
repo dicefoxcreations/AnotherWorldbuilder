@@ -18,7 +18,7 @@ export type IdentityInfo = {
   avatar: string | null;
 };
 
-export type Role = "gm" | "player";
+export type Role = "gm" | "supporter" | "player";
 
 export type MemberInfo = {
   id: string;
@@ -34,8 +34,6 @@ export type WorldInfo = {
   id: string;
   name: string;
   icon: string;
-  publicKey: string;
-  tokenFile: string;
   folder: string;
   role: Role;
   isGm: boolean;
@@ -52,28 +50,14 @@ export type WorldInfo = {
   takeovers: Record<string, string>;
   /** Members' own colours by the terms that name them — `player:<name>`, `doc:…`. */
   colours: Record<string, string>;
-  /** The member the GM hands the world over to, once they show up. */
-  handover: string | null;
   /** Whether players' writing waits for the GM before the others see it. */
   moderated: boolean;
   /** Versions waiting: for the GM, what players wrote; for a player, their own. */
   waiting: number;
-  /** Changes that reach no one: for the GM all, for a player their own. */
-  conflicts: number;
   /** How many versions of each document stay. */
   versionLimit: number;
-  /** Encrypted: the keys keep views and rights. Without, the host keeps them for players online; whoever has the folder reads all of it. */
-  encrypted: boolean;
-  /** Where this device keeps the readable copy — empty: nowhere. */
-  readable: string;
-  /** The copy lies in the world's folder (GM, unencrypted): always on. */
-  readableInWorld: boolean;
   /** Worked on online: the host holds it, this device asks it for everything. */
   online: boolean;
-  /** The GM's: players of this encrypted world get a copy — else they work online. */
-  copies: boolean;
-  /** Held here only while online — it goes when the app starts again. */
-  fleeting: boolean;
   /** The server it lives on, by code — empty: this device. */
   server: string;
   /** Hosting identity even when its address has been removed. */
@@ -88,13 +72,8 @@ export type WorldInfo = {
   calendar: WorldCalendar;
   /** Who supports the world, by id: the players the GM chose and the admins of its server. */
   supporters: string[];
-  /** The GM's choice among them. */
-  chosen: string[];
-  /** The admins of its server, by name — supporters of every world there. */
-  admins: string[];
   /** This device's member supports it: lets players in, and may take the GM's place. */
   supporter: boolean;
-  canTakeOver: boolean;
   /** The roles there are to give — the GM's and a supporter's. */
   roles: string[];
 };
@@ -522,8 +501,6 @@ const toWorld = (r: Raw): WorldInfo => ({
   id: r.id,
   name: r.name,
   icon: r.icon,
-  publicKey: r.public_key,
-  tokenFile: r.token_file,
   folder: r.folder,
   role: r.role,
   isGm: r.is_gm,
@@ -535,16 +512,9 @@ const toWorld = (r: Raw): WorldInfo => ({
   invited: r.invited ?? [],
   takeovers: (r.takeovers as Record<string, string>) ?? {},
   colours: (r.colours as Record<string, string>) ?? {},
-  handover: r.handover ?? null,
   moderated: !!r.moderated,
   waiting: r.waiting ?? 0,
-  conflicts: r.conflicts ?? 0,
   versionLimit: r.version_limit ?? 50,
-  encrypted: r.encrypted !== false,
-  readable: (r.readable as string | undefined) ?? "",
-  readableInWorld: !!r.readable_in_world,
-  copies: !!r.copies,
-  fleeting: !!r.fleeting,
   server: (r.server as string | undefined) ?? "",
   serverId: (r.server_id as string | undefined) ?? "",
   offered: !!r.offered,
@@ -553,10 +523,7 @@ const toWorld = (r: Raw): WorldInfo => ({
   dice: (r.dice as number[] | undefined) ?? [],
   calendar: (r.calendar as WorldCalendar | undefined) ?? DEFAULT_CALENDAR,
   supporters: (r.supporters as string[] | undefined) ?? [],
-  chosen: (r.chosen as string[] | undefined) ?? [],
-  admins: (r.admins as string[] | undefined) ?? [],
   supporter: !!r.supporter,
-  canTakeOver: !!r.can_take_over,
   roles: (r.roles as string[] | undefined) ?? [],
 });
 
@@ -1125,10 +1092,6 @@ export const api = {
   backupRestore: async (path: string) => toWorld(await invoke<Raw>("backup_restore", { path })),
   /** Moves a GM's world into a folder here (empty: where its copy lies) or onto a server. */
   worldMove: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_move", { world, destination })),
-  worldOpen: async (path: string, location: string) => toWorld(await invoke<Raw>("world_open", { path, location })),
-  worldShare: (world: string, member: string, path: string) =>
-    invoke<string>("world_share", { world, member, path }),
-  worldTokenCheck: (world: string) => invoke<boolean>("world_token_check", { world }),
   worldIconSet: async (world: string, icon: string) =>
     toWorld(await invoke<Raw>("world_icon_set", { world, icon })),
   /** Deletes a world for good. `confirmation` has to be the world's name. */
@@ -1153,9 +1116,6 @@ export const api = {
   /** Hands the world over once the member shows up; `null` takes it back. */
   gmHandover: async (world: string, member: string | null) =>
     toWorld(await invoke<Raw>("gm_handover", { world, member })),
-  /** Hands the world over as a file — this device steps down at once. */
-  gmHandoverFile: (world: string, member: string, path: string) =>
-    invoke<string>("gm_handover_file", { world, member, path }),
 
   networkSettings: () => invoke<NetworkView>("network_settings"),
   browserSettings: () => invoke<BrowserView>("browser_settings"),
@@ -1168,7 +1128,6 @@ export const api = {
   networkFolders: (enabled: boolean) => invoke<NetworkView>("network_folders", { enabled }),
   networkPort: (port: number | null) => invoke<NetworkView>("network_port", { port }),
   worldSwitchProgress: (world: string) => invoke<SwitchProgress | null>("world_switch_progress", { world }),
-  networkCopiesSet: (world: string, copies: boolean) => invoke<NetworkView>("network_copies_set", { world, copies }),
   networkServers: (servers: string[]) => invoke<NetworkView>("network_servers", { servers }),
   /** What a server holds and who uses it — for its admin; with an order, carried out first. */
   serverManage: (server: string, order: ServerOrder | null = null) => invoke<ServerState>("server_manage", { server, order }),
@@ -1381,12 +1340,6 @@ export const api = {
     invoke<void>("version_verdict", { world, article, session, accepted }),
   /** The versions waiting: for the GM, what players wrote; for a player, their own. */
   waitingVersions: (world: string) => invoke<WaitingVersion[]>("waiting_versions", { world }),
-  /** Changes that reach no one: for the GM all, for a player their own. */
-  worldConflicts: (world: string) => invoke<Conflict[]>("world_conflicts", { world }),
-  /** Lets them go, for good — the GM's. */
-  conflictDismiss: (world: string, article: string, session: string) => invoke<void>("conflict_dismiss", { world, article, session }),
-  /** Saves them as a new document — the GM's at once, a player's as a proposal. */
-  conflictRescue: (world: string, article: string, session: string) => invoke<string>("conflict_rescue", { world, article, session }),
   /** Uploads an image under a name — its metadata is taken out first. Returns its id. */
   imageUpload: (world: string, path: string, name: string, folder = "") =>
     invoke<string>("image_upload", { world, path, name, folder }),
@@ -1446,11 +1399,6 @@ export const api = {
   worldSupportersSet: async (world: string, ids: string[]) => toWorld(await invoke<Raw>("world_supporters_set", { world, ids })),
   /** A supporter takes the GM's place — everyone sees it. */
   worldTakeOver: async (world: string) => toWorld(await invoke<Raw>("world_take_over", { world })),
-  /** Lets go of what newer records replaced — how many went. */
-  worldTidy: (world: string) => invoke<number>("world_tidy", { world }),
-  /** Encrypts the world or opens it — the GM's. */
-  worldReadableSet: async (world: string, on: boolean) => toWorld(await invoke<Raw>("world_readable_set", { world, on })),
-  worldEncryptionSet: async (world: string, on: boolean) => toWorld(await invoke<Raw>("world_encryption_set", { world, on })),
   /** The dice the world rolls with — the GM's. Empty: the usual set. */
   worldDiceSet: async (world: string, sides: number[]) => toWorld(await invoke<Raw>("world_dice_set", { world, sides })),
   /** Writes a package — types, or documents with their types and images — into a folder, unencrypted. */
@@ -1470,9 +1418,6 @@ export const api = {
   /** Trusts a member — their writing counts at once — or no longer. */
   memberTrustSet: async (world: string, member: string, trusted: boolean) =>
     toWorld(await invoke<Raw>("member_trust_set", { world, member, trusted })),
-  /** Takes a version's lines into the text that a change of access left behind. */
-  versionCarry: (world: string, article: string, session: string) =>
-    invoke<number>("version_carry", { world, article, session }),
   /** Takes a version back, as part of the editing session `into`. */
   versionRevert: (world: string, article: string, session: string, into: string) =>
     invoke<number>("version_revert", { world, article, session, into }),

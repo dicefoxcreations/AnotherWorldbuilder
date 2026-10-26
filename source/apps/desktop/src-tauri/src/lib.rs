@@ -19,6 +19,8 @@ mod media;
 mod live;
 mod backup;
 mod transfer;
+mod network;
+mod keys;
 
 use aw_crypto::{Identity, IdentityPublic};
 use aw_model::{editor, markdown, names, template_text, types, Attribute, Policy, Template, WorldCalendar, WorldDate};
@@ -1898,6 +1900,12 @@ pub fn run() {
             document::version_document,
             applog::app_log,
             applog::app_log_open,
+            network::network_settings,
+            network::network_sync,
+            network::network_worlds,
+            network::join_requests,
+            network::world_connect,
+            network::world_disconnect,
             profile::storage_status,
             profile::storage_locations,
             profile::storage_choose,
@@ -1983,6 +1991,8 @@ pub fn run() {
             app_restart,
             world_dice_set,
             world_switch_progress,
+            keys::keys_backup,
+            keys::keys_restore,
             navigation_load,
             navigation_set,
             transfer::package_export,

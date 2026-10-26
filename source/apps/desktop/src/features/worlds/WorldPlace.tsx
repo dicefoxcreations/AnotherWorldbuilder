@@ -115,9 +115,9 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
         : uploading ||
           (checking ? `checking images ${checking[0].toLocaleString()} of ${checking[1].toLocaleString()}` : checked ? checkText(checked) : "") || "online"
       : place.kind === "host"
-        ? world.online || world.fleeting
+        ? world.online
           ? "worked on online"
-          : "a copy lies on this device"
+          : "on this device"
         : place.title;
   const offer = async (on: boolean) => {
     setBusy(true);
@@ -180,7 +180,6 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
         </label>
       )}
       {/* A world on a server is there and nowhere else: no copies of it, the GM's neither. */}
-      {world.isGm && place.kind !== "server" && <Copies world={world} onChanged={onChanged} onError={onError} />}
       {world.isGm && (place.kind === "server" || world.offered) && (
         <Listed world={world} where={place.kind === "server" ? "on the server" : "on the network"} onChanged={onChanged} onError={onError} />
       )}
@@ -215,37 +214,6 @@ function Listed({ world, where, onChanged, onError }: { world: WorldInfo; where:
       <span>
         <strong>Seen by everyone {where}</strong>
         <small className="small">{world.listed ? "on · anyone there may ask to join" : "off · only members and players added by id"}</small>
-      </span>
-    </label>
-  );
-}
-
-/**
- * Whether players get a copy of the world when it is offered — only an
- * encrypted one can be copied: each opens their part. Unencrypted, they
- * work online, with the GM's device or the server as host.
- */
-function Copies({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
-  const [busy, setBusy] = useState(false);
-  const turn = async (copies: boolean) => {
-    setBusy(true);
-    try {
-      await api.networkCopiesSet(world.id, copies);
-      onChanged();
-    } catch (e) {
-      onError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <label className={world.encrypted ? "switch-row" : "switch-row off"}>
-      <input type="checkbox" checked={world.encrypted && world.copies} disabled={busy || !world.encrypted} onChange={(e) => void turn(e.target.checked)} />
-      <span>
-        <strong>Allow offline editing</strong>
-        <small className="small">
-          {!world.encrypted ? "only for encrypted worlds · players work online" : world.copies ? "on · players keep a copy and work offline too" : "off · players work online"}
-        </small>
       </span>
     </label>
   );
