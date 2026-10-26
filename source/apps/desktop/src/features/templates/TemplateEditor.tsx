@@ -529,16 +529,6 @@ function AccessRow({
         onChange={(edit) => onChange({ edit })}
         small
       />
-      <select
-        className="level-picker"
-        value={access.level}
-        onChange={(e) => onChange({ level: e.target.value })}
-        title="How far this part travels"
-      >
-        <option value="open">open</option>
-        <option value="sealed">sealed</option>
-        <option value="gm-only">GM only</option>
-      </select>
     </div>
   );
 }
@@ -681,7 +671,7 @@ function Preview({
               {/* One box of its own per part, with access of its own — so the
                   picture shows where an inner block cuts the text apart. */}
               {block.parts.map((part) => {
-                const access = { view: part.view, edit: part.edit, level: part.level };
+                const access = { view: part.view, edit: part.edit };
                 // Whoever says nothing of their own inherits from the article —
                 // and then nothing stands here either. An access row above
                 // every paragraph says the same thing three times and cuts up
@@ -690,9 +680,7 @@ function Preview({
                 return (
                   <div
                     key={part.key}
-                    className={`block-part${part.level !== "open" ? ` level-${part.level}` : ""}${
-                      inherited ? "" : " guarded"
-                    }`}
+                    className={`block-part${inherited ? "" : " guarded"}`}
                   >
                     <div className={inherited ? "access-slot quiet" : "access-slot"}>
                       <AccessRow

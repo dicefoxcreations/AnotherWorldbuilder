@@ -24,7 +24,6 @@ export function BlockEditor({
   style,
   text,
   policy,
-  level,
   inherited,
   articles,
   templates,
@@ -37,7 +36,6 @@ export function BlockEditor({
   style: BlockStyle;
   text: string;
   policy: string;
-  level: string;
   /** Whether the visibility is only the article's — then it steps back. */
   inherited?: boolean;
   /** For `@@` suggestions and the preview of links. */
@@ -84,7 +82,7 @@ export function BlockEditor({
   };
 
   return (
-    <section className={`block ${style}${level !== "open" ? ` level-${level}` : ""}`}>
+    <section className={`block ${style}`}>
       <div className="block-mark">
         {/* A part of a block has no title of its own — then none stands
             there either. “untitled” was information about nothing. */}

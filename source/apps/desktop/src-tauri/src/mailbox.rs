@@ -392,7 +392,7 @@ fn send(store: &Store, world: &str, command: &str, args: serde_json::Value, stat
 /// Commands that change nothing — not sent.
 const READS: &[&str] = &[
     "world_connect", "world_sync", "world_revision", "view", "templates_load", "templates_types", "template_read", "template_write",
-    "navigation_load", "today_in_world", "texts_written", "document_open", "document_read", "session_end", "article_versions",
+    "navigation_load", "today_in_world", "texts_written", "document_open", "document_read", "article_versions",
     "version_compare", "version_document", "version_marks", "waiting_versions", "gallery", "gallery_folders", "image_data",
     "join_requests", "presence", "world_presence", "dice_roll", "dice_rolls", "dice_clear",
 ];
@@ -555,7 +555,7 @@ mod tests {
     }
 
     fn layer(section: &str, text: &str, policy: &str) -> NewLayer {
-        serde_json::from_value(json!({ "title": "", "text": text, "policy": policy, "level": "open", "section": section, "edit": "", "fields": null })).unwrap()
+        serde_json::from_value(json!({ "title": "", "text": text, "policy": policy, "section": section, "edit": "", "fields": null })).unwrap()
     }
 
     #[test]

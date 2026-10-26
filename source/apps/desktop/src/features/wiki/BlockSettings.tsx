@@ -78,7 +78,7 @@ export async function addSection(world: string, templates: Template[], articleTy
   if (!own) throw new Error("This document has no type to add a section to.");
   const below = typeOf(templates, articleType)?.blocks.find((b) => b.key === after);
   const key = newId();
-  const access = own.auth ?? { view: "players", edit: "gm", level: "open" };
+  const access = own.auth ?? { view: "players", edit: "gm" };
   const block: TemplateBlock = {
     key,
     title: "New section",
@@ -86,7 +86,7 @@ export async function addSection(world: string, templates: Template[], articleTy
     place: below?.place ?? "flow",
     fold: "open",
     heading: 1,
-    parts: [{ key, text: "", view: access.view, edit: access.edit, level: access.level }],
+    parts: [{ key, text: "", view: access.view, edit: access.edit }],
   };
   let all = await api.templateSave(world, { ...own, blocks: [...own.blocks, block] });
   if (below) all = await moveBlock(world, all, articleType, key, after, true);

@@ -419,8 +419,8 @@ export function BlockText({
 /**
  * A part of a block, read.
  *
- * A part is exactly one layer — an encrypted package of its own with its own
- * view. Changing it happens in the edit mode; here it is only shown, marked
+ * A part is exactly one layer, stored with its own rule of who sees it.
+ * Changing it happens in the edit mode; here it is only shown, marked
  * when it is narrower than the default.
  */
 function PartDisplay({
@@ -445,17 +445,15 @@ function PartDisplay({
   onPlace: (o: Place) => void;
 }) {
   // Guarded means: narrower than the document itself — as the editor marks it.
-  const guarded = layer.policy !== base || layer.level !== "open";
+  const guarded = layer.policy !== base;
   // What is rolled in a part only the GM sees stays with the GM.
   const scope = useContext(RollScopeContext);
-  const secret = layer.level === "gm-only" || layer.policy.trim().toLowerCase() === "gm";
+  const secret = layer.policy.trim().toLowerCase() === "gm";
   const rolls = useMemo(() => (scope && secret ? { ...scope, secret } : scope), [scope, secret]);
   return (
     <RollScopeContext.Provider value={rolls}>
     <div
-      className={`block-part${guarded ? " guarded" : ""}${
-        layer.level !== "open" ? ` level-${layer.level}` : ""
-      }`}
+      className={`block-part${guarded ? " guarded" : ""}`}
     >
       {access}
       <MarkdownText text={layer.text} nodes={nodes} folds={folds} resolve={resolve} value={values} onPlace={onPlace} />

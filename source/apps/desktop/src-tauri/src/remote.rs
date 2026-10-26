@@ -72,7 +72,6 @@ pub(crate) fn call(store: &Store, world: &str, command: &str, args: &serde_json:
         "document_open" => json(document::document_open_in(store, w(), arg(args, "article")?)?),
         "document_read" => json(document::document_read_in(store, w(), arg(args, "article")?, arg(args, "text")?, arg(args, "base")?)?),
         "document_save" => json(document::document_save_in(store, w(), arg(args, "article")?, arg(args, "text")?, arg(args, "base")?, arg(args, "session")?)?),
-        "session_end" => json(document::session_end_in(store, w(), arg(args, "session")?)?),
         "image_field_set" => json(document::image_field_set_in(store, w(), arg(args, "article")?, arg(args, "field")?, arg(args, "image")?)?),
         "references_set" => json(document::references_set_in(store, w(), arg(args, "article")?, arg(args, "field")?, arg(args, "ids")?)?),
         "relations_set" => json(document::relations_set_in(store, w(), arg(args, "changes")?)?),

@@ -145,13 +145,9 @@ fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; 
 fieldset legend { color: var(--muted); font-size: 13px; padding: 0 6px; }
 fieldset input, fieldset textarea, fieldset select { width: 100%; margin-bottom: 8px; }
 
-.level { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
-.level.open { border-color: var(--ok-line); color: var(--ok-text); }
 /* Whether a server answers — beside its name and its worlds. */
 .reach { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; background: var(--muted, #888); opacity: .55; }
 .reach.on { background: var(--ok-text); opacity: 1; }
-.level.sealed { border-color: var(--accent-line); color: var(--accent); }
-.level.gm-only { border-color: var(--danger-line); color: var(--danger-text); }
 
 .article { display: flex; flex-direction: column; gap: 14px; }
 .note, .small { color: var(--muted); font-size: 13px; }
@@ -566,7 +562,6 @@ button.icon.more-button, .phone-only { display: none; }
 .color-hex.wrong { border-color: var(--warn); }
 
 /* Visibility sits in the section, not in the sidebar. */
-.level-picker { padding: 2px 6px; font-size: 11px; }
 
 .mark-short { font-size: 11px; color: var(--muted); line-height: 1; }
 .mark-divider { width: 1px; height: 13px; background: var(--border); }
@@ -744,8 +739,6 @@ button.infobox-image.choosable { padding: 0; cursor: pointer; font: inherit; }
 }
 .block.statblock .markdown hr, .block.statblock .flow-rule { margin: 10px 0; }
 .block.statblock .markdown strong, .block.statblock .flow-bold { font-weight: 600; }
-.block.level-gm-only { border-left: 3px solid var(--danger-line); padding-left: 14px; }
-.block.level-sealed { border-left: 3px solid var(--accent-line); padding-left: 14px; }
 
 .block-mark { display: flex; align-items: center; gap: 10px; min-height: 24px; margin-bottom: 2px; }
 /* A block's title is a heading, as large as its type says (`.head-1` … `.head-4`). */
@@ -1063,8 +1056,8 @@ button.ability-also:hover { border-color: var(--accent); background: var(--accen
 .empty-note { margin: 0; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; line-height: 1.6; }
 .empty-note strong { color: var(--text); }
 
-/* A guarded part of a block — visibly set apart, because it is an encrypted
-   package of its own and not merely styled differently. */
+/* A guarded part of a block — visibly set apart, because it is stored with
+   a rule of its own and not merely styled differently. */
 /* Block flow, not flex: an image floats in it as it does when reading, and
    the text field beside it takes what room is left. */
 .block-part { display: flow-root; position: relative; }
@@ -1090,16 +1083,12 @@ button.ability-also:hover { border-color: var(--accent); background: var(--accen
 .block:hover .block-view.quiet, .block-view.quiet:focus-within { opacity: 1; }
 .block-part + .block-part { margin-top: 10px; }
 .block-part.guarded { padding: 14px 12px 8px; margin-top: 18px; border: 1px dashed var(--accent-line); border-radius: 8px; }
-.block-part.level-gm-only { border-color: var(--danger-line); }
-.block-part.level-sealed { border-color: var(--accent-line); }
 .block-part .block-view { margin-left: 0; }
 
 /* Click access instead of typing it — the same choice as everywhere else. */
 .access-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 2px; }
 /* Fixed width, otherwise the field sizes itself to its longest option and
    tears a gap up to the next word. */
-.access-row .level-picker { border: 0; background: transparent; padding: 0 2px; font-size: 10px; color: var(--muted); height: 18px; width: 118px; }
-.access-row .level-picker:hover { color: var(--text); }
 /* The note that the skeleton stands again — not an error, only information.
    Hence in the accent colour and not in red. */
 .repaired-note { margin: 8px 0 0; padding: 7px 10px; border-left: 3px solid var(--accent); background: var(--sunken); border-radius: 0 6px 6px 0; color: var(--muted); }
@@ -1756,7 +1745,6 @@ input.invalid { border-color: var(--danger-line); }
 .inspector-section h5 { margin: 0; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .inspector-section > * { max-width: 100%; }
 .inspector-access { display: grid; grid-template-columns: 62px minmax(0, 1fr); align-items: center; gap: 6px 8px; width: 100%; }
-.inspector-access .level-picker { width: 120px; height: 28px; min-height: 0; padding: 2px 6px; font-size: 12px; }
 .inspector-code { width: 100%; font-family: var(--mono, monospace); font-size: 12px; resize: vertical; }
 .inspector-remove { align-self: flex-start; margin-top: 4px; }
 .inspector .time-settings { border: 0; padding: 0; margin: 0; background: none; width: 100%; }
@@ -1772,7 +1760,6 @@ input.invalid { border-color: var(--danger-line); }
 .inspector .image-card-hidden input { width: 100%; }
 /* Choices in the side bar look alike: flat, of one height, with one arrow. */
 .side-panel select { appearance: none; height: 32px; min-height: 0; padding: 4px 28px 4px 10px; font-size: 13px; background: var(--field) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a9aa0' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 10px center; cursor: pointer; }
-.side-panel .inspector-access .level-picker { height: 28px; padding: 2px 26px 2px 8px; font-size: 12px; }
 
 /* ---------- Dice ----------
    The table: a canvas over the whole window while dice roll — clicks go through. */

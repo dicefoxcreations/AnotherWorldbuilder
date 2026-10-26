@@ -1,14 +1,13 @@
-//! Data types for AnotherWorldbuilder: articles, layers, attributes,
-//! policies and the world calendar.
-//!
-//! This crate knows no keys and no persistence. It only describes what a
-//! world looks like — what of it can be decrypted is decided by `aw-policy`.
+//! What a world is made of, apart from how it is stored: types and their
+//! text form, documents as an editor writes them, who may see what
+//! (attributes and policies), links, names, navigation and the world's
+//! calendar.
 
-pub mod article;
 pub mod attribute;
 pub mod calendar;
 pub mod document;
 pub mod editor;
+pub mod ids;
 pub mod link;
 pub mod markdown;
 pub mod names;
@@ -18,9 +17,7 @@ pub mod template;
 pub mod template_text;
 pub mod types;
 
-pub use article::{
-    Article, ArticleId, FieldValue, Layer, LayerId, ModelError, Level, WriteAccess,
-};
+pub use ids::{ArticleId, LayerId, ModelError};
 pub use attribute::{Attribute, Conjunction, Policy, PolicyError};
 pub use calendar::{CalendarError, Era, LeapRule, Month, Moon, WorldCalendar, WorldDate};
 pub use template::{

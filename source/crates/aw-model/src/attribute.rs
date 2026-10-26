@@ -8,12 +8,10 @@
 //! class:rogue AND faction:thieves-guild
 //! ```
 //!
-//! OR is the normal case and costs nothing — the data key is simply wrapped
-//! several times. AND costs a derived key. NOT does not exist: whoever has
-//! a key, has it.
+//! NOT does not exist: a rule says who may, never who may not.
 //!
-//! The canonical notation (`Display`) is stable because it feeds into key
-//! derivation. It must never change casually.
+//! The canonical notation (`Display`) is what is stored and compared; it
+//! must never change casually.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -196,10 +194,6 @@ impl Policy {
         Policy(vec![Conjunction::single(attribute)])
     }
 
-    /// Several attributes, any one of which suffices.
-    pub fn any_of(attributes: impl IntoIterator<Item = Attribute>) -> Result<Self, PolicyError> {
-        Policy::new(attributes.into_iter().map(Conjunction::single))
-    }
 
     pub fn groups(&self) -> &[Conjunction] {
         &self.0
@@ -235,10 +229,7 @@ impl Policy {
         Policy::new(groups).unwrap_or_else(|_| self.clone())
     }
 
-    /// All attributes that occur anywhere — for the UI.
-    pub fn mentioned(&self) -> BTreeSet<&Attribute> {
-        self.0.iter().flat_map(|g| g.attributes().iter()).collect()
-    }
+
 }
 
 impl FromStr for Policy {

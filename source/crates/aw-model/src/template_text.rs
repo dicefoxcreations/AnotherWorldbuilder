@@ -55,7 +55,6 @@
 
 use crate::template::{
     check_pattern, just_input, BlockFold, BlockPlace, BlockStyle, BlockPart, FieldKind, Infobox, Access, Rule, Template,
-    LEVELS, LEVEL_OPEN,
     TemplateBlock, TemplateField, PATTERN_INPUT,
 };
 
@@ -137,14 +136,6 @@ pub fn element_for(kind: &FieldKind) -> &'static str {
         FieldKind::Image { .. } => "image",
         FieldKind::Group { .. } => "group",
     }
-}
-
-/// Checks a level word from the text.
-///
-/// The text carries the same word that is stored — otherwise you would have
-/// to learn twice what the same thing is called.
-fn level_in(word: &str) -> Option<&'static str> {
-    LEVELS.into_iter().find(|s| *s == word)
 }
 
 // --- Writing ------------------------------------------------------------
@@ -274,7 +265,6 @@ fn access_of(part: &BlockPart) -> Access {
     Access {
         view: part.view.clone(),
         edit: part.edit.clone(),
-        level: part.level.clone(),
     }
 }
 
@@ -306,13 +296,9 @@ pub(crate) fn access_on(name: &str, access: &Access) -> String {
     format!("<{name}{}>", access_attributes(access))
 }
 
-/// ` view=… edit=…`, and `level=…` where it is not the open one.
+/// ` view=… edit=…`.
 fn access_attributes(access: &Access) -> String {
-    let mut out = format!(" view={} edit={}", value(&access.view), value(&access.edit));
-    if access.level != LEVEL_OPEN {
-        out.push_str(&format!(" level={}", access.level));
-    }
-    out
+    format!(" view={} edit={}", value(&access.view), value(&access.edit))
 }
 
 /// Writes an attribute value — in quotes where needed.
@@ -422,9 +408,6 @@ pub(crate) fn block_tag(block: &TemplateBlock, access: Option<&Access>) -> Strin
     // attribute cannot do: a region *inside* the flowing text.
     if let Some(r) = access {
         tag.push_str(&format!(" view={} edit={}", value(&r.view), value(&r.edit)));
-        if r.level != LEVEL_OPEN {
-            tag.push_str(&format!(" level={}", r.level));
-        }
     }
     tag.push('>');
     tag
@@ -865,7 +848,7 @@ pub fn from_text(text: &str, directory: &Directory) -> Parsed {
                             errors.push(TextError {
                                 line: tag.line,
                                 text: format!(
-                                    "A block inside a block is a region of the text — it takes view, edit and level, no {n}."
+                                    "A block inside a block is a region of the text — it takes view and edit, no {n}."
                                 ),
                             });
                         }
@@ -1044,7 +1027,6 @@ pub fn from_text(text: &str, directory: &Directory) -> Parsed {
             block.parts.push(BlockPart {
                 view: access.view.clone(),
                 edit: access.edit.clone(),
-                level: access.level.clone(),
                 ..BlockPart::fresh(block.key.clone())
             });
         }
@@ -1189,7 +1171,7 @@ fn read_rule(raw: &str) -> Option<Result<Rule, String>> {
 }
 
 /// The attributes that say who may see and change.
-const ACCESS: [&str; 3] = ["view", "edit", "level"];
+const ACCESS: [&str; 2] = ["view", "edit"];
 
 /// What reading says to access on something that only shows a property.
 const ACCESS_ON_PROPERTY: &str =
@@ -1274,7 +1256,7 @@ fn read_property(raw: &str, article: &Access, directory: &Directory) -> Result<T
         _ => (None, options),
     };
 
-    // Who may see it stands among the options: view=, edit=, level=.
+    // Who may see it stands among the options: view=, edit=.
     let mut access_part = String::new();
     let mut words: Vec<String> = Vec::new();
     for word in split_words(options) {
@@ -1584,7 +1566,6 @@ fn push_part(blocks: &mut [TemplateBlock], body: &mut Vec<String>, access: Acces
             text,
             view: access.view,
             edit: access.edit,
-            level: access.level,
         });
     }
 }
@@ -1619,7 +1600,7 @@ fn dedented(body: &[String]) -> String {
     }
 }
 
-/// Reads `<auth view=… edit=… level=…>`.
+/// Reads `<auth view=… edit=…>`.
 ///
 /// What is not written comes from the surrounding bracket — and if there is
 /// none, from the default: everyone may do everything.
@@ -1630,11 +1611,6 @@ pub(crate) fn read_access(tag: &Tag, fallback: &Access) -> Result<Access, String
     }
     if let Some(w) = tag.attr("edit").filter(|w| !w.is_empty()) {
         access.edit = w.to_string();
-    }
-    if let Some(w) = tag.attr("level").filter(|w| !w.is_empty()) {
-        access.level = level_in(w)
-            .ok_or_else(|| format!("nobody knows level={w}. There is: open, sealed, gm-only."))?
-            .to_string();
     }
     Ok(access)
 }
@@ -1673,8 +1649,8 @@ fn read_head(tag: &Tag) -> Result<(String, String), String> {
 
 /// Gives the blocks that were read their ids back.
 ///
-/// A block's id does **not** stand in the text — the encrypted layers of the
-/// articles lie under it, and it has nothing to do with the text. So reading
+/// A block's id does **not** stand in the text — the layers of the
+/// documents lie under it, and it has nothing to do with the text. So reading
 /// has to decide which block that was read is which known one.
 ///
 /// In two passes: first what matches, then what is left, in order. That way
@@ -1865,7 +1841,6 @@ fn read_block(tag: &Tag, article: &Access) -> Result<(TemplateBlock, Access), St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::template::LEVEL_GM;
 
     /// The types the fixtures refer to.
     ///
@@ -2178,35 +2153,30 @@ Mood: text = calm
   Another one.
 </block>
 
-<block title="The truth" style=box view="class:rogue OR gm" level=gm-only>
+<block title="The truth" style=box view="class:rogue OR gm">
   For the few.
 </block>
 "#,
         );
         assert_eq!(b.len(), 2);
         assert_eq!(b[0].parts[0].text, "One paragraph.\n\nAnother one.");
-        assert_eq!(b[0].parts[0].level, LEVEL_OPEN);
         assert_eq!(b[1].style, BlockStyle::Box);
         assert_eq!(
             b[1].parts[0].view, "class:rogue OR gm",
             "a policy with spaces goes in quotes and stays whole"
-        );
-        assert_eq!(
-            b[1].parts[0].level, LEVEL_GM,
-            "gm-only is stored as gm-only"
         );
     }
 
     #[test]
     fn an_inner_block_cuts_a_block_into_parts() {
         // The core: a region with access of its own becomes a part of its
-        // own — and therefore later its own layer with its own data key.
+        // own — and therefore later its own layer with its own rule.
         let (_, b) = read_ok(
             r#"
 <block title="History">
   Everyone knows that.
 
-  <block view=gm edit=gm level=gm-only>
+  <block view=gm edit=gm>
     Only the GM knows that.
   </block>
 
@@ -2227,7 +2197,6 @@ Mood: text = calm
         assert_eq!(t[1].text, "Only the GM knows that.");
         assert_eq!(t[1].view, "gm");
         assert_eq!(t[1].edit, "gm");
-        assert_eq!(t[1].level, LEVEL_GM);
 
         assert_eq!(t[2].key, format!("{}-3", b[0].key));
         assert_eq!(t[2].text, "And everyone again.");
@@ -2236,7 +2205,7 @@ Mood: text = calm
 
     #[test]
     fn an_inner_block_survives_the_round_trip() {
-        let t = template("<block title=\"K\">\n  Open.\n  <block view=gm edit=gm level=gm-only>\n    Secret.\n  </block>\n  Open again.\n</block>\n");
+        let t = template("<block title=\"K\">\n  Open.\n  <block view=gm edit=gm>\n    Secret.\n  </block>\n  Open again.\n</block>\n");
         let (g, text) = round_trip(&t);
         assert!(g.errors.is_empty(), "{:?}", g.errors);
         assert_eq!(g.blocks, t.blocks, "written and parsed again is the same");
@@ -2285,8 +2254,7 @@ Mood: text = calm
             g.auth,
             Some(Access {
                 view: "players".into(),
-                edit: "gm".into(),
-                level: LEVEL_OPEN.into()
+                edit: "gm".into()
             })
         );
         let views: Vec<&str> = b[0].parts.iter().map(|p| p.view.as_str()).collect();
@@ -2310,11 +2278,11 @@ Mood: text = calm
     #[test]
     fn access_for_a_whole_block_stands_on_its_tag() {
         let t = template(
-            "<block title=\"Secret\" view=gm edit=gm level=gm-only>\n  First paragraph.\n\n  Second paragraph.\n</block>\n\n<block title=\"Open\">\n  For everyone.\n</block>\n",
+            "<block title=\"Secret\" view=gm edit=gm>\n  First paragraph.\n\n  Second paragraph.\n</block>\n\n<block title=\"Open\">\n  For everyone.\n</block>\n",
         );
         let text = to_text(&t);
         assert!(
-            text.contains("<block title=Secret view=gm edit=gm level=gm-only>"),
+            text.contains("<block title=Secret view=gm edit=gm>"),
             "the access stands on the tag:\n{text}"
         );
         assert_eq!(text.matches("<block").count(), 2, "no inner block:\n{text}");
@@ -2344,12 +2312,11 @@ Mood: text = calm
     #[test]
     fn access_on_a_block_survives_the_round_trip() {
         let t = template(
-            "<article view=all edit=all>\n  <name>\n  <body>\n    <block title=\"Half\" view=players edit=gm>\n      All players.\n      <block view=gm edit=gm level=gm-only>\n        Only the game master.\n      </block>\n    </block>\n  </body>\n</article>\n",
+            "<article view=all edit=all>\n  <name>\n  <body>\n    <block title=\"Half\" view=players edit=gm>\n      All players.\n      <block view=gm edit=gm>\n        Only the game master.\n      </block>\n    </block>\n  </body>\n</article>\n",
         );
         assert_eq!(t.blocks[0].parts.len(), 2);
         assert_eq!(t.blocks[0].parts[0].view, "players");
         assert_eq!(t.blocks[0].parts[1].view, "gm");
-        assert_eq!(t.blocks[0].parts[1].level, LEVEL_GM);
 
         let (g, text) = round_trip(&t);
         assert!(g.errors.is_empty(), "{:?}\n{text}", g.errors);
@@ -2422,7 +2389,7 @@ Mood: text = calm
         // holds every field kind and every block style, including those
         // nobody would create on their own.
         let t = template(
-            "---\nPortrait: image 200x260 left\nTitle:\nMotto: textarea = Never again\nAge: number years = 30\nBorn: date\nStatus: @@datatype@@\nLanguages: @@language@@ multiple\nLies in: parent\nHome: @@place@@ multiple\nSecret: text view=gm edit=gm level=gm-only\n---\n\n<article view=players edit=gm>\n    <name=\"Entry %%count%%\">\n    <body>\n      <infobox align=right width=320>\n        <image bind=Portrait>\n        <text bind=Title>\n        <select bind=Status label=\"How\">\n      </infobox>\n      <block title=\"Open\">\n        One paragraph.\n\n        Another with a @@link@@.\n      </block>\n      <block title=\"Box\" style=box view=gm edit=gm level=gm-only>\n        Secret.\n      </block>\n      <block title=\"Quote\" style=quote>\n        Open at first.\n        <block view=gm edit=gm>\n          Then no longer.\n        </block>\n        <image size=300x200 align=right view=gm edit=gm>\n        <list type=place columns=2 view=gm edit=gm>\n      </block>\n    </body>\n</article>\n",
+            "---\nPortrait: image 200x260 left\nTitle:\nMotto: textarea = Never again\nAge: number years = 30\nBorn: date\nStatus: @@datatype@@\nLanguages: @@language@@ multiple\nLies in: parent\nHome: @@place@@ multiple\nSecret: text view=gm edit=gm\n---\n\n<article view=players edit=gm>\n    <name=\"Entry %%count%%\">\n    <body>\n      <infobox align=right width=320>\n        <image bind=Portrait>\n        <text bind=Title>\n        <select bind=Status label=\"How\">\n      </infobox>\n      <block title=\"Open\">\n        One paragraph.\n\n        Another with a @@link@@.\n      </block>\n      <block title=\"Box\" style=box view=gm edit=gm>\n        Secret.\n      </block>\n      <block title=\"Quote\" style=quote>\n        Open at first.\n        <block view=gm edit=gm>\n          Then no longer.\n        </block>\n        <image size=300x200 align=right view=gm edit=gm>\n        <list type=place columns=2 view=gm edit=gm>\n      </block>\n    </body>\n</article>\n",
         );
 
         let (g, text) = round_trip(&t);
@@ -2631,13 +2598,12 @@ Mood: text = calm
         // it before still matches it afterwards. Then only what really
         // differs may say so in the text.
         let mut t = template(
-            "<article view=players edit=gm>\n    <name>\n    <body>\n      <block title=\"History\">\n        Open.\n        <block view=gm edit=gm level=gm-only>\n          Secret.\n        </block>\n      </block>\n    </body>\n</article>\n",
+            "<article view=players edit=gm>\n    <name>\n    <body>\n      <block title=\"History\">\n        Open.\n        <block view=gm edit=gm>\n          Secret.\n        </block>\n      </block>\n    </body>\n</article>\n",
         );
 
         let fresh = Access {
             view: "all".into(),
             edit: "gm".into(),
-            level: LEVEL_OPEN.into(),
         };
         t.auth = Some(fresh.clone());
         t.blocks[0].parts[0].view = fresh.view.clone();
@@ -2805,8 +2771,7 @@ Mood: text = calm
             t.auth,
             Some(Access {
                 view: "players".into(),
-                edit: "gm".into(),
-                level: LEVEL_OPEN.into()
+                edit: "gm".into()
             })
         );
         assert_eq!(g.auth, t.auth, "{text}");

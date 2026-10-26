@@ -51,7 +51,6 @@ pub(crate) struct LayerContent {
     pub edit: String,
     /// Who sees it, as written.
     pub own: String,
-    pub level: String,
     /// The template fields of this section, key → value.
     pub fields: serde_json::Value,
 }
@@ -67,7 +66,6 @@ fn layer_content(layer: &store::Layer, reader: &Reader) -> Result<LayerContent, 
         section: layer.section.clone(),
         edit: layer.access.edit.clone(),
         own: layer.access.view.clone(),
-        level: layer.access.level.clone(),
         fields: fields_value(&layer.fields),
     })
 }
@@ -369,7 +367,7 @@ fn open_doc(store: &Store, world: &str, doc: store::Document, reader: &Reader, t
         text: DocumentText::default(),
         shape: Shape {
             declared: template.iter().flat_map(|t| t.properties.iter().map(|p| p.label.clone())).collect(),
-            defaults: Access { view: visibility, edit, level: aw_model::template::LEVEL_OPEN.into() },
+            defaults: Access { view: visibility, edit },
         },
         template,
         readable,
@@ -393,7 +391,7 @@ fn open_doc(store: &Store, world: &str, doc: store::Document, reader: &Reader, t
 /// says. `None` where it is the document's.
 fn infobox_of(opened: &Opened) -> Option<Access> {
     let access = match opened.layer(INFOBOX_SECTION) {
-        Some((_, _, content)) => Access { view: content.own.clone(), edit: content.edit.clone(), level: content.level.clone() },
+        Some((_, _, content)) => Access { view: content.own.clone(), edit: content.edit.clone() },
         None => opened.template.as_ref()?.infobox.access.clone()?,
     };
     let defaults = &opened.shape.defaults;
@@ -764,7 +762,6 @@ fn blocks_of(opened: &Opened) -> Vec<TemplateBlock> {
                         text: names::written(&content.text, &*opened.known, &opened.article_type),
                         view: content.own.clone(),
                         edit: content.edit.clone(),
-                        level: content.level.clone(),
                     },
                 ))
             })
@@ -1003,20 +1000,6 @@ pub(crate) fn document_save_in(store: &Store, world: String, article: String, te
     code_of(store, &world, &article)
 }
 
-#[cfg(feature = "gui")]
-/// Ends an editing session — leaving edit mode. Each save of it is kept as
-/// it goes; nothing waits for this.
-// Off the main thread: while the store works, the window keeps drawing and taking keys.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-pub fn session_end(app: tauri::AppHandle, world: String, session: String) -> Answer<()> {
-    session_end_in(&store(&app)?, world, session)
-}
-
-/// `session_end` for whom the store is given.
-pub(crate) fn session_end_in(store: &Store, world: String, session: String) -> Answer<()> {
-    let _ = (store, world, session);
-    Ok(())
-}
 
 /// Opens a document as code — without Tauri, for the command and the tests.
 pub(crate) fn code_of(store: &Store, world: &str, article: &str) -> Answer<DocumentCode> {
@@ -1097,17 +1080,17 @@ impl Changing {
     }
 
     /// Who sees and edits a layer, from now on.
-    fn set_access(&mut self, id: &str, view: &str, edit: &str, level: &str) -> Answer<()> {
+    fn set_access(&mut self, id: &str, view: &str, edit: &str) -> Answer<()> {
         view.parse::<Policy>().map_err(AppError::from)?;
         edit.parse::<Policy>().map_err(AppError::from)?;
         if let Some(i) = self.at(id) {
-            self.now.layers[i].access = store::Access { view: view.to_string(), edit: edit.to_string(), level: level.to_string() };
+            self.now.layers[i].access = store::Access { view: view.to_string(), edit: edit.to_string() };
         }
         Ok(())
     }
 
     /// A new layer, after the others.
-    fn add(&mut self, section: String, view: String, edit: String, level: String, plain: Plain) -> Answer<()> {
+    fn add(&mut self, section: String, view: String, edit: String, plain: Plain) -> Answer<()> {
         view.parse::<Policy>().map_err(AppError::from)?;
         edit.parse::<Policy>().map_err(AppError::from)?;
         let mut layer = store::Layer {
@@ -1115,7 +1098,7 @@ impl Changing {
             base: false,
             section,
             title: String::new(),
-            access: store::Access { view, edit, level },
+            access: store::Access { view, edit },
             text: String::new(),
             fields: Default::default(),
             images: Vec::new(),
@@ -1163,12 +1146,12 @@ pub(crate) fn save(store: &Store, world: &str, article: &str, text: &str, base: 
         base.contains_key(&layer.id).then(|| seen_state(base, &layer.id).unwrap_or_else(|| Plain::of(layer)))
     };
     // Who could see and edit a layer as the editor saw it.
-    let seen_access = |i: usize| -> Answer<(LayerContent, String)> {
+    let seen_access = |i: usize| -> Answer<LayerContent> {
         let layer = &opened.doc.layers[i];
         if !base.contains_key(&layer.id) {
             return Err(AppError("This part was not open here.".into()));
         }
-        Ok((layer_content(layer, &reader)?, layer.access.level.clone()))
+        layer_content(layer, &reader)
     };
 
     // --- The skeleton: name and access -----------------------------------
@@ -1216,14 +1199,12 @@ pub(crate) fn save(store: &Store, world: &str, article: &str, text: &str, base: 
             }
         }
     }
-    let was = seen_access(*base_index).map(|(c, _)| (c.own, c.edit)).unwrap_or((opened.shape.defaults.view.clone(), opened.shape.defaults.edit.clone()));
+    let was = seen_access(*base_index).map(|c| (c.own, c.edit)).unwrap_or((opened.shape.defaults.view.clone(), opened.shape.defaults.edit.clone()));
     if access.view != was.0 || access.edit != was.1 {
         if !gm {
             return Err(AppError("Only the GM can change who sees or edits the document.".into()));
         }
-        let view: Policy = access.view.parse().map_err(AppError::from)?;
-        let level = if view.to_string() == "gm" { "gm-only" } else { "open" };
-        doc.set_access(opened.layer_id(*base_index), &access.view, &access.edit, level)?;
+        doc.set_access(opened.layer_id(*base_index), &access.view, &access.edit)?;
     }
 
     // --- The properties --------------------------------------------------
@@ -1253,14 +1234,12 @@ pub(crate) fn save(store: &Store, world: &str, article: &str, text: &str, base: 
     // Who sees and changes the infobox — its own, or the document's.
     let infobox = read.document.infobox.clone().unwrap_or_else(|| access.clone());
     if let Some((_, i, content)) = opened.layer(INFOBOX_SECTION) {
-        let (view, edit, level) = seen_access(*i).map(|(c, l)| (c.own, c.edit, l)).unwrap_or((content.own.clone(), content.edit.clone(), content.level.clone()));
-        // Without its own, it follows the document — at the level it has.
-        let wanted_level = if read.document.infobox.is_some() { infobox.level.clone() } else { level.clone() };
-        if infobox.view != view || infobox.edit != edit || wanted_level != level {
+        let (view, edit) = seen_access(*i).map(|c| (c.own, c.edit)).unwrap_or((content.own.clone(), content.edit.clone()));
+        if infobox.view != view || infobox.edit != edit {
             if !gm {
                 return Err(AppError("Only the GM can change who sees or edits the infobox.".into()));
             }
-            doc.set_access(opened.layer_id(*i), &infobox.view, &infobox.edit, &wanted_level)?;
+            doc.set_access(opened.layer_id(*i), &infobox.view, &infobox.edit)?;
         }
     }
     for (section, values) in wanted_fields {
@@ -1278,17 +1257,17 @@ pub(crate) fn save(store: &Store, world: &str, article: &str, text: &str, base: 
                     continue;
                 }
                 let own = template_fields.iter().find(|f| field_section(&f.key) == section).and_then(|f| f.access.clone());
-                let (view, edit, level) = match own {
-                    Some(a) => (a.view, a.edit, a.level),
+                let (view, edit) = match own {
+                    Some(a) => (a.view, a.edit),
                     // Without access of its own a property is the infobox's.
-                    None => (infobox.view.clone(), infobox.edit.clone(), infobox.level.clone()),
+                    None => (infobox.view.clone(), infobox.edit.clone()),
                 };
                 let (view, edit) = (crate::own_view(&view, &id, &opened.article_type), crate::own_view(&edit, &id, &opened.article_type));
                 // Who may edit the infobox may give the document its first values.
-                if !gm && !reader.may_edit(&store::Access { view: view.clone(), edit: edit.clone(), level: level.clone() }) {
+                if !gm && !reader.may_edit(&store::Access { view: view.clone(), edit: edit.clone() }) {
                     return Err(AppError("You may not give this document properties.".into()));
                 }
-                doc.add(section, view, edit, level, Plain { fields: values.into_iter().collect(), ..Plain::default() })?;
+                doc.add(section, view, edit, Plain { fields: values.into_iter().collect(), ..Plain::default() })?;
             }
         }
     }
@@ -1326,17 +1305,17 @@ pub(crate) fn save(store: &Store, world: &str, article: &str, text: &str, base: 
                         }
                         doc.write(&reader, opened.layer_id(*i), &was, &wanted)?;
                     }
-                    let (was, level) = seen_access(*i).map(|(c, l)| ((c.own, c.edit), l)).unwrap_or(((content.own.clone(), content.edit.clone()), content.level.clone()));
-                    let access_changed = part.view != was.0 || part.edit != was.1 || part.level != level;
+                    let was = seen_access(*i).map(|c| (c.own, c.edit)).unwrap_or((content.own.clone(), content.edit.clone()));
+                    let access_changed = part.view != was.0 || part.edit != was.1;
                     if access_changed && !gm {
                         // Who may edit a part says who sees it. Who edits it
                         // stays the GM's to say.
-                        if part.edit != was.1 || part.level != level || !reader.allows(&was.1) {
+                        if part.edit != was.1 || !reader.allows(&was.1) {
                             return Err(AppError("Only the GM can change who edits a part.".into()));
                         }
                     }
                     if access_changed {
-                        doc.set_access(opened.layer_id(*i), &part.view, &part.edit, &part.level)?;
+                        doc.set_access(opened.layer_id(*i), &part.view, &part.edit)?;
                     }
                 }
                 None => {
@@ -1350,15 +1329,14 @@ pub(crate) fn save(store: &Store, world: &str, article: &str, text: &str, base: 
                     let own_access = as_typed.is_some_and(|t| {
                         let same = |a: &str, b: &str| a == b || a.parse::<Policy>().ok().is_some_and(|a| b.parse::<Policy>().ok() == Some(a));
                         !(same(&crate::own_view(&t.view, &id, &opened.article_type), &part.view)
-                            && same(&crate::own_view(&t.edit, &id, &opened.article_type), &part.edit)
-                            && t.level == part.level)
+                            && same(&crate::own_view(&t.edit, &id, &opened.article_type), &part.edit))
                     });
                     if part.text.trim().is_empty() && !named_own && !own_access {
                         continue;
                     }
                     // A part as its type sets it out is written by whoever may
                     // edit it; one with access of its own is the GM's.
-                    let as_set_out = as_typed.is_some() && !own_access && reader.may_edit(&store::Access { view: part.view.clone(), edit: part.edit.clone(), level: part.level.clone() });
+                    let as_set_out = as_typed.is_some() && !own_access && reader.may_edit(&store::Access { view: part.view.clone(), edit: part.edit.clone() });
                     if !gm && !as_set_out {
                         return Err(AppError("Only the GM can add a part with access of its own.".into()));
                     }
@@ -1366,7 +1344,7 @@ pub(crate) fn save(store: &Store, world: &str, article: &str, text: &str, base: 
                     if !typed(&block.key) && part.key == block.key {
                         OwnShape::from_block(block, &*opened.known).put(&mut fields);
                     }
-                    doc.add(part.key.clone(), part.view.clone(), part.edit.clone(), part.level.clone(), Plain { title: block.title.clone(), text, fields, images: Vec::new() })?;
+                    doc.add(part.key.clone(), part.view.clone(), part.edit.clone(), Plain { title: block.title.clone(), text, fields, images: Vec::new() })?;
                 }
             }
         }
@@ -1492,16 +1470,16 @@ fn set_relations(store: &Store, world: &str, article: &str, field: &aw_model::te
         }
         None if wanted.is_empty() => {}
         None => {
-            let (view, edit, level) = match &target.access {
-                Some(a) => (a.view.clone(), a.edit.clone(), a.level.clone()),
-                None => (opened.shape.defaults.view.clone(), opened.shape.defaults.edit.clone(), "open".to_string()),
+            let (view, edit) = match &target.access {
+                Some(a) => (a.view.clone(), a.edit.clone()),
+                None => (opened.shape.defaults.view.clone(), opened.shape.defaults.edit.clone()),
             };
-            if !opened.gm && !reader.may_edit(&store::Access { view: view.clone(), edit: edit.clone(), level: level.clone() }) {
+            if !opened.gm && !reader.may_edit(&store::Access { view: view.clone(), edit: edit.clone() }) {
                 return Err(AppError("You may not give this document properties.".into()));
             }
             let mut fields = BTreeMap::new();
             fields.insert(target.key.clone(), relation::value(&replaced(None)));
-            doc.add(section, view, edit, level, Plain { fields, ..Plain::default() })?;
+            doc.add(section, view, edit, Plain { fields, ..Plain::default() })?;
         }
     }
     doc.finish(store, world, session)?;
@@ -1596,16 +1574,16 @@ fn set_field(store: &Store, world: &str, article: &str, field: &str, value: Opti
         }
         None if value.is_none() => {}
         None => {
-            let (view, edit, level) = match &target.access {
-                Some(a) => (a.view.clone(), a.edit.clone(), a.level.clone()),
-                None => (opened.shape.defaults.view.clone(), opened.shape.defaults.edit.clone(), "open".to_string()),
+            let (view, edit) = match &target.access {
+                Some(a) => (a.view.clone(), a.edit.clone()),
+                None => (opened.shape.defaults.view.clone(), opened.shape.defaults.edit.clone()),
             };
-            if !opened.gm && !reader.may_edit(&store::Access { view: view.clone(), edit: edit.clone(), level: level.clone() }) {
+            if !opened.gm && !reader.may_edit(&store::Access { view: view.clone(), edit: edit.clone() }) {
                 return Err(AppError("You may not give this document properties.".into()));
             }
             let mut fields = BTreeMap::new();
             fields.insert(target.key.clone(), value.clone().expect("a value"));
-            doc.add(section, view, edit, level, Plain { fields, ..Plain::default() })?;
+            doc.add(section, view, edit, Plain { fields, ..Plain::default() })?;
         }
     }
     doc.finish(store, world, session)
@@ -2514,16 +2492,15 @@ mod tests {
         t
     }
 
-    fn part(key: &str, view: &str, edit: &str, level: &str) -> BlockPart {
-        BlockPart { key: key.into(), text: String::new(), view: view.into(), edit: edit.into(), level: level.into() }
+    fn part(key: &str, view: &str, edit: &str) -> BlockPart {
+        BlockPart { key: key.into(), text: String::new(), view: view.into(), edit: edit.into() }
     }
 
-    fn layer(section: &str, text: &str, view: &str, edit: &str, level: &str) -> NewLayer {
+    fn layer(section: &str, text: &str, view: &str, edit: &str) -> NewLayer {
         NewLayer {
             title: String::new(),
             text: text.into(),
             policy: view.into(),
-            level: level.into(),
             section: section.into(),
             edit: edit.into(),
             fields: serde_json::Value::Null,
@@ -2631,10 +2608,10 @@ mod tests {
     #[test]
     fn an_empty_section_has_its_part_to_write_in() {
         let w = world("empty");
-        let story = TemplateBlock { key: "story".into(), title: "Story".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("story", "players", "gm", "open")] };
-        let allies = TemplateBlock { key: "allies".into(), title: "Allies".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("allies", "players", "gm", "open")] };
+        let story = TemplateBlock { key: "story".into(), title: "Story".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("story", "players", "gm")] };
+        let allies = TemplateBlock { key: "allies".into(), title: "Allies".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("allies", "players", "gm")] };
         w.store.save_templates(&w.id, &[template("place", vec![], vec![story, allies])]).unwrap();
-        let tavern = doc(&w, "place", "Tavern", vec![layer("story", "The tavern is old.", "players", "gm", "open")]);
+        let tavern = doc(&w, "place", "Tavern", vec![layer("story", "The tavern is old.", "players", "gm")]);
         let code = code_of(&w.store, &w.id, &tavern).unwrap();
         let block = code.document.blocks.iter().find(|b| b.key == "allies").expect("the empty section is there");
         assert_eq!((block.parts.len(), block.parts[0].key.as_str(), block.parts[0].text.as_str()), (1, "allies", ""));
@@ -2703,7 +2680,7 @@ mod tests {
             &w.home,
             &skeleton(
                 "Eldermere",
-                "<block>\nFor everyone.\n\n<block view=gm edit=gm level=gm-only>\nThe hidden door.\n</block>\n</block>\n",
+                "<block>\nFor everyone.\n\n<block view=gm edit=gm>\nThe hidden door.\n</block>\n</block>\n",
             ),
         )
         .unwrap();
@@ -2716,7 +2693,7 @@ mod tests {
 
         // The layer is kept gm-only.
         let page = w.store.db(&w.id).unwrap().document(&w.home).unwrap().unwrap();
-        assert!(page.layers.iter().any(|l| l.access.level == "gm-only"));
+        assert!(page.layers.iter().any(|l| l.access.view == "gm"));
     }
 
     #[test]
@@ -2830,7 +2807,7 @@ mod tests {
                 fold: Default::default(),
                 heading: 1,
                 new: Vec::new(),
-                parts: vec![part("story", "all", "gm", "open")],
+                parts: vec![part("story", "all", "gm")],
             }],
         );
         w.store.save_templates(&w.id, &[place]).unwrap();
@@ -2909,13 +2886,13 @@ mod tests {
         let mut log = template(
             "log",
             vec![field("date", "Date", FieldKind::Text { multiline: false })],
-            vec![TemplateBlock { parts: vec![part("journal", "all", "players", "open")], ..TemplateBlock::fresh("journal", "Journal") }],
+            vec![TemplateBlock { parts: vec![part("journal", "all", "players")], ..TemplateBlock::fresh("journal", "Journal") }],
         );
-        log.auth = Some(Access { view: "all".into(), edit: "players".into(), level: "open".into() });
+        log.auth = Some(Access { view: "all".into(), edit: "players".into() });
         w.store.save_templates(&w.id, &[log]).unwrap();
-        let mut props = layer(INFOBOX_SECTION, "", "all", "players", "open");
+        let mut props = layer(INFOBOX_SECTION, "", "all", "players");
         props.fields = serde_json::json!({ "date": "1 Hammer" });
-        let id = create_document(&w.store, &w.id, "log".into(), "s1".into(), "Session 1".into(), "all".into(), vec![props, layer("journal", "They meet.", "all", "players", "open")]).unwrap();
+        let id = create_document(&w.store, &w.id, "log".into(), "s1".into(), "Session 1".into(), "all".into(), vec![props, layer("journal", "They meet.", "all", "players")]).unwrap();
         let held = Reader::gm();
         let infobox = || crate::view_with(&w.store, &w.id, &held).unwrap().into_iter().find(|a| a.id == id).unwrap().layers.into_iter().find(|l| l.section == INFOBOX_SECTION).map(|l| (l.policy, l.edit)).unwrap();
         assert_eq!(infobox(), ("all".to_string(), "players".to_string()));
@@ -2930,7 +2907,7 @@ mod tests {
     fn a_field_with_access_of_its_own_is_a_layer_of_its_own() {
         let w = world("field");
         let mut secret = field("goal", "True goal", FieldKind::Text { multiline: false });
-        secret.access = Some(Access { view: "gm".into(), edit: "gm".into(), level: "gm-only".into() });
+        secret.access = Some(Access { view: "gm".into(), edit: "gm".into() });
         let npc = template("npc", vec![field("title", "Title", FieldKind::Text { multiline: false }), secret], vec![]);
         w.store.save_templates(&w.id, &[npc]).unwrap();
         let mira = doc(&w, "npc", "Mira", vec![]);
@@ -2944,7 +2921,7 @@ mod tests {
         assert_eq!(own.fields["goal"], "Revenge");
         assert!(layers.iter().find(|l| l.section == INFOBOX_SECTION).unwrap().fields.get("goal").is_none());
         let raw = w.store.db(&w.id).unwrap().document(&mira).unwrap().unwrap();
-        assert!(raw.layers.iter().any(|l| l.access.level == "gm-only"), "only the GM reads it");
+        assert!(raw.layers.iter().any(|l| l.access.view == "gm"), "only the GM reads it");
 
         // Players get the title, not the goal — not even its label.
         let players = Reader::holding(&[]);
@@ -2959,7 +2936,7 @@ mod tests {
     #[test]
     fn a_reader_who_misses_a_part_between_two_writes_both() {
         let w = world("between");
-        let body = "<block title=Journal>\nFirst.\n<block view=gm edit=gm level=gm-only>\nSecret.\n</block>\nSecond.\n</block>\n";
+        let body = "<block title=Journal>\nFirst.\n<block view=gm edit=gm>\nSecret.\n</block>\nSecond.\n</block>\n";
         let page = doc(&w, "", "Session", vec![]);
         let code = format!("<article view=all edit=players>\n<name=Session>\n<body>\n{body}</body>\n</article>\n");
         save_now(&w.store, &w.id, &page, &code).unwrap();
@@ -2970,23 +2947,23 @@ mod tests {
         assert!(!theirs.contains("Secret"), "{theirs}");
         as_bob(&bob, || save_now(&w.store, &w.id, &page, &theirs.replace("Second.", "Second, _changed_."))).unwrap();
         let back = code_of(&w.store, &w.id, &page).unwrap().code;
-        assert!(back.contains("First.\n\n<block view=gm edit=gm level=gm-only>\nSecret.\n</block>\n\nSecond, _changed_.\n</block>"), "{back}");
+        assert!(back.contains("First.\n\n<block view=gm edit=gm>\nSecret.\n</block>\n\nSecond, _changed_.\n</block>"), "{back}");
     }
 
     #[test]
     fn a_types_access_goes_to_its_documents_and_their_sections_alike() {
         let w = world("typeaccess");
-        let story = TemplateBlock { key: "story".into(), title: "Story".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("story", "all", "gm", "open")] };
-        let secret = TemplateBlock { key: "secret".into(), title: "Secret".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("secret", "gm", "gm", "gm-only")] };
+        let story = TemplateBlock { key: "story".into(), title: "Story".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("story", "all", "gm")] };
+        let secret = TemplateBlock { key: "secret".into(), title: "Secret".into(), style: Default::default(), place: Default::default(), width: 0, fold: Default::default(), heading: 1, new: Vec::new(), parts: vec![part("secret", "gm", "gm")] };
         w.store.save_templates(&w.id, &[template("npc", vec![], vec![story, secret])]).unwrap();
-        let ilva = doc(&w, "npc", "Ilva", vec![layer("story", "A smuggler.", "all", "gm", "open"), layer("secret", "Works for the duke.", "gm", "gm", "gm-only")]);
-        let other = doc(&w, "npc", "Bram", vec![layer("story", "A fisher.", "all", "gm", "open")]);
+        let ilva = doc(&w, "npc", "Ilva", vec![layer("story", "A smuggler.", "all", "gm"), layer("secret", "Works for the duke.", "gm", "gm")]);
+        let other = doc(&w, "npc", "Bram", vec![layer("story", "A fisher.", "all", "gm")]);
         let n = crate::type_access_apply_in(&w.store, &w.id, "npc", &[ilva.clone()], None, Some("players".into())).unwrap();
         assert_eq!(n, 1);
         let code = code_of(&w.store, &w.id, &ilva).unwrap().code;
         assert!(code.starts_with("<article view=all edit=players>"), "{code}");
         assert!(code.contains("<block title=Story>\nA smuggler."), "the section follows: {code}");
-        assert!(code.contains("<block title=Secret view=gm edit=gm level=gm-only>"), "the secret keeps its own: {code}");
+        assert!(code.contains("<block title=Secret view=gm edit=gm>"), "the secret keeps its own: {code}");
         assert!(code_of(&w.store, &w.id, &other).unwrap().code.contains("edit=gm>"), "only the documents named");
     }
 
@@ -3001,7 +2978,7 @@ mod tests {
             fold: Default::default(),
             heading: 1,
             new: Vec::new(),
-            parts: vec![part("story", "players", "gm", "open")],
+            parts: vec![part("story", "players", "gm")],
         };
         let journal = TemplateBlock {
             key: "journal".into(),
@@ -3011,13 +2988,13 @@ mod tests {
             fold: Default::default(),
             heading: 1,
             new: Vec::new(),
-            parts: vec![part("journal", "players", "players", "open")],
+            parts: vec![part("journal", "players", "players")],
         };
         w.store.save_templates(&w.id, &[template("place", vec![], vec![story, journal])]).unwrap();
         let tavern = doc(&w, "place", "Tavern", vec![
-            layer("story", "The tavern is old.", "players", "gm", "open"),
-            layer("story-2", "The innkeeper is a spy.", "gm", "gm", "sealed"),
-            layer("journal", "We arrived at night.", "players", "players", "open"),
+            layer("story", "The tavern is old.", "players", "gm"),
+            layer("story-2", "The innkeeper is a spy.", "gm", "gm"),
+            layer("journal", "We arrived at night.", "players", "players"),
         ]);
 
         // Bob joins.

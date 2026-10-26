@@ -51,7 +51,6 @@ function article(name: string, articleType: string, rel: Raw[] = []): ArticleVie
         text: "",
         fields: { rel },
         policy: "all",
-        level: "open",
         epoch: 1,
         parent: null,
       } as unknown as ArticleView["layers"][number],
@@ -113,12 +112,12 @@ const WORLD: WorldInfo = {
 const TIM_TREE = '<graph around=self depth=2>\n</graph>\n';
 const TIM_DOC: DocumentText = {
   name: "Tim",
-  access: { view: "all", edit: "gm", level: "open" },
+  access: { view: "all", edit: "gm" },
   properties: [
     { name: "Relations", value: "@@Character:Franklin@@ Father/Son, @@Character:Anna@@ Mother/Son, @@Character:Simon@@ Brother/Brother" },
   ],
   blocks: [
-    { key: "tim-rel", title: "Relations", style: "text", parts: [{ key: "tim-rel", text: TIM_TREE, view: "all", edit: "gm", level: "open" }] },
+    { key: "tim-rel", title: "Relations", style: "text", parts: [{ key: "tim-rel", text: TIM_TREE, view: "all", edit: "gm" }] },
   ],
 };
 

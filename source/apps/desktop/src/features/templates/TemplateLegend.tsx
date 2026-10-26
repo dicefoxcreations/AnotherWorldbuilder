@@ -452,12 +452,6 @@ export const BRICKS: Group[] = [
         what: "all, players, gm, an attribute like class:rogue — several with OR.",
       },
       {
-        name: "level",
-        where: "legend-only",
-        line: "level=«gm-only»",
-        what: "open, sealed, gm-only. How far the region travels.",
-      },
-      {
         name: "%%input%%, %%count%%",
         where: "legend-only",
         line: '<name="Session log «%%count%%»">',

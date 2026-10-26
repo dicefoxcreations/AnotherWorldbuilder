@@ -17,7 +17,7 @@ export function sameContent(a: DocumentText, b: DocumentText): boolean {
       blocks: d.blocks.flatMap((block) =>
         block.parts
           .filter((p) => p.text.trim())
-          .map((p) => [block.title, block.style, p.text.trim(), p.view, p.edit, p.level]),
+          .map((p) => [block.title, block.style, p.text.trim(), p.view, p.edit]),
       ),
     });
   return meaning(a) === meaning(b);

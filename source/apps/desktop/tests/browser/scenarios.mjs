@@ -31,34 +31,20 @@ function check(claim, actual, expected) {
 }
 
 const SCENARIOS = {
-  /** A new document: its texts and its image fields take images — a player's waiting one too. */
+  /**
+   * A new document: a name and its type, nothing else — what it holds is
+   * written on its page afterwards, as it will look.
+   */
   async create(page) {
     await page.openStage("create");
     await page.settle(800);
     check("the form shows without an error", await page.js(`return document.body.innerText.includes("TypeError");`), false);
-    await page.js(`[...document.querySelectorAll(".block-tools button")].find((b) => /image/i.test(b.title)).click(); return 1;`);
-    await page.settle(300);
-    check("a text takes an image — upload or gallery", await page.js(`return !!document.querySelector(".image-picker");`), true);
-    await page.key("Escape");
-    await page.js(`document.querySelector(".image-picker .ghost, .image-picker button")?.click(); return 1;`);
-    await page.settle(200);
-    await page.js(`document.querySelector(".infobox button.choosable").click(); return 1;`);
-    await page.settle(300);
-    check("an image field takes one too", await page.js(`return !!document.querySelector(".image-picker");`), true);
-    await page.key("Escape");
-    await page.js(`document.querySelector(".image-picker")?.querySelector("button.ghost, .close")?.click(); return 1;`);
-    await page.settle(200);
-
-    // Who sees it: ＋ offers the basics, and a field finds the rest by name.
-    await page.js(`document.querySelector(".article-head .bubble.plus").click(); return 1;`);
-    await page.settle(200);
-    check("＋ offers the basics — no long lists, no switch", await page.js(`const m = document.querySelector(".view-menu"); return [[...m.querySelectorAll(":scope > button")].map((b) => b.textContent), !!m.querySelector(".view-search"), m.textContent.includes("advanced")];`), [["All players", "GM only"], true, false]);
-    await page.js(`const i = document.querySelector(".view-search"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, "charac"); i.dispatchEvent(new Event("input", { bubbles: true })); return 1;`);
+    check("it asks for a name, the type beside it", await page.js(`return [!!document.querySelector("input[placeholder=Name]"), document.body.innerText.includes("Character")];`), [true, true]);
+    await page.js(`const i = document.querySelector("input[placeholder=Name]"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, "Mira"); i.dispatchEvent(new Event("input", { bubbles: true })); return 1;`);
     await page.settle(150);
-    check("typing finds a type", await page.js(`return [...document.querySelectorAll(".view-found button")].map((b) => b.textContent);`), ["All CharacterType"]);
-    await page.js(`document.querySelector(".view-search").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return 1;`);
-    await page.settle(150);
-    check("Enter adds it — beside the GM; everyone goes, it would take everyone in", await page.js(`return [...document.querySelectorAll(".article-head .bubble:not(.plus)")].map((b) => b.textContent.replace("×", ""));`), ["GM", "All Character"]);
+    await page.js(`[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Create").click(); return 1;`);
+    await page.settle(500);
+    check("Create makes it", await page.js(`return document.body.innerText.includes("Created (the bench stores nothing).");`), true);
   },
 
   /**
@@ -179,9 +165,13 @@ const SCENARIOS = {
       return true;
     `);
 
-    // Change something about the access: that writes the text afresh from
-    // the structure — and the new name has to appear in the process.
-    await page.choose(".article-meta .level-picker", "sealed");
+    // Change something about the access in the preview: that writes the
+    // text afresh from the structure — and the new name has to appear in
+    // the process.
+    await page.click(".article-meta .bubble.plus");
+    await page.settle(300);
+    await page.type("players");
+    await page.key("Enter");
     await page.settle(900);
 
     const after = await page.text(".template-text");
@@ -196,6 +186,8 @@ const SCENARIOS = {
   /** The types overview lists every type; subtypes fold away inside their supertype. */
   async types(page) {
     await page.openStage("options");
+    await page.js(`[...document.querySelectorAll("button")].find((b) => b.textContent.trim().endsWith("Types")).click(); return 1;`);
+    await page.settle(300);
     check(
       "both types stand there",
       await page.js(`return [...document.querySelectorAll(".type-row strong")].map((s) => s.textContent);`),
@@ -281,7 +273,7 @@ const SCENARIOS = {
     check(
       "beside a section's title, who views and changes it — only where that is not the document's",
       await page.js(`return [...document.querySelectorAll("#brakka .block-mark")].filter((m) => m.querySelector(".head-access")).map((m) => [m.querySelector(".block-title").textContent.trim(), m.querySelector(".head-access").innerText.replace(/\\s+/g, " ")]);`),
-      [["Family", "Players"]],
+      [["Family", "GM"]],
     );
     const head = (name) => page.js(`[...document.querySelectorAll("#brakka .markdown-head.foldable")].find((h) => h.textContent === ${JSON.stringify(name)}).click(); return 1;`);
     check("a text's headings, all open", await story(), ["Story", "Youth", "Born under the mountain.", "Exile", "The Blue Mountains.", "Deeds", "Retook Erebor.", "Hid the map."]);

@@ -10,14 +10,14 @@ import type { Access, Template } from "../api/client";
  * `view=` in the text that says the same thing again.
  */
 
-export const OPEN: Access = { view: "all", edit: "all", level: "open" };
+export const OPEN: Access = { view: "all", edit: "all" };
 
 /** Whether this access restricts nothing at all — then no bracket is needed. */
 export const isOpen = (r: Access) =>
-  r.view === "all" && r.edit === "all" && r.level === "open";
+  r.view === "all" && r.edit === "all";
 
 export const sameAccess = (a: Access, b: Access) =>
-  a.view === b.view && a.edit === b.edit && a.level === b.level;
+  a.view === b.view && a.edit === b.edit;
 
 /** The template's bracket — without a statement of its own: everyone may do everything. */
 export const bracket = (template: Template): Access => template.auth ?? OPEN;

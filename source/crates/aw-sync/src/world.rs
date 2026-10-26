@@ -403,7 +403,6 @@ pub struct WorldNet {
     /// How this device looked from outside to a STUN server, before the
     /// endpoint took the port over.
     outside: Option<SocketAddr>,
-    punches: Arc<Semaphore>,
     host: Arc<dyn Host>,
     found: Arc<Mutex<BTreeMap<String, Found>>>,
     /// Our own announcements, to take them back.
@@ -526,12 +525,10 @@ impl WorldNet {
         let answering = host.clone();
         let seen = found.clone();
         let punches = Arc::new(Semaphore::new(PUNCHES));
-        let punching = punches.clone();
         let task = tokio::spawn(async move {
             // Connections stay open between asks now — one per device.
             let slots = Arc::new(Semaphore::new(64));
             let per_address: Arc<Mutex<HashMap<std::net::IpAddr, usize>>> = Default::default();
-            let punches = punching;
             let mut tick = tokio::time::interval(Duration::from_millis(250));
             loop {
                 tokio::select! {
@@ -620,7 +617,6 @@ impl WorldNet {
             portmap,
             mapping,
             outside,
-            punches,
             host,
             found,
             announced: Mutex::new(Vec::new()),
@@ -879,25 +875,6 @@ impl WorldNet {
         (self.port() != 0).then(|| SocketAddr::new(ip.into(), self.port()))
     }
 
-    /// Opens the way for someone about to connect from outside: connects
-    /// towards them, which lets their packets through the firewall here.
-    pub fn punch_to(&self, endpoint: &str, addrs: &[SocketAddr]) -> Result<()> {
-        let id: EndpointId = endpoint.parse()?;
-        if addrs.is_empty() {
-            return Ok(());
-        }
-        let Ok(permit) = self.punches.clone().try_acquire_owned() else { return Ok(()) };
-        let mut to = EndpointAddr::new(id);
-        for a in addrs {
-            to = to.with_ip_addr(*a);
-        }
-        let ep = self.endpoint.clone();
-        tokio::spawn(async move {
-            let _permit = permit;
-            punch(&ep, to).await;
-        });
-        Ok(())
-    }
 
     /// Where this side can be reached on this very machine — for tests.
     pub fn loopback_addr(&self) -> EndpointAddr {

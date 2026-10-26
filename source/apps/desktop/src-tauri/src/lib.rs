@@ -150,7 +150,6 @@ pub struct LayerView {
     pub policy: String,
     /// Who may change it — to know whom to ask.
     pub edit: String,
-    pub level: String,
     pub epoch: u32,
 }
 
@@ -175,7 +174,6 @@ pub struct NewLayer {
     pub title: String,
     pub text: String,
     pub policy: String,
-    pub level: String,
     /// Key of the section in the template.
     #[serde(default)]
     pub section: String,
@@ -249,7 +247,6 @@ fn layer_view(layer: &Layer, reader: &Reader) -> LayerView {
         fields: fields_value(&layer.fields),
         policy: shown_rule(&layer.access.view),
         edit: shown_rule(&layer.access.edit),
-        level: layer.access.level.clone(),
         epoch: 0,
     }
 }
@@ -760,7 +757,6 @@ fn create_page(store: &Store, world: &str, slug: &str, name: &str, text: String)
             title: String::new(),
             text,
             policy: "all".into(),
-            level: "open".into(),
             section: aw_model::template_text::new_id(),
             edit: "gm".into(),
             fields: serde_json::Value::Null,
@@ -1550,13 +1546,13 @@ pub(crate) fn propose_document(store: &Store, world: &str, article_type: String,
         .into_iter()
         .filter_map(|mut layer| {
             if layer.section == document::INFOBOX_SECTION {
-                (layer.policy, layer.edit, layer.level) = (auth.view.clone(), auth.edit.clone(), "open".into());
+                (layer.policy, layer.edit) = (auth.view.clone(), auth.edit.clone());
             } else if let Some(key) = layer.section.strip_prefix(&format!("{}:", document::INFOBOX_SECTION)) {
                 let access = template.properties.iter().find(|f| f.key == key)?.access.clone()?;
-                (layer.policy, layer.edit, layer.level) = (access.view, access.edit, access.level);
+                (layer.policy, layer.edit) = (access.view, access.edit);
             } else {
                 let (block, part) = template.blocks.iter().find_map(|b| b.parts.iter().find(|p| p.key == layer.section).map(|p| (b, p)))?;
-                (layer.policy, layer.edit, layer.level, layer.title) = (part.view.clone(), part.edit.clone(), part.level.clone(), block.title.clone());
+                (layer.policy, layer.edit, layer.title) = (part.view.clone(), part.edit.clone(), block.title.clone());
                 layer.fields = serde_json::Value::Object(Default::default());
             }
             layer.parent = None;
@@ -1621,7 +1617,8 @@ fn create_document_as(
     }
     // Nested sections inherit their parents' visibility.
     let effective = effective_policies(&layers)?;
-    let view: Policy = visibility.parse().map_err(AppError::from)?;
+    // A rule that cannot be read is no rule to keep.
+    visibility.parse::<Policy>().map_err(AppError::from)?;
     let by = store.actor()?;
     let at = store::now();
     let new_id = || aw_model::LayerId::new().to_string();
@@ -1631,7 +1628,7 @@ fn create_document_as(
         base: true,
         section: String::new(),
         title: name,
-        access: Access { view: visibility, edit: "gm".into(), level: if view.to_string() == "gm" { "gm-only".into() } else { "open".into() } },
+        access: Access { view: visibility, edit: "gm".into() },
         text: String::new(),
         fields: Default::default(),
         images: Vec::new(),
@@ -1643,7 +1640,7 @@ fn create_document_as(
             base: false,
             section: input.section,
             title: input.title,
-            access: Access { view: view.to_string(), edit: if input.edit.is_empty() { "gm".into() } else { input.edit }, level: input.level },
+            access: Access { view: view.to_string(), edit: if input.edit.is_empty() { "gm".into() } else { input.edit } },
             text: input.text,
             fields: fields_map(&input.fields),
             images,
@@ -2154,7 +2151,6 @@ pub fn run() {
             document::document_read,
             document::document_write,
             document::document_save,
-            document::session_end,
             document::image_field_set,
             document::references_set,
             live::presence,
@@ -2216,7 +2212,6 @@ mod tests {
             title: policy.into(),
             text: String::new(),
             policy: policy.into(),
-            level: "open".into(),
             fields: serde_json::Value::Null,
             section: policy.into(),
             edit: "gm".into(),
@@ -2737,7 +2732,7 @@ mod tests {
         let characters = all.iter().find(|t| t.name == "Characters").unwrap().clone();
 
         let layer: NewLayer = serde_json::from_value(serde_json::json!({
-            "title": "", "text": "", "policy": "all", "level": "open", "section": "properties", "edit": "gm", "fields": { "str": 15 }
+            "title": "", "text": "", "policy": "all", "section": "properties", "edit": "gm", "fields": { "str": 15 }
         }))
         .unwrap();
         let tim = create_document(&store, &id, characters.id.clone(), String::new(), "Tim".into(), "all".into(), vec![layer]).unwrap();

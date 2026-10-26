@@ -4,7 +4,7 @@ import { api, type BackupView, type ServerBackupPlan, type ServerBackups, type W
 
 /**
  * A world's backups — the GM's. On this device by hand, every one kept,
- * each holding the whole world with its keys sealed for the GM. A world on a
+ * each holding the whole world as it was. A world on a
  * server is backed up by the server itself, daily or weekly, as many kept as
  * asked for. See `backup.rs` and `server.rs`.
  */

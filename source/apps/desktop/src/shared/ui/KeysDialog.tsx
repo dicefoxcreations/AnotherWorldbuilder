@@ -3,9 +3,9 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { api, type IdentityInfo } from "../../api/client";
 
 /**
- * Backs one's keys up, or brings them back — locked with a passphrase.
- * Without them nobody opens an encrypted world again: not this device after
- * a new install, not another one.
+ * Backs one's identity up, or brings it back — locked with a passphrase.
+ * Without it, a new install or another device is someone else to the worlds
+ * one plays in.
  */
 export function KeysDialog({
   mode,

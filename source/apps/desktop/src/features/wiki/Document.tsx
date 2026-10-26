@@ -569,7 +569,7 @@ function ComparePages({
 
 /**
  * Both versions of a page with their differences marked in their texts —
- * by the journal's word where it has one, otherwise by comparing the texts.
+ * by the version's own marks where it has them, otherwise by comparing the texts.
  */
 function markedViews(then: ArticleView, now: ArticleView, marks: VersionMarks | null): [ArticleView, ArticleView] {
   const whole = (text: string): Range[] => [{ start: 0, end: text.length }];
@@ -885,7 +885,6 @@ function DocumentEditor({
           wrote.current = true;
           return api.documentSave(world.id, article.id, last, k.base, session);
         })
-        .then(() => api.sessionEnd(world.id, session))
         // Only what was written loads the world again: with thousands of
         // documents, a look into the editor should not cost a reload.
         .then(() => wrote.current && onSaved(), onError);
@@ -974,7 +973,7 @@ function DocumentEditor({
     others.flatMap((o) =>
       o.caret && o.caret.part === key ? [{ id: o.id, name: o.name, start: o.caret.partStart, end: o.caret.partEnd }] : [],
     );
-  // Beside a version: what differs marked in both. The journal's marks fit
+  // Beside a version: what differs marked in both. The version's marks fit
   // the text as kept; while something typed is not kept yet, comparing the
   // texts stands in for them.
   const kinds = sides(marks);
@@ -1204,7 +1203,7 @@ const BRICKS: { title: string; bricks: Brick[] }[] = [
     bricks: [
       {
         name: "Secret region",
-        text: "<block view=«gm» edit=gm level=gm-only>\n\n</block>",
+        text: "<block view=«gm» edit=gm>\n\n</block>",
         gmOnly: true,
       },
     ],
@@ -1858,7 +1857,7 @@ function useBricks(gm: boolean, text: string, onText: (t: string) => void, links
                   // A region stands on lines of its own.
                   const before = from > 0 && text[from - 1] !== "\n" ? "\n" : "";
                   const after = to < text.length && text[to] !== "\n" ? "\n" : "";
-                  onText(`${text.slice(0, from)}${before}<block view=gm edit=gm level=gm-only>\n${text.slice(from, to)}\n</block>${after}${text.slice(to)}`);
+                  onText(`${text.slice(0, from)}${before}<block view=gm edit=gm>\n${text.slice(from, to)}\n</block>${after}${text.slice(to)}`);
                 }
               : undefined
           }
@@ -2127,7 +2126,7 @@ export function VisualEditor({
       style: "text",
       // As large as the heading was: the page looks as before.
       heading: Math.min(level, 4),
-      parts: [{ key: `new-${stamp}-${i}`, text: s.text, view: part.view, edit: part.edit, level: part.level }],
+      parts: [{ key: `new-${stamp}-${i}`, text: s.text, view: part.view, edit: part.edit }],
     }));
     const kept = { ...block, parts: block.parts.map((x, i) => (i === p ? { ...x, text: before } : x)) };
     onDoc({ ...doc, blocks: [...doc.blocks.slice(0, b), kept, ...fresh, ...doc.blocks.slice(b + 1)] });
@@ -2139,7 +2138,7 @@ export function VisualEditor({
       key,
       title: "New section",
       style: "text",
-      parts: [{ key, text: "", view: doc.access.view, edit: doc.access.edit, level: "open" }],
+      parts: [{ key, text: "", view: doc.access.view, edit: doc.access.edit }],
     };
     const at = doc.blocks.findIndex((x) => x.key === after) + 1;
     onDoc({ ...doc, blocks: [...doc.blocks.slice(0, at), block, ...doc.blocks.slice(at)] });
@@ -2208,7 +2207,6 @@ export function VisualEditor({
       if (next === opened.code) continue;
       const session = newSession();
       await api.documentSave(world.id, other.id, next, opened.base, session);
-      await api.sessionEnd(world.id, session);
     }
     if (others.length) reload?.();
   };
@@ -2463,7 +2461,7 @@ export function VisualEditor({
                 world={world}
                 part={part}
                 title={block.title}
-                inherited={part.view === base && part.level === "open"}
+                inherited={part.view === base}
                 sections={sectionActions}
                 docAccess={doc.access}
                 region={
@@ -2571,7 +2569,7 @@ export function VisualEditor({
         all={all}
         links={links}
         onProperty={setProperty}
-        onAccess={(a) => onDoc({ ...doc, infobox: samePolicy(a.view, doc.access.view) && samePolicy(a.edit, doc.access.edit) && (a.level ?? "open") === "open" ? undefined : a })}
+        onAccess={(a) => onDoc({ ...doc, infobox: samePolicy(a.view, doc.access.view) && samePolicy(a.edit, doc.access.edit) ? undefined : a })}
         onChanged={reload}
       />}
 
@@ -3386,9 +3384,7 @@ function PartEditor({
   return (
     <PartAccessContext.Provider value={{ world, part, title, alone, onPart, onRemove: removable ? onRemove : undefined, editor }}>
     <div
-      className={`block-part${guarded ? " guarded" : ""}${inspecting ? " inspected" : ""}${
-        part.level !== "open" ? ` level-${part.level}` : ""
-      }`}
+      className={`block-part${guarded ? " guarded" : ""}${inspecting ? " inspected" : ""}`}
     >
       {region && (
         <RegionAccess world={world} view={part.view} edit={part.edit} docView={docAccess.view} docEdit={docAccess.edit} onClick={world.isGm || editor ? () => (setDismissed(false), setInspecting(true)) : undefined} />

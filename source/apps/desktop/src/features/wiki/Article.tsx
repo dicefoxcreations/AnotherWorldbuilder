@@ -355,7 +355,6 @@ function NewArticle({
                   style={block.style}
                   text={texts[part.key] ?? ""}
                   policy={viewOf(part.key, part.view)}
-                  level={part.level}
                   inherited={viewOf(part.key, part.view) === visibility}
                   articles={articles}
                   templates={templates}
@@ -411,7 +410,6 @@ export function layersFor(
       title: "",
       text: "",
       policy: box?.view ?? visibility,
-      level: box?.level ?? "open",
       fields: common,
       section: PROPERTIES,
       edit: box?.edit ?? template.auth?.edit ?? "gm",
@@ -423,7 +421,6 @@ export function layersFor(
       title: "",
       text: "",
       policy: field.access!.view,
-      level: field.access!.level,
       fields: { [field.key]: values[field.key] },
       section: `${PROPERTIES}:${field.key}`,
       edit: field.access!.edit,
@@ -436,7 +433,6 @@ export function layersFor(
         title: block.title,
         text: texts[part.key] ?? "",
         policy: views[part.key] ?? part.view,
-        level: part.level,
         fields: {},
         section: part.key,
         edit: part.edit,

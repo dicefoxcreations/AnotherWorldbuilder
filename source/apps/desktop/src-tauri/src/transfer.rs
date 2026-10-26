@@ -79,12 +79,6 @@ pub struct PackedPart {
     pub fields: BTreeMap<String, serde_json::Value>,
     pub view: String,
     pub edit: String,
-    #[serde(default = "open_level")]
-    pub level: String,
-}
-
-fn open_level() -> String {
-    aw_model::template::LEVEL_OPEN.into()
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -237,7 +231,6 @@ pub fn export(store: &Store, world: &str, choice: &Choice, path: &Path, progress
                     fields,
                     view: layer.access.view.clone(),
                     edit: layer.access.edit.clone(),
-                    level: layer.access.level.clone(),
                 });
             }
         }
@@ -415,13 +408,12 @@ pub fn import(store: &Store, world: &str, folder: &Path, package: &Package, prog
         }
         doc.view.parse::<Policy>().map_err(AppError::from)?;
         let new_id = || aw_model::LayerId::new().to_string();
-        let base_level = if doc.view.parse::<Policy>().map(|p| p.to_string()).as_deref() == Ok("gm") { "gm-only" } else { "open" };
         let mut layers = vec![store::Layer {
             id: new_id(),
             base: true,
             section: String::new(),
             title: doc.name.clone(),
-            access: store::Access { view: doc.view.clone(), edit: doc.edit.clone(), level: base_level.into() },
+            access: store::Access { view: doc.view.clone(), edit: doc.edit.clone() },
             text: String::new(),
             fields: doc.fields.clone().into_iter().collect(),
             images: Vec::new(),
@@ -443,7 +435,7 @@ pub fn import(store: &Store, world: &str, folder: &Path, package: &Package, prog
                 base: false,
                 section: part.section.clone(),
                 title: part.title.clone(),
-                access: store::Access { view: part.view.clone(), edit: part.edit.clone(), level: part.level.clone() },
+                access: store::Access { view: part.view.clone(), edit: part.edit.clone() },
                 text,
                 fields,
                 images: images.into_iter().collect(),
@@ -629,7 +621,7 @@ mod tests {
     }
 
     fn part(section: &str, text: &str, view: &str) -> NewLayer {
-        NewLayer { title: String::new(), text: text.into(), policy: view.into(), level: if view == "gm" { "gm-only".into() } else { "open".into() }, section: section.into(), edit: "gm".into(), fields: serde_json::Value::Null, parent: None }
+        NewLayer { title: String::new(), text: text.into(), policy: view.into(), section: section.into(), edit: "gm".into(), fields: serde_json::Value::Null, parent: None }
     }
 
     /// A real package into a fresh world, timed: `AW_PACKAGE=… cargo test
@@ -706,7 +698,7 @@ mod tests {
         let package: Package = serde_json::from_value(serde_json::json!({
             "format": "aw-package", "version": 1, "home": page,
             "documents": [{ "id": page, "type": "", "slug": "campaign", "name": "Campaign", "view": "all", "edit": "gm", "fields": {},
-                "parts": [{ "section": "overview", "title": "", "text": "Welcome.", "fields": {}, "view": "all", "edit": "gm", "level": "open" }] }],
+                "parts": [{ "section": "overview", "title": "", "text": "Welcome.", "fields": {}, "view": "all", "edit": "gm" }] }],
         }))
         .unwrap();
         import(&to.store, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
@@ -722,8 +714,8 @@ mod tests {
             "format": "aw-package", "version": 1,
             "documents": [{ "id": page, "type": "", "slug": "campaign", "name": "Campaign", "view": "all", "edit": "gm", "fields": {},
                 "parts": [
-                    { "section": "overview", "title": "", "text": "Welcome.", "fields": {}, "view": "all", "edit": "gm", "level": "open" },
-                    { "section": "timeline", "title": "Timeline", "text": "<timeline>", "fields": { "shape": { "place": "side", "width": 380 } }, "view": "all", "edit": "gm", "level": "open" },
+                    { "section": "overview", "title": "", "text": "Welcome.", "fields": {}, "view": "all", "edit": "gm" },
+                    { "section": "timeline", "title": "Timeline", "text": "<timeline>", "fields": { "shape": { "place": "side", "width": 380 } }, "view": "all", "edit": "gm" },
                 ] }],
         }))
         .unwrap();

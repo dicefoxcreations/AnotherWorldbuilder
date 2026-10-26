@@ -17,8 +17,8 @@ import { FolderTile } from "./FolderTile";
  * document stands in the navigation.
  *
  * The GM sorts: folders in folders, renamed, moved by dragging, deleted —
- * the images of a deleted folder then lie in none, its folders move up. The tree is sealed
- * for the GM; a player sees their own uploads and the images of parts they
+ * the images of a deleted folder then lie in none, its folders move up. The tree is the
+ * GM's alone; a player sees their own uploads and the images of parts they
  * can read, unsorted. Nothing is deleted by itself.
  */
 type Filter = "all" | "used" | "versions" | "unused";

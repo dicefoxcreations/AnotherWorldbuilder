@@ -705,7 +705,7 @@ mod tests {
     }
 
     fn layer(text: &str, policy: &str) -> serde_json::Value {
-        json!({ "title": "", "text": text, "policy": policy, "level": "", "section": "", "edit": "", "fields": null })
+        json!({ "title": "", "text": text, "policy": policy, "section": "", "edit": "", "fields": null })
     }
 
     #[test]

@@ -2,8 +2,8 @@
 //!
 //! Character, place, organisation are not special cases in the code, they are
 //! data. A template has an infobox of fields and a body of blocks. A block is
-//! also a unit of encryption — each one gets its own policy when an article
-//! is created.
+//! also a unit of access — each one gets its own rule when a document is
+//! made.
 //!
 //! Everything is a document. The only field kind that picks something is
 //! [`FieldKind::Reference`]: a field `species` points at documents of type
@@ -216,14 +216,6 @@ impl FieldKind {
         }
     }
 
-    /// Whether this field belongs in the infobox.
-    ///
-    /// Everything of known size — images included, since the portrait is the
-    /// heart of an infobox. Not flowing text and headings: that is prose and
-    /// belongs in the body, where the page grows with it.
-    pub fn structured(&self) -> bool {
-        !matches!(self, FieldKind::RichText | FieldKind::Heading { .. } | FieldKind::Group { .. })
-    }
 
     /// The type this field points at — if it points at one.
     ///
@@ -414,16 +406,6 @@ fn everyone() -> String {
     "all".into()
 }
 
-/// The delivery levels — the same words as in the text.
-///
-/// They once stood in German inside and in English in the text. Two
-/// spellings for the same thing is one too many: whoever writes `gm-only`
-/// should find `gm-only` again, wherever they look.
-pub const LEVEL_OPEN: &str = "open";
-pub const LEVEL_SEALED: &str = "sealed";
-pub const LEVEL_GM: &str = "gm-only";
-pub const LEVELS: [&str; 3] = [LEVEL_OPEN, LEVEL_SEALED, LEVEL_GM];
-
 /// The style of a block in the body.
 ///
 /// It steers the look — and **only** the look. Who may see a block stands in
@@ -457,7 +439,7 @@ impl BlockStyle {
 /// A block a new article of this type is given.
 ///
 /// The template suggests blocks; while writing, any number may be added. A
-/// block is the unit of encryption and access, not of appearance.
+/// block is the unit of access, not of appearance.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TemplateBlock {
     pub key: String,
@@ -469,9 +451,9 @@ pub struct TemplateBlock {
     /// The parts a block is made of — at least one.
     ///
     /// A part begins where the permission changes. Why parts at all: a
-    /// region someone may not see has to be its own encrypted package. Were
-    /// it in the same package as the text around it, hiding would be a matter
-    /// of display — and whoever can open the block would have it too.
+    /// region someone may not see has to be stored on its own. Were it in the
+    /// same layer as the text around it, hiding would be a matter of display —
+    /// and whoever may read the block would get it too.
     #[serde(default)]
     pub parts: Vec<BlockPart>,
     /// Where it stands: in the text beside the infobox, above or below
@@ -537,33 +519,27 @@ pub enum BlockFold {
     Off,
 }
 
-/// Who may see and who may change, plus how far it travels.
+/// Who may see and who may change.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Access {
     #[serde(default = "everyone")]
     pub view: String,
     #[serde(default = "everyone")]
     pub edit: String,
-    #[serde(default = "open_level")]
-    pub level: String,
 }
 
 impl Default for Access {
     fn default() -> Self {
-        Access {
-            view: everyone(),
-            edit: everyone(),
-            level: open_level(),
-        }
+        Access { view: everyone(), edit: everyone() }
     }
 }
 
-/// A piece of a block — and at the same time a unit of encryption.
+/// A piece of a block — and at the same time a unit of access.
 ///
-/// When an article is created, each part becomes its own layer with its own
-/// data key. That is exactly why a region with access of its own — an inner
+/// When a document is made, each part becomes a part of its own with its own
+/// rule. That is why a region with access of its own — an inner
 /// `<block view=…>`, an `<image view=…>` — can sit in the middle of flowing
-/// text without hiding becoming a matter of the interface.
+/// text, and who sees it is decided where it is stored.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlockPart {
     /// Unique within the article — the first part carries the block id,
@@ -578,9 +554,6 @@ pub struct BlockPart {
     /// Who may change it.
     #[serde(default = "everyone")]
     pub edit: String,
-    /// `open`, `sealed` or `gm-only`.
-    #[serde(default = "open_level")]
-    pub level: String,
 }
 
 impl Default for BlockPart {
@@ -590,7 +563,6 @@ impl Default for BlockPart {
             text: String::new(),
             view: everyone(),
             edit: everyone(),
-            level: open_level(),
         }
     }
 }
@@ -602,10 +574,6 @@ impl BlockPart {
             ..BlockPart::default()
         }
     }
-}
-
-fn open_level() -> String {
-    LEVEL_OPEN.into()
 }
 
 impl TemplateBlock {
@@ -892,16 +860,7 @@ impl Template {
         self.properties.iter().find(|f| f.key == name || f.label.eq_ignore_ascii_case(name))
     }
 
-    /// All article types this template refers to.
-    ///
-    /// From this the application builds the list of types that must exist —
-    /// whoever creates a field `species` also needs the type `species`.
-    pub fn referenced_types(&self) -> std::collections::BTreeSet<&str> {
-        self.fields()
-            .into_iter()
-            .flat_map(|f| f.kind.references().into_iter().chain(f.kind.roles()))
-            .collect()
-    }
+
 }
 
 
@@ -1033,7 +992,6 @@ mod tests {
             text: "GM only.".into(),
             view: "gm".into(),
             edit: "gm".into(),
-            level: LEVEL_GM.into(),
         }];
         t.normalize();
         t

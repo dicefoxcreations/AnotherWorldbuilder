@@ -85,7 +85,7 @@ const MONSTER: Template = {
     { key: "skills", label: "Skills", kind: "reference", articleType: "skill", multiple: true, parent: false, count: "Proficiency", every: true },
   ],
   infobox: { align: "none", width: "auto", show: [] },
-  blocks: [{ key: "stats", title: "", style: "statblock", parts: [{ key: "stats", text: "", view: "all", edit: "gm", level: "open" }] }],
+  blocks: [{ key: "stats", title: "", style: "statblock", parts: [{ key: "stats", text: "", view: "all", edit: "gm" }] }],
 };
 
 const FEAT: Template = {
@@ -104,7 +104,7 @@ const ITEM: Template = {
   name: "Item",
   icon: "🧤",
   infobox: { align: "right", width: "auto", show: [{ element: "number", property: "strength", label: "" }] },
-  blocks: [{ key: "stats", title: "", style: "text", parts: [{ key: "stats", text: "", view: "all", edit: "gm", level: "open" }] }],
+  blocks: [{ key: "stats", title: "", style: "text", parts: [{ key: "stats", text: "", view: "all", edit: "gm" }] }],
 };
 
 const ref = (key: string, label: string, articleType: string, more: Partial<{ multiple: boolean; adds: boolean }> = {}): TemplateField =>
@@ -198,7 +198,7 @@ const CHARACTER_STATS: Template = {
     ref("feats", "Feats", "feat", { multiple: true, adds: true }),
     ref("equipment", "Equipment", "item", { multiple: true, adds: true }),
   ],
-  blocks: [{ key: "layout", title: "", style: "text", parts: [{ key: "layout", text: SHEET, view: "all", edit: "all", level: "open" }] }],
+  blocks: [{ key: "layout", title: "", style: "text", parts: [{ key: "layout", text: SHEET, view: "all", edit: "all" }] }],
 };
 
 const CHARACTER: Template = {
@@ -223,18 +223,18 @@ const CHARACTER: Template = {
     show: [...ABILITIES.slice(0, 3).map((a) => ({ element: "number", property: a.toLowerCase(), label: "" })), { element: "select", property: "feats", label: "" }, { element: "select", property: "equipment", label: "" }],
   },
   blocks: [
-    { key: "stats", title: "Stats", style: "statblock", place: "top", parts: [{ key: "stats", text: "", view: "all", edit: "gm", level: "open" }] },
+    { key: "stats", title: "Stats", style: "statblock", place: "top", parts: [{ key: "stats", text: "", view: "all", edit: "gm" }] },
     {
       key: "story",
       title: "Story",
       style: "text",
       parts: [
-        { key: "story", text: "", view: "all", edit: "gm", level: "open" },
-        { key: "story-2", text: "", view: "gm", edit: "gm", level: "open" },
+        { key: "story", text: "", view: "all", edit: "gm" },
+        { key: "story-2", text: "", view: "gm", edit: "gm" },
       ],
     },
-    { key: "notes", title: "Notes", style: "text", new: ["Character"], parts: [{ key: "notes", text: "", view: "all", edit: "gm", level: "open" }] },
-    { key: "family", title: "Family", style: "text", place: "bottom", parts: [{ key: "family", text: "", view: "all", edit: "gm", level: "open" }] },
+    { key: "notes", title: "Notes", style: "text", new: ["Character"], parts: [{ key: "notes", text: "", view: "all", edit: "gm" }] },
+    { key: "family", title: "Family", style: "text", place: "bottom", parts: [{ key: "family", text: "", view: "all", edit: "gm" }] },
   ],
 };
 
@@ -279,7 +279,7 @@ const BRAKKA_TEXT = `<view of="Character stats">
 `;
 
 function layer(owner: string, section: string, text: string, fields: Record<string, unknown> = {}) {
-  return { id: `${owner}-${section}`, title: "", section, mayEdit: true, text, fields, policy: "all", edit: "gm", level: "open", epoch: 1, parent: null } as unknown as ArticleView["layers"][number];
+  return { id: `${owner}-${section}`, title: "", section, mayEdit: true, text, fields, policy: "all", edit: "gm", epoch: 1, parent: null } as unknown as ArticleView["layers"][number];
 }
 
 function article(id: string, name: string, articleType: string, fields: Record<string, unknown>, text = ""): ArticleView {
@@ -338,8 +338,8 @@ const ARTICLES: ArticleView[] = [
   ),
 ].map((a) => (a.id === "brakka" ? { ...a, layers: [
           ...a.layers,
-          // Narrower than the document: only players see it.
-          { ...layer("brakka", "family", "Son of Thráin, grandson of Thrór."), policy: "players" },
+          // Narrower than the document: only the GM sees it.
+          { ...layer("brakka", "family", "Son of Thráin, grandson of Thrór."), policy: "gm" },
           // Headings fold what follows them, on into the next part.
           layer("brakka", "story", "# Youth\nBorn under the mountain.\n\n## Exile\nThe Blue Mountains.\n\n# Deeds\nRetook Erebor."),
           layer("brakka", "story-2", "Hid the map."),
@@ -347,18 +347,18 @@ const ARTICLES: ArticleView[] = [
 
 const GOBLIN_DOC: DocumentText = {
   name: "Goblin",
-  access: { view: "all", edit: "gm", level: "open" },
+  access: { view: "all", edit: "gm" },
   properties: [
     { name: "Armor class", value: "15" },
     { name: "Hit points", value: "7" },
     ...ABILITIES.map((a, i) => ({ name: a, value: String([8, 14, 10, 10, 8, 8][i]), group: ["Abilities"] })),
   ],
-  blocks: [{ key: "stats", title: "", style: "statblock", parts: [{ key: "stats", text: GOBLIN_TEXT, view: "all", edit: "gm", level: "open" }] }],
+  blocks: [{ key: "stats", title: "", style: "statblock", parts: [{ key: "stats", text: GOBLIN_TEXT, view: "all", edit: "gm" }] }],
 };
 
 const BRAKKA_DOC: DocumentText = {
   name: "Brakka",
-  access: { view: "all", edit: "gm", level: "open" },
+  access: { view: "all", edit: "gm" },
   properties: [
     { name: "Species", value: "@@Species:Dwarf@@" },
     { name: "Classes", value: "@@Class:Fighter@@ 3, @@Class:Rogue@@ 1" },
@@ -368,11 +368,11 @@ const BRAKKA_DOC: DocumentText = {
     { name: "Saving throws", value: "@@Saving throw:Strength@@ 1, @@Saving throw:Constitution@@ 1" },
   ],
   blocks: [
-    { key: "stats", title: "Stats", style: "statblock", place: "top", parts: [{ key: "stats", text: BRAKKA_TEXT, view: "all", edit: "gm", level: "open" }] },
-    { key: "story", title: "Story", style: "text", parts: [{ key: "story", text: "Born under the mountain.", view: "all", edit: "gm", level: "open" }] },
-    { key: "notes", title: "Notes", style: "text", parts: [{ key: "notes", text: "Owes the guild.", view: "all", edit: "gm", level: "open" }] },
+    { key: "stats", title: "Stats", style: "statblock", place: "top", parts: [{ key: "stats", text: BRAKKA_TEXT, view: "all", edit: "gm" }] },
+    { key: "story", title: "Story", style: "text", parts: [{ key: "story", text: "Born under the mountain.", view: "all", edit: "gm" }] },
+    { key: "notes", title: "Notes", style: "text", parts: [{ key: "notes", text: "Owes the guild.", view: "all", edit: "gm" }] },
     // A section of Brakka's own, with headings in it.
-    { key: "lore", title: "Lore", style: "text", parts: [{ key: "lore", text: "Old tales.\n\n## Mines\nDeep ones.\n\n## Wars\nMany.", view: "all", edit: "gm", level: "open" }] },
+    { key: "lore", title: "Lore", style: "text", parts: [{ key: "lore", text: "Old tales.\n\n## Mines\nDeep ones.\n\n## Wars\nMany.", view: "all", edit: "gm" }] },
   ],
 };
 

@@ -216,7 +216,6 @@ export type LayerView = {
   policy: string;
   /** Who may change it — to know whom to ask. */
   edit: string;
-  level: string;
   epoch: number;
 };
 
@@ -241,7 +240,6 @@ export type NewLayer = {
   title: string;
   text: string;
   policy: string;
-  level: string;
   fields: Record<string, unknown>;
   /** Key of the part in the template. */
   section: string;
@@ -320,12 +318,9 @@ export type Infobox = {
 export type BlockStyle = "text" | "box" | "quote" | "statblock";
 
 /**
- * A piece of a block — and at the same time a unit of encryption.
- *
- * When an article is created, every part becomes a layer of its own with its
- * own data key. That is the only reason a region with access of its own can
- * sit in the middle of flowing text without hiding becoming a matter of the
- * interface.
+ * A piece of a block — and at the same time a unit of access: every part is
+ * stored with a rule of its own, so a region with access of its own can sit
+ * in the middle of flowing text.
  */
 export type BlockPart = {
   key: string;
@@ -333,11 +328,10 @@ export type BlockPart = {
   text: string;
   view: string;
   edit: string;
-  level: string;
 };
 
-/** Who may see and who may change, plus how far it travels. */
-export type Access = { view: string; edit: string; level: string };
+/** Who may see and who may change. */
+export type Access = { view: string; edit: string };
 
 /** A block a new article of this type is given. */
 export type BlockPlace = "flow" | "top" | "bottom" | "side";
@@ -540,7 +534,6 @@ const toLayer = (l: Raw): LayerView => ({
   fields: l.fields ?? {},
   policy: l.policy,
   edit: l.edit ?? "gm",
-  level: l.level,
   epoch: l.epoch,
 });
 
@@ -654,7 +647,6 @@ const toBlock = (r: Raw): TemplateBlock => ({
     text: t.text ?? "",
     view: t.view ?? "players",
     edit: t.edit ?? "gm",
-    level: t.level ?? "open",
   })),
   place: r.place === "top" || r.place === "bottom" || r.place === "side" ? r.place : "flow",
   width: typeof r.width === "number" ? r.width : 0,
@@ -803,7 +795,7 @@ export type MapNode = { src: string; height: number; pins: MapPin[]; areas: MapA
  * in a part of its own when saved (`aw_model::document`, “Secret pins”).
  * Reading, only `view` comes, to mark it.
  */
-export type MapAccess = { view?: string; edit?: string; level?: string };
+export type MapAccess = { view?: string; edit?: string };
 /** Where a pin's name stands: right of it (none), left, top, bottom. */
 export type LabelAt = "left" | "top" | "bottom";
 /**
@@ -1053,7 +1045,7 @@ export const api = {
   identityRename: async (name: string) =>
     toIdentity(await invoke<Raw>("identity_rename", { name })),
   identityExport: (path: string) => invoke<string>("identity_export", { path }),
-  /** Writes one's keys — identity, and the world keys this profile holds — locked with a passphrase. */
+  /** Writes one's identity, locked with a passphrase. */
   keysBackup: (path: string, passphrase: string) => invoke<string>("keys_backup", { path, passphrase }),
   /** Brings keys back from a backup: the identity where there is none, what is missing of each world. */
   keysRestore: async (path: string, passphrase: string) => toIdentity(await invoke<Raw>("keys_restore", { path, passphrase })),
@@ -1185,8 +1177,8 @@ export const api = {
    * Changes who may see a part. Leaving `layer` out means: the whole
    * article.
    *
-   * Rust rejects the change when the full keyring is missing. There is
-   * deliberately no check here — one in the frontend could be bypassed.
+   * Rust decides who may. There is deliberately no check here — one in
+   * the frontend could be bypassed.
    */
   /** A type's access for documents of it already there — and their sections that had theirs. How many changed. */
   typeAccessApply: (world: string, articleType: string, articles: string[], view: string | null, edit: string | null) =>
@@ -1197,8 +1189,7 @@ export const api = {
   /**
    * Deletes an article for good.
    *
-   * `confirmation` has to be the article's name — Rust checks that and
-   * refuses when the full keyring is missing.
+   * `confirmation` has to be the article's name — Rust checks that.
    */
   articleDelete: (world: string, article: string, confirmation: string) =>
     invoke<void>("article_delete", { world, article, confirmation }),
@@ -1263,7 +1254,6 @@ export const api = {
   documentSave: async (world: string, article: string, text: string, base: Bases, session: string) =>
     toCode(await invoke<Raw>("document_save", { world, article, text, base, session })),
   /** Ends an editing session: what it wrote becomes a version of each document it wrote in. */
-  sessionEnd: (world: string, session: string) => invoke<void>("session_end", { world, session }),
   /**
    * Sets what `article` says about `with` in a relation property — and the
    * other side too, as far as this reader may. `null` removes it.
@@ -1296,7 +1286,7 @@ export const api = {
       after: c.after,
       mayRevert: c.may_revert,
     })),
-  /** Rolls for everyone in the session — passed on with the next digest. */
+  /** Rolls for everyone in the session. */
   diceRoll: (world: string, roll: SharedRoll) => invoke<void>("dice_roll", { world, roll }),
   /** The dice rolled lately in a world, by anyone — oldest first. */
   diceRolls: (world: string) => invoke<SharedRoll[]>("dice_rolls", { world }),
@@ -1400,7 +1390,7 @@ export const api = {
   worldTakeOver: async (world: string) => toWorld(await invoke<Raw>("world_take_over", { world })),
   /** The dice the world rolls with — the GM's. Empty: the usual set. */
   worldDiceSet: async (world: string, sides: number[]) => toWorld(await invoke<Raw>("world_dice_set", { world, sides })),
-  /** Writes a package — types, or documents with their types and images — into a folder, unencrypted. */
+  /** Writes a package — types, or documents with their types and images — into a folder, as plain text and files. */
   packageExport: async (world: string, path: string, choice: { name: string; types: string[]; documentsOf: string[] }) =>
     toSummary(await invoke<Raw>("package_export", { world, path, choice: { name: choice.name, types: choice.types, documents_of: choice.documentsOf } })),
   /** What a package would bring into this world. */

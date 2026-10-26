@@ -582,7 +582,7 @@ function ItemAccess({ item, onChange }: { item: MapAccess; onChange: (next: MapA
         </button>
       </InspectorSection>
     );
-  const value = { view: item.view, edit: item.edit || at.part.edit, level: item.level || "open" };
+  const value = { view: item.view, edit: item.edit || at.part.edit };
   return (
     <InspectorSection title="Access — its own">
       <AccessRows
@@ -590,10 +590,10 @@ function ItemAccess({ item, onChange }: { item: MapAccess; onChange: (next: MapA
         value={value}
         onChange={(p) => {
           const next = { ...value, ...p };
-          onChange({ view: next.view, edit: next.edit, level: next.level === "open" ? undefined : next.level });
+          onChange({ view: next.view, edit: next.edit });
         }}
       />
-      <button className="compact ghost" onClick={() => onChange({ view: undefined, edit: undefined, level: undefined })}>
+      <button className="compact ghost" onClick={() => onChange({ view: undefined, edit: undefined })}>
         As the map
       </button>
     </InspectorSection>

@@ -103,7 +103,7 @@ pub(crate) fn use_folders(profile: &Path, worlds: &Path, locks: &Path) -> Answer
 }
 
 fn world_lock_path(root: &Path, canonical_worlds: &Path) -> PathBuf {
-    let id = aw_crypto::WorldId::derive("storage", &[canonical_worlds.as_os_str().as_encoded_bytes()]);
+    let id = aw_crypto::Id::derive("storage", &[canonical_worlds.as_os_str().as_encoded_bytes()]);
     root.join(format!("{}.lock", store::dir_name(id.as_str())))
 }
 
@@ -388,16 +388,7 @@ pub fn storage_locations(app: tauri::AppHandle, paths: Vec<String>) -> Answer<St
 pub fn storage_open(app: tauri::AppHandle, path: String) -> Answer<()> {
     let store = store(&app)?;
     let path = PathBuf::from(path);
-    // A world's readable copy too: `<location>/<world>/text`.
-    // Or one's own beside the profile: `<profile>/worlds/<world>/text`.
-    let copy = path.file_name().is_some_and(|n| n == "text")
-        && path
-            .parent()
-            .and_then(|w| w.parent())
-            .is_some_and(|root| store.local_roots().iter().any(|r| r == root) || root == store.profile_dir().join("worlds"));
-    let known = path == store.profile_dir()
-        || store.local_roots().contains(&path)
-        || copy;
+    let known = path == store.profile_dir() || store.local_roots().contains(&path);
     if !known || !path.is_dir() {
         return Err(AppError("That folder is not there.".into()));
     }

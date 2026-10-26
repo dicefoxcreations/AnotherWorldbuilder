@@ -54,7 +54,7 @@ const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS layers(
         document TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, id TEXT NOT NULL,
         position INTEGER NOT NULL, base INTEGER NOT NULL DEFAULT 0, section TEXT NOT NULL,
-        title TEXT NOT NULL DEFAULT '', view TEXT NOT NULL, edit TEXT NOT NULL, level TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '', view TEXT NOT NULL, edit TEXT NOT NULL,
         text TEXT NOT NULL DEFAULT '', fields TEXT NOT NULL DEFAULT '{}', images TEXT NOT NULL DEFAULT '[]',
         PRIMARY KEY(document, id));
     CREATE TABLE IF NOT EXISTS versions(
@@ -79,12 +79,11 @@ const SCHEMA: &str = "
 pub struct Access {
     pub view: String,
     pub edit: String,
-    pub level: String,
 }
 
 impl Default for Access {
     fn default() -> Self {
-        Access { view: "all".into(), edit: "all".into(), level: "open".into() }
+        Access { view: "all".into(), edit: "all".into() }
     }
 }
 
@@ -578,7 +577,7 @@ impl WorldDb {
             .optional()?;
         let Some(mut doc) = head else { return Ok(None) };
         let mut q = conn.prepare(
-            "SELECT id, base, section, title, view, edit, level, text, fields, images FROM layers WHERE document = ?1 ORDER BY base DESC, position",
+            "SELECT id, base, section, title, view, edit, text, fields, images FROM layers WHERE document = ?1 ORDER BY base DESC, position",
         )?;
         doc.layers = q
             .query_map([id], |r| {
@@ -587,10 +586,10 @@ impl WorldDb {
                     base: r.get(1)?,
                     section: r.get(2)?,
                     title: r.get(3)?,
-                    access: Access { view: r.get(4)?, edit: r.get(5)?, level: r.get(6)? },
-                    text: r.get(7)?,
-                    fields: from_json(&r.get::<_, String>(8)?),
-                    images: from_json(&r.get::<_, String>(9)?),
+                    access: Access { view: r.get(4)?, edit: r.get(5)? },
+                    text: r.get(6)?,
+                    fields: from_json(&r.get::<_, String>(7)?),
+                    images: from_json(&r.get::<_, String>(8)?),
                 })
             })?
             .collect::<std::result::Result<_, _>>()?;
@@ -618,7 +617,7 @@ impl WorldDb {
             .collect::<std::result::Result<_, _>>()?;
         let at: std::collections::HashMap<String, usize> = docs.iter().enumerate().map(|(i, d)| (d.id.clone(), i)).collect();
         let mut q = conn.prepare(
-            "SELECT document, id, base, section, title, view, edit, level, text, fields, images FROM layers ORDER BY document, base DESC, position",
+            "SELECT document, id, base, section, title, view, edit, text, fields, images FROM layers ORDER BY document, base DESC, position",
         )?;
         let rows = q.query_map([], |r| {
             Ok((
@@ -628,10 +627,10 @@ impl WorldDb {
                     base: r.get(2)?,
                     section: r.get(3)?,
                     title: r.get(4)?,
-                    access: Access { view: r.get(5)?, edit: r.get(6)?, level: r.get(7)? },
-                    text: r.get(8)?,
-                    fields: from_json(&r.get::<_, String>(9)?),
-                    images: from_json(&r.get::<_, String>(10)?),
+                    access: Access { view: r.get(5)?, edit: r.get(6)? },
+                    text: r.get(7)?,
+                    fields: from_json(&r.get::<_, String>(8)?),
+                    images: from_json(&r.get::<_, String>(9)?),
                 },
             ))
         })?;
@@ -709,10 +708,10 @@ impl WorldDb {
         tx.execute("DELETE FROM layers WHERE document = ?1", [&doc.id])?;
         for (i, l) in doc.layers.iter().enumerate() {
             tx.execute(
-                "INSERT INTO layers(document, id, position, base, section, title, view, edit, level, text, fields, images)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                "INSERT INTO layers(document, id, position, base, section, title, view, edit, text, fields, images)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
-                    doc.id, l.id, i as i64, l.base, l.section, l.title, l.access.view, l.access.edit, l.access.level,
+                    doc.id, l.id, i as i64, l.base, l.section, l.title, l.access.view, l.access.edit,
                     l.text, json(&l.fields)?, json(&l.images)?
                 ],
             )?;
@@ -738,10 +737,10 @@ impl WorldDb {
     pub fn names_for(&self, reader: &Reader) -> Result<Vec<(String, String, String)>> {
         let conn = self.conn();
         let mut q = conn.prepare(
-            "SELECT d.id, l.title, d.type, l.view, l.edit, l.level FROM documents d JOIN layers l ON l.document = d.id AND l.base = 1 ORDER BY d.created, d.id",
+            "SELECT d.id, l.title, d.type, l.view, l.edit FROM documents d JOIN layers l ON l.document = d.id AND l.base = 1 ORDER BY d.created, d.id",
         )?;
         let rows = q.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, Access { view: r.get(3)?, edit: r.get(4)?, level: r.get(5)? }))
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, Access { view: r.get(3)?, edit: r.get(4)? }))
         })?;
         let mut out = Vec::new();
         for row in rows {
@@ -1043,7 +1042,7 @@ mod tests {
             base: false,
             section: section.into(),
             title: String::new(),
-            access: Access { view: view.into(), edit: view.into(), level: "open".into() },
+            access: Access { view: view.into(), edit: view.into() },
             text: text.into(),
             fields: Default::default(),
             images: Vec::new(),

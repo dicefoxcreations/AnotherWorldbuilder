@@ -305,11 +305,11 @@ export const LABEL_AT = ["left", "top", "bottom"] as const;
 /** A pin's or region's own access, as it stands on its tag. */
 function accessOf(at: Map<string, string>): MapAccess {
   const out: MapAccess = {};
-  for (const n of ["view", "edit", "level"] as const) if (at.get(n)) out[n] = at.get(n);
+  for (const n of ["view", "edit"] as const) if (at.get(n)) out[n] = at.get(n);
   return out;
 }
 
-const accessText = (a: MapAccess) => (["view", "edit", "level"] as const).filter((n) => a[n]).map((n) => `${n}=${value(a[n]!)}`);
+const accessText = (a: MapAccess) => (["view", "edit"] as const).filter((n) => a[n]).map((n) => `${n}=${value(a[n]!)}`);
 
 /** Reads a map: its tag, and the pins on the lines before `</map>`. Forgiving: what does not read is left out. */
 export function readMap(tag: string, inside: string[]): MapNode {

@@ -22,7 +22,7 @@
 //! <block title="History">
 //! Everyone knows this.
 //!
-//! <block view=gm edit=gm level=gm-only>
+//! <block view=gm edit=gm>
 //! Only the GM knows this.
 //! </block>
 //! <image size=300x200 view=gm edit=gm>
@@ -34,11 +34,11 @@
 //! Nothing is indented, unlike in a template: in Markdown four spaces make a
 //! code block.
 //!
-//! **This is only a translation.** What is stored stays the encrypted
-//! layers; every part with access of its own is a package of its own with its
-//! own key. Which layer a part becomes, and whether the reader may change it,
-//! is decided when saving — in the application, which holds the keys. The
-//! text only ever contains what the reader could decrypt.
+//! **This is only a translation.** What is stored stays the layers; every
+//! part with access of its own is a layer of its own with its own rule.
+//! Which layer a part becomes, and whether the reader may change it, is
+//! decided when saving — where the world is held. The text only ever
+//! contains what the reader may see.
 //!
 //! Property values are text here. `@@Type:Name@@` names a document (see
 //! [`crate::link`]); resolving it to an id happens on saving, where it is
@@ -172,7 +172,6 @@ fn access_of(part: &crate::template::BlockPart) -> Access {
     Access {
         view: part.view.clone(),
         edit: part.edit.clone(),
-        level: part.level.clone(),
     }
 }
 
@@ -305,7 +304,7 @@ fn infobox_access(inner: &str, first: usize, document: &Access, errors: &mut Vec
 // access has — onto the map itself once it is the map's own.
 
 const PINS: &str = "pins";
-const ACCESS: [&str; 3] = ["view", "edit", "level"];
+const ACCESS: [&str; 2] = ["view", "edit"];
 
 /// A line's tag, if it is one on a line of its own.
 fn line_tag(line: &str) -> Option<template_text::Tag> {
@@ -427,7 +426,7 @@ fn split_secret_pins(blocks: &mut [TemplateBlock], previous: &[TemplateBlock]) {
             });
             taken.insert(key.clone());
             reused.insert(key.clone());
-            block.parts.push(crate::template::BlockPart { key, text, view: access.view, edit: access.edit, level: access.level });
+            block.parts.push(crate::template::BlockPart { key, text, view: access.view, edit: access.edit });
         }
     }
 }
@@ -825,13 +824,12 @@ mod tests {
     use super::*;
     use crate::template::BlockPart;
 
-    fn part(key: &str, text: &str, view: &str, edit: &str, level: &str) -> BlockPart {
+    fn part(key: &str, text: &str, view: &str, edit: &str) -> BlockPart {
         BlockPart {
             key: key.into(),
             text: text.into(),
             view: view.into(),
             edit: edit.into(),
-            level: level.into(),
         }
     }
 
@@ -839,7 +837,6 @@ mod tests {
         Access {
             view: "players".into(),
             edit: "gm".into(),
-            level: "open".into(),
         }
     }
 
@@ -862,9 +859,9 @@ mod tests {
                     heading: 1,
                     new: Vec::new(),
                     parts: vec![
-                        part("history", "Everyone knows this.", "players", "gm", "open"),
-                        part("history-2", "Only the GM.", "gm", "gm", "gm-only"),
-                        part("history-3", "Again for all.", "players", "gm", "open"),
+                        part("history", "Everyone knows this.", "players", "gm"),
+                        part("history-2", "Only the GM.", "gm", "gm"),
+                        part("history-3", "Again for all.", "players", "gm"),
                     ],
                 },
                 TemplateBlock {
@@ -875,7 +872,7 @@ mod tests {
                     fold: Default::default(),
                     heading: 1,
                     new: Vec::new(),
-                    parts: vec![part("notes", "Open to everyone.", "all", "all", "open")],
+                    parts: vec![part("notes", "Open to everyone.", "all", "all")],
                 },
             ],
         };
@@ -895,7 +892,7 @@ mod tests {
         assert!(code.ends_with("</block>\n</body>\n</article>\n"), "{code}");
         assert!(code.contains("<block title=History>\nEveryone knows this.\n"), "{code}");
         assert!(
-            code.contains("<block view=gm edit=gm level=gm-only>\nOnly the GM.\n</block>"),
+            code.contains("<block view=gm edit=gm>\nOnly the GM.\n</block>"),
             "{code}"
         );
         assert!(
@@ -912,7 +909,7 @@ mod tests {
     #[test]
     fn the_infobox_may_have_access_of_its_own() {
         let (mut doc, shape) = article();
-        doc.infobox = Some(Access { view: "players".into(), edit: "players".into(), level: "open".into() });
+        doc.infobox = Some(Access { view: "players".into(), edit: "players".into() });
         let code = to_code(&doc);
         assert!(code.contains("<body>\n<infobox view=players edit=players>\n\n<block title=History>"), "{code}");
         let back = from_code(&code, &doc, &shape);
@@ -967,7 +964,7 @@ mod tests {
     fn a_document_without_a_type_is_built_the_same() {
         let doc = DocumentText {
             name: "Eldermere".into(),
-            access: Access { view: "all".into(), edit: "gm".into(), level: "open".into() },
+            access: Access { view: "all".into(), edit: "gm".into() },
             infobox: None,
             properties: vec![],
             blocks: vec![TemplateBlock {
@@ -979,21 +976,21 @@ mod tests {
                 heading: 1,
                 new: Vec::new(),
                 parts: vec![
-                    part("welcome", "# Welcome\n\n<list type=Place style=cards>\n</list>", "all", "gm", "open"),
-                    part("welcome-2", "The secret map.", "gm", "gm", "gm-only"),
+                    part("welcome", "# Welcome\n\n<list type=Place style=cards>\n</list>", "all", "gm"),
+                    part("welcome-2", "The secret map.", "gm", "gm"),
                 ],
             }],
         };
         let shape = Shape {
             declared: Vec::new(),
-            defaults: Access { view: "all".into(), edit: "gm".into(), level: "open".into() },
+            defaults: Access { view: "all".into(), edit: "gm".into() },
         };
         let code = to_code(&doc);
         assert!(
             code.starts_with("<article view=all edit=gm>\n<name=Eldermere>\n<body>\n<block>\n# Welcome"),
             "the text stands in a block, as everywhere:\n{code}"
         );
-        assert!(code.contains("<block view=gm edit=gm level=gm-only>"), "{code}");
+        assert!(code.contains("<block view=gm edit=gm>"), "{code}");
 
         let back = from_code(&code, &doc, &shape);
         assert!(back.errors.is_empty(), "{:?}\n{code}", back.errors);
@@ -1029,7 +1026,7 @@ mod tests {
     fn an_empty_body_gets_no_access_of_its_own() {
         let shape = Shape {
             declared: Vec::new(),
-            defaults: Access { view: "all".into(), edit: "gm".into(), level: "open".into() },
+            defaults: Access { view: "all".into(), edit: "gm".into() },
         };
         let doc = DocumentText { name: "Home".into(), access: shape.defaults.clone(), ..Default::default() };
         let code = "<article view=all edit=gm>\n<name=Home>\n<body>\n<block>\n</block>\n</body>\n</article>\n";

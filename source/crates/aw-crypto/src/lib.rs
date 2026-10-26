@@ -1,29 +1,16 @@
-//! Cryptographic foundations for AnotherWorldbuilder.
-//!
-//! This crate is the only place in the project that touches key material.
-//! It invents no cryptography: X25519 for wrapping, XChaCha20-Poly1305 for
-//! content, HKDF-SHA256 for derived keys, Ed25519 for signatures, Argon2id
-//! for a passphrase.
-//!
-//! Every serialized format carries a version number from the first byte on.
-//! Without it the format could never change later without making existing
-//! worlds unreadable.
+//! Who is who in AnotherWorldbuilder: identities (Ed25519 to sign, an
+//! X25519 key that is part of what makes an id), ids, and a passphrase lock
+//! for one's own key backup (Argon2id, XChaCha20-Poly1305). It invents no
+//! cryptography.
 
 pub mod aead;
 pub mod ids;
 pub mod identity;
-pub mod kdf;
 pub mod passphrase;
-pub mod seal;
-pub mod world;
-pub mod write;
 
 pub use aead::{decrypt, encrypt, ContentKey};
 pub use ids::Id;
 pub use identity::{Identity, IdentityPublic};
-pub use seal::{seal_key, unseal_key, WrappedKey};
-pub use world::{WorldId, WorldPublic, WorldToken};
-pub use write::{verify_write, WriteKey};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CryptoError {

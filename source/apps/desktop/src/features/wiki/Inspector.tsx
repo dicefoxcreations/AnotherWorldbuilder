@@ -61,9 +61,9 @@ export function InspectorSection({ title, children }: { title: string; children:
   );
 }
 
-const ACCESS = ["view", "edit", "level"] as const;
+const ACCESS = ["view", "edit"] as const;
 
-/** Who may see, who may change, how far it travels — three rows. */
+/** Who may see, who may change — two rows. */
 export function AccessRows({
   world,
   value,
@@ -72,8 +72,8 @@ export function AccessRows({
   viewOnly,
 }: {
   world: WorldInfo;
-  value: { view: string; edit: string; level: string };
-  onChange: (p: Partial<{ view: string; edit: string; level: string }>) => void;
+  value: { view: string; edit: string };
+  onChange: (p: Partial<{ view: string; edit: string }>) => void;
   /** Only shown — set elsewhere. */
   readOnly?: boolean;
   /** Who sees it may be set, not who changes it — an editor who is not the GM. */
@@ -85,12 +85,6 @@ export function AccessRows({
       <VisibilityPicker world={world} value={value.view} onChange={(view) => onChange({ view })} small readOnly={readOnly} />
       <span className="small muted">Change</span>
       <VisibilityPicker world={world} value={value.edit} onChange={(edit) => onChange({ edit })} small readOnly={readOnly || viewOnly} />
-      <span className="small muted">Travels</span>
-      <select className="level-picker" disabled={readOnly || viewOnly} value={value.level || "open"} onChange={(e) => onChange({ level: e.target.value })}>
-        <option value="open">open</option>
-        <option value="sealed">sealed</option>
-        <option value="gm-only">GM only</option>
-      </select>
     </div>
   );
 }
@@ -148,13 +142,13 @@ export function AccessSection({ attrs, onAttrs }: { attrs?: ImageAttrs; onAttrs?
   }
   const own = !!attrs && ACCESS.some((n) => attr(attrs, n) !== "");
   if (own && attrs && onAttrs) {
-    const value = { view: attr(attrs, "view") || part.view, edit: attr(attrs, "edit") || part.edit, level: attr(attrs, "level") || "open" };
+    const value = { view: attr(attrs, "view") || part.view, edit: attr(attrs, "edit") || part.edit };
     return (
       <InspectorSection title="Access — its own">
         <AccessRows
           world={world}
           value={value}
-          onChange={(p) => onAttrs(Object.entries({ ...value, ...p }).reduce((a, [n, v]) => withAttr(a, n, n === "level" && v === "open" ? "" : v), attrs))}
+          onChange={(p) => onAttrs(Object.entries({ ...value, ...p }).reduce((a, [n, v]) => withAttr(a, n, v), attrs))}
         />
         <button className="compact ghost" onClick={() => onAttrs(ACCESS.reduce((a, n) => withAttr(a, n, ""), attrs))}>
           Same as its part
@@ -177,7 +171,7 @@ export function AccessSection({ attrs, onAttrs }: { attrs?: ImageAttrs; onAttrs?
     <InspectorSection title="Access">
       <button
         className="compact"
-        onClick={() => onAttrs(withAttr(withAttr(withAttr(attrs, "view", part.view), "edit", part.edit), "level", part.level === "open" ? "" : part.level))}
+        onClick={() => onAttrs(withAttr(withAttr(attrs, "view", part.view), "edit", part.edit))}
       >
         Own access
       </button>

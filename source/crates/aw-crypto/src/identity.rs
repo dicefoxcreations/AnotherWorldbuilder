@@ -90,10 +90,6 @@ impl Identity {
         }
     }
 
-    /// The private X25519 key that unwraps attribute keys.
-    pub fn seal_secret(&self) -> &StaticSecret {
-        &self.seal
-    }
 
     pub fn sign(&self, message: &[u8]) -> [u8; 64] {
         self.sign.sign(message).to_bytes()
@@ -164,14 +160,6 @@ impl IdentityPublic {
             .map_err(|_| CryptoError::BadSignature)
     }
 
-    /// The public X25519 key that attribute keys are wrapped for.
-    pub fn seal_public(&self) -> Result<PublicKey> {
-        let bytes: [u8; 32] = hex::decode(&self.seal_key)
-            .map_err(|e| CryptoError::BadKey(e.to_string()))?
-            .try_into()
-            .map_err(|_| CryptoError::BadKey("wrapping key is not 32 bytes".into()))?;
-        Ok(PublicKey::from(bytes))
-    }
 
     /// Whether the id really belongs to these keys.
     ///

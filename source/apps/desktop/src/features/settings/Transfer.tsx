@@ -6,7 +6,7 @@ import { ancestors, isA, realTypes } from "../../shared/types";
 
 /**
  * Types and documents from one world into another — the GM's. A package is
- * a folder, unencrypted; see `transfer.rs`.
+ * a folder, as plain text and files; see `transfer.rs`.
  */
 export function TransferArea({
   world,
@@ -123,7 +123,7 @@ function ExportPart({ world, templates, articles, onError }: { world: WorldInfo;
       </div>
       {done && (
         <p className="small">
-          {done.typesNew} types · {done.documentsNew} documents · {done.imagesNew} images — unencrypted
+          {done.typesNew} types · {done.documentsNew} documents · {done.imagesNew} images
         </p>
       )}
     </section>

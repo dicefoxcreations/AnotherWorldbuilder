@@ -108,9 +108,6 @@ pub const DAY_MINUTES: f64 = 1440.0;
 pub struct WorldDate(pub i64);
 
 impl WorldDate {
-    pub fn day_number(&self) -> i64 {
-        self.0
-    }
 
     pub fn plus_days(&self, days: i64) -> Self {
         WorldDate(self.0 + days)

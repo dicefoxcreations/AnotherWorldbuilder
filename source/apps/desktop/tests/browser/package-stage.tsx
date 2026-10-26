@@ -24,7 +24,7 @@ type Packed = {
     name: string;
     view: string;
     edit: string;
-    parts: { section: string; title: string; text: string; fields: Record<string, unknown>; view: string; edit: string; level: string }[];
+    parts: { section: string; title: string; text: string; fields: Record<string, unknown>; view: string; edit: string }[];
   }[];
 };
 
@@ -61,7 +61,7 @@ const asView = (d: Packed["documents"][number]): ArticleView => ({
   visibility: d.view,
   edit: d.edit,
   layerTotal: d.parts.length,
-  layers: d.parts.map((p, i) => ({ id: `${d.id}-${i}`, title: p.title, section: p.section, mayEdit: true, text: p.text, fields: p.fields ?? {}, policy: p.view, edit: p.edit, level: p.level, epoch: 0 })),
+  layers: d.parts.map((p, i) => ({ id: `${d.id}-${i}`, title: p.title, section: p.section, mayEdit: true, text: p.text, fields: p.fields ?? {}, policy: p.view, edit: p.edit, epoch: 0 })),
 });
 
 /** The document as the editor gets it: a section per part key, the first part's shape its look. */
@@ -71,11 +71,11 @@ const asText = (d: Packed["documents"][number]): DocumentText => {
     if (p.section === "properties" || p.section === "infobox") continue;
     const key = p.section.replace(/-\d+$/, "");
     const at = blocks.find((b) => b.key === key);
-    const part = { key: p.section, text: p.text, view: p.view, edit: p.edit, level: p.level };
+    const part = { key: p.section, text: p.text, view: p.view, edit: p.edit };
     if (at) at.parts.push(part);
     else blocks.push({ key, title: p.title, style: "text", heading: 1, ...((p.fields?.shape as object) ?? {}), parts: [part] } as TemplateBlock);
   }
-  return { name: d.name, access: { view: d.view, edit: d.edit, level: "open" }, properties: [], blocks };
+  return { name: d.name, access: { view: d.view, edit: d.edit }, properties: [], blocks };
 };
 
 export function PackageStage() {

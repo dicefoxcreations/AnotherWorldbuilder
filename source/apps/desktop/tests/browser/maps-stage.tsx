@@ -55,7 +55,7 @@ const PLACE: Template = {
   auth: null,
   namePattern: "%%input%%",
   page: "",
-  blocks: [{ key: "text", title: "", style: "text", parts: [{ key: "text", text: "", view: "all", edit: "all", level: "open" }] }],
+  blocks: [{ key: "text", title: "", style: "text", parts: [{ key: "text", text: "", view: "all", edit: "all" }] }],
 };
 
 const HARBOUR = `The harbour, from above.
@@ -81,7 +81,7 @@ const article = (id: string, name: string, text: string): ArticleView =>
     name,
     visibility: "all",
     layerTotal: 1,
-    layers: [{ id: `${id}-text`, title: "", section: "text", mayEdit: true, text, fields: {}, policy: "all", level: "open", epoch: 1, parent: null }],
+    layers: [{ id: `${id}-text`, title: "", section: "text", mayEdit: true, text, fields: {}, policy: "all", epoch: 1, parent: null }],
   }) as unknown as ArticleView;
 
 // A pin set apart for the GM — a part of its own, as saving leaves it.
@@ -97,9 +97,9 @@ const ARTICLES = [article("harbour", "Harbour", HARBOUR), article("cellar", "Cel
 
 const HARBOUR_DOC: DocumentText = {
   name: "Harbour",
-  access: { view: "all", edit: "all", level: "open" },
+  access: { view: "all", edit: "all" },
   properties: [],
-  blocks: [{ key: "text", title: "", style: "text", parts: [{ key: "text", text: HARBOUR, view: "all", edit: "all", level: "open" }] }],
+  blocks: [{ key: "text", title: "", style: "text", parts: [{ key: "text", text: HARBOUR, view: "all", edit: "all" }] }],
 };
 
 export function MapsStage() {
