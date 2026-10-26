@@ -479,13 +479,13 @@ mod tests {
 
     #[test]
     fn two_typing_at_the_same_spot_letter_by_letter_both_stay() {
-        let start = "Absatz 13: am Markt.\n\nAbsatz 14: weiter.";
+        let start = "Paragraph 13: at the pub.\n\nParagraph 14: on.";
         let mut doc = LayerDoc::genesis(&plain(start), "lay", 1).unwrap();
         let base = doc.doc.get_heads();
         // Each writes on what they last saw of their own — not the other's.
         let (mut a_heads, mut b_heads) = (base.clone(), base);
         let (mut a_text, mut b_text) = (start.to_string(), start.to_string());
-        let (a_typed, b_typed) = (" GM dreizehn.", " Leo dreizehn gleicher Absatz.");
+        let (a_typed, b_typed) = (" GM thirteen.", " Bob thirteen, same paragraph.");
         for n in 0..a_typed.len().max(b_typed.len()) {
             for (who, typed, text, heads) in [("id:a", a_typed, &mut a_text, &mut a_heads), ("id:b", b_typed, &mut b_text, &mut b_heads)] {
                 let Some(c) = typed.chars().nth(n) else { continue };
@@ -496,29 +496,29 @@ mod tests {
             }
         }
         let now = doc.plain().unwrap().text;
-        assert!(now.contains("GM dreizehn.") && now.contains("Leo dreizehn gleicher Absatz."), "{now}");
+        assert!(now.contains("GM thirteen.") && now.contains("Bob thirteen, same paragraph."), "{now}");
     }
 
     #[test]
     fn one_who_wrote_around_what_came_in_keeps_their_own() {
-        let para = |n: u32, more: &str| format!("Absatz {n}: Die Gruppe zieht weiter am Markt.{more}");
+        let para = |n: u32, more: &str| format!("Paragraph {n}: The group walks on to the pub.{more}");
         let text = |more: &str| [para(15, ""), para(16, more), para(17, "")].join("\n\n");
         let mut doc = LayerDoc::genesis(&plain(&text("")), "lay", 1).unwrap();
         let base = doc.doc.get_heads();
         let heads = |c: &[Change]| c.iter().map(|c| c.hash()).collect::<Vec<_>>();
-        // The GM types; Leo reads the first letter.
+        // The GM types; Bob reads the first letter.
         let mut gm = heads(&doc.edit(&base, &plain(&text(" G")), "id:gm", "s1", 1).unwrap());
-        let leo_base = gm.clone();
+        let bob_base = gm.clone();
         for more in [" GM", " GM ", " GM 1"] {
             let c = doc.edit(&gm, &plain(&text(more)), "id:gm", "s1", 1).unwrap();
             if !c.is_empty() {
                 gm = heads(&c);
             }
         }
-        // Leo writes before the G he saw.
-        doc.edit(&leo_base, &plain(&text(" Leo 16  G")), "id:leo", "s2", 1).unwrap();
+        // Bob writes before the G he saw.
+        doc.edit(&bob_base, &plain(&text(" Bob 16  G")), "id:bob", "s2", 1).unwrap();
         let now = doc.plain().unwrap().text;
-        assert!(now.contains("Leo 16") && now.contains("M 1"), "{now}");
+        assert!(now.contains("Bob 16") && now.contains("M 1"), "{now}");
     }
 
     #[test]

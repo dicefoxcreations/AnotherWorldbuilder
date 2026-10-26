@@ -306,9 +306,9 @@ mod tests {
 
     #[test]
     fn written_letter_by_letter_nothing_unchanged_is_taken_out() {
-        let old = "Am Markt. G\n\nNext.";
-        assert_eq!(edits(old, "Am Markt. GM\n\nNext."), vec![Splice { at: 11, delete: 0, insert: "M".into() }]);
-        assert_eq!(edits(old, "Am Markt. Leo G\n\nNext."), vec![Splice { at: 10, delete: 0, insert: "Leo ".into() }]);
+        let old = "At a pub. G\n\nNext.";
+        assert_eq!(edits(old, "At a pub. GM\n\nNext."), vec![Splice { at: 11, delete: 0, insert: "M".into() }]);
+        assert_eq!(edits(old, "At a pub. Bob G\n\nNext."), vec![Splice { at: 10, delete: 0, insert: "Bob ".into() }]);
         let both = "Ä🙂 one two three";
         let changed = "Ä🙂 one 2 three!";
         assert_eq!(apply(both, &edits(both, changed)), changed);

@@ -1214,12 +1214,12 @@ mod tests {
         let _ = write_online(&gm, &world, &article, &gm_server, &gm_wire, Some((gm1.code.replace("Rumours G\n", "Rumours GM 1\n"), gm1.base.clone()))).await;
         // Bob's session reads the GM's on the way — his save builds on what he saw.
         tokio::time::sleep(crate::online::FRESH).await;
-        let bob2 = write_online(&bob, &world, &article, &bob_server, &bob_wire, Some((bob1.code.replace("Rumours G\n", "Rumours Leo 16  G\n"), bob1.base.clone()))).await;
-        assert!(bob2.code.contains("Leo 16"), "his own, at once: {}", bob2.code);
+        let bob2 = write_online(&bob, &world, &article, &bob_server, &bob_wire, Some((bob1.code.replace("Rumours G\n", "Rumours Bob 16  G\n"), bob1.base.clone()))).await;
+        assert!(bob2.code.contains("Bob 16"), "his own, at once: {}", bob2.code);
         tokio::time::sleep(crate::online::FRESH).await;
         let bob3 = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await;
         let gm3 = write_online(&gm, &world, &article, &gm_server, &gm_wire, None).await;
-        assert!(bob3.code.contains("Leo 16") && bob3.code.contains("M 1"), "{}", bob3.code);
+        assert!(bob3.code.contains("Bob 16") && bob3.code.contains("M 1"), "{}", bob3.code);
         assert_eq!(gm3.code.lines().nth(4), bob3.code.lines().nth(4));
         crate::online::close_session(&gm.store, &world).await.unwrap();
         crate::online::close_session(&bob.store, &world).await.unwrap();

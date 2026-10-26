@@ -38,10 +38,10 @@ test("what others wrote and what one typed meanwhile both stay, part by part", a
   const { mergeTyped } = await import("../../src/shared/editor/Content.ts");
   const doc = (a, b) => ({ name: "Session", access: { view: "all", edit: "players", level: "open" }, properties: [], blocks: [{ key: "j", title: "Journal", parts: [{ key: "j", text: a, view: "all", edit: "players", level: "open" }, { key: "j-2", text: b, view: "all", edit: "players", level: "open" }] }] });
   const base = doc("First.", "Second.");
-  const ours = doc("First.", "Second. Leo types on");
+  const ours = doc("First.", "Second. Bob types on");
   const theirs = doc("First. The GM adds.", "Second.");
   const out = mergeTyped(base, ours, theirs);
-  assert.deepEqual(out.blocks[0].parts.map((p) => p.text), ["First. The GM adds.", "Second. Leo types on"]);
+  assert.deepEqual(out.blocks[0].parts.map((p) => p.text), ["First. The GM adds.", "Second. Bob types on"]);
   const added = { ...ours, blocks: [{ ...ours.blocks[0], parts: [...ours.blocks[0].parts, { key: "j-3", text: "New", view: "all", edit: "players", level: "open" }] }] };
   assert.equal(mergeTyped(base, added, theirs), null, "a part added here: the code is merged");
 });
