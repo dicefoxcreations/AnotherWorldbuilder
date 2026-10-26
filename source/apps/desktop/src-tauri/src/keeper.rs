@@ -1,23 +1,25 @@
-//! The keeper of a group's worlds: who comes in, who may ask to, and what
-//! each one gets — the same rules wherever it runs. On a server (see
-//! `server`) it holds no world's keys; on the GM's own device (`here`) it
-//! answers for the GM's worlds and holds theirs.
+//! The keeper of a group's worlds: who comes in, and what each one may do
+//! there — the same rules wherever it runs. On a server (see `server`) it
+//! holds the worlds GMs brought; in the app (`here`) it answers for the
+//! GM's own worlds, those offered on the network.
+//!
+//! A member works in a world here by asking for commands of the app, done
+//! in their name (`remote::call`): what they get to see and change, the
+//! world itself says.
 
 use super::*;
-use crate::store::JoinRequest;
+use store::WorldDb;
 use aw_sync::world::{Ask, BackupPlan, HeldWorld, Host, Offer, Order, Person, Reply, ServerBackups, ServerState};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-mod transactions;
-
-/// Someone seen this long ago is noted again on disk.
+/// Someone seen this long ago is noted again on disk, in seconds.
 const NOTE_AGAIN: u64 = 10 * 60;
-
-pub(crate) fn is_id(id: &str) -> bool {
-    id.strip_prefix("id:").is_some_and(|body| body.len() == 16 && body.chars().all(|c| c.is_ascii_hexdigit()))
-}
+/// How much of a file one piece carries.
+const PIECE: usize = 4 * 1024 * 1024;
+/// How large a world brought here may be.
+const MAX_WORLD: u64 = 64 * 1024 * 1024 * 1024;
 
 /// What the server keeps of whom: who may bring worlds, which are closed,
 /// who came and who is turned away.
@@ -30,26 +32,23 @@ pub(crate) struct Book {
     #[serde(default)]
     worldbuilders: Vec<String>,
     /// Who would bring a world.
+    #[serde(default)]
     asking: Vec<String>,
     /// By world: its name, for when it is gone.
+    #[serde(default)]
     closed: BTreeMap<String, String>,
+    #[serde(default)]
     blocked: Vec<String>,
-    /// By id: name, and when last seen.
+    /// By id: name, and when last seen in seconds.
+    #[serde(default)]
     users: BTreeMap<String, (String, u64)>,
     /// By world: how it is backed up, where its GM said otherwise than daily, 7 kept.
     #[serde(default)]
     backups: BTreeMap<String, BackupPlan>,
-    /// By world: whom an admin let in — the next device holding its keys
-    /// lets them in.
+    /// By world: the server it went to from here, by its code — for its
+    /// members to follow.
     #[serde(default)]
-    approved: BTreeMap<String, Vec<String>>,
-    /// By world: whom an admin took out — turned away at once; the next
-    /// device holding its keys takes them out for good.
-    #[serde(default)]
-    removing: BTreeMap<String, Vec<String>>,
-    /// The admins as they proved themselves: for GMs to seal their keys for.
-    #[serde(default)]
-    identities: BTreeMap<String, IdentityPublic>,
+    moved: BTreeMap<String, String>,
 }
 
 /// Unless its GM says otherwise, a world here is backed up daily and the last
@@ -60,83 +59,30 @@ fn default_plan() -> BackupPlan {
 
 pub(crate) struct Keeper {
     store: Store,
-    /// In the app, beside what the device holds of others' worlds: it keeps
-    /// the GM's own worlds for others — those offered on the network — and
-    /// may let players keep copies, where a server is the one place a world
-    /// lies.
+    /// In the app: it answers for the GM's own worlds offered on the
+    /// network, and nobody brings any.
     in_app: bool,
     admin: String,
-    /// Where the backups of the worlds lie: `backups/` in the data folder.
-    backups: PathBuf,
+    /// Its folder: `server.json`, `backups/`, and what is on its way.
+    data: PathBuf,
     me: IdentityPublic,
     book: Mutex<Book>,
-    path: PathBuf,
-    /// Worlds being written right now: asked about meanwhile, the server
-    /// says it is busy instead of waiting — and lists them as last known.
-    writing: Mutex<HashSet<String>>,
-    known: Mutex<HashMap<String, Known>>,
-    /// Online commands on their way, by world, member and transaction —
-    /// see `transactions`.
-    staged: Mutex<HashMap<String, transactions::Staged>>,
-    /// Their answers, for a commit asked again after its answer got lost.
-    receipts: Mutex<HashMap<String, (Reply, std::time::Instant)>>,
 }
 
-/// What the server last read of a world: its GM, and whether encrypted.
-#[derive(Clone, Default)]
-struct Known {
-    gm: String,
-    gm_id: String,
-    encrypted: bool,
-    at: Option<std::time::Instant>,
-}
-
-/// How long what is known of a world holds before it is read again.
-const KNOWN_FOR: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// A world being written, until it is done — whatever the outcome.
-struct Writing<'a> {
-    keeper: &'a Keeper,
-    world: String,
-}
-
-impl Drop for Writing<'_> {
-    fn drop(&mut self) {
-        if let Ok(mut writing) = self.keeper.writing.lock() {
-            writing.remove(&self.world);
-        }
-    }
-}
-
-/// Whether an ask brings records or image parts along.
-/// Requests to join one world may wait at once: more are not taken.
-const MAX_REQUESTS: usize = 50;
-
-/// How long a write waits for the one before it.
-const WRITE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
-
-fn writes(ask: &Ask) -> bool {
-    match ask {
-        Ask::Swap { give, .. } => !give.is_empty(),
-        Ask::Give { records } => !records.is_empty(),
-        Ask::Parts { give, .. } => !give.is_empty(),
-        Ask::Commit { .. } | Ask::Abort { .. } | Ask::Release { .. } => true,
-        _ => false,
-    }
+fn secs() -> u64 {
+    store::now() / 1000
 }
 
 impl Keeper {
     pub(crate) fn open(store: Store, data: &Path, admin: String) -> Answer<Self> {
-        let path = data.join("server.json");
-        let book = match std::fs::read(&path) {
+        let book = match std::fs::read(data.join("server.json")) {
             Ok(raw) => serde_json::from_slice(&raw)?,
             Err(_) => Book::default(),
         };
         let me = store.load_identity()?.public();
-        let keeper = Keeper { store, in_app: false, admin, backups: data.join("backups"), me, book: Mutex::new(book), path, writing: Mutex::default(), known: Mutex::default(), staged: Mutex::default(), receipts: Mutex::default() };
-        // Online commands were staged in files before world format 4.
-        let _ = std::fs::remove_dir_all(data.join("online-transactions"));
-        Ok(keeper)
+        // What was on its way when it stopped is asked for again.
+        let _ = std::fs::remove_dir_all(data.join("outgoing"));
+        Ok(Keeper { store, in_app: false, admin, data: data.to_path_buf(), me, book: Mutex::new(book) })
     }
 
     fn book(&self) -> Answer<std::sync::MutexGuard<'_, Book>> {
@@ -144,73 +90,21 @@ impl Keeper {
     }
 
     fn save(&self, book: &Book) -> Answer<()> {
-        aw_store::durable::write(&self.path, &serde_json::to_vec_pretty(book)?)?;
+        aw_store::durable::write(&self.data.join("server.json"), &serde_json::to_vec_pretty(book)?)?;
         Ok(())
     }
 
     /// Notes who came — on disk when new, or not seen for a while.
     fn note(&self, who: &IdentityPublic) -> Answer<()> {
         let mut book = self.book()?;
-        let now = network::now();
+        let now = secs();
         let id = who.id.to_string();
-        let mut again = book.users.get(&id).is_none_or(|(name, last)| *name != who.name || now.saturating_sub(*last) > NOTE_AGAIN);
-        book.users.insert(id.clone(), (who.name.clone(), now));
-        if (id == self.admin || book.admins.contains(&id)) && who.is_genuine() && book.identities.get(&id) != Some(who) {
-            book.identities.insert(id, who.clone());
-            again = true;
-        }
+        let again = book.users.get(&id).is_none_or(|(name, last)| *name != who.name || now.saturating_sub(*last) > NOTE_AGAIN);
+        book.users.insert(id, (who.name.clone(), now));
         if again {
             self.save(&book)?;
         }
         Ok(())
-    }
-
-    /// Asking about a world: `None` while it is being written; otherwise
-    /// the claim to write it, if the ask writes.
-    fn claim(&self, world: &str, writes: bool) -> Answer<Option<Option<Writing<'_>>>> {
-        let mut writing = self.writing.lock().map_err(AppError::from)?;
-        if writing.contains(world) {
-            return Ok(None);
-        }
-        if !writes {
-            return Ok(Some(None));
-        }
-        writing.insert(world.to_string());
-        Ok(Some(Some(Writing { keeper: self, world: world.to_string() })))
-    }
-
-    /// A write's turn: waits a moment for the write before it, then says
-    /// busy — the app asks again.
-    fn claim_soon(&self, world: &str) -> Answer<Option<Option<Writing<'_>>>> {
-        let until = std::time::Instant::now() + WRITE_WAIT;
-        loop {
-            if let Some(writing) = self.claim(world, true)? {
-                return Ok(Some(writing));
-            }
-            if std::time::Instant::now() >= until {
-                return Ok(None);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-    }
-
-    /// GM and form of a world — as last known while it is being written,
-    /// and read again now and then.
-    fn known(&self, world: &str) -> Answer<Known> {
-        let last = self.known.lock().map_err(AppError::from)?.get(world).cloned();
-        let fresh = last.as_ref().and_then(|k| k.at).is_some_and(|at| at.elapsed() < KNOWN_FOR);
-        if fresh || self.writing.lock().map_err(AppError::from)?.contains(world) {
-            return Ok(last.unwrap_or_default());
-        }
-        let gm = self.store.with_journal(world, |j| Ok(j.world_item().map(|(.., gm)| gm.clone())))?;
-        let known = Known {
-            gm: gm.as_ref().map(|g| g.name.clone()).unwrap_or_default(),
-            gm_id: gm.map(|g| g.id.to_string()).unwrap_or_default(),
-            encrypted: self.store.is_encrypted(world)?,
-            at: Some(std::time::Instant::now()),
-        };
-        self.known.lock().map_err(AppError::from)?.insert(world.to_string(), known.clone());
-        Ok(known)
     }
 
     /// Whether someone manages the server.
@@ -218,50 +112,52 @@ impl Keeper {
         Ok(id == self.admin || self.book()?.admins.iter().any(|a| a == id))
     }
 
-    /// The admins' identities as they proved them — the first one first.
-    fn admin_identities(&self) -> Answer<Vec<IdentityPublic>> {
-        let book = self.book()?;
-        Ok(std::iter::once(&self.admin).chain(book.admins.iter()).filter_map(|id| book.identities.get(id).cloned()).collect())
-    }
-
     fn may_bring(&self, id: &str) -> Answer<bool> {
-        Ok(self.is_admin(id)? || self.book()?.worldbuilders.iter().any(|g| g == id))
+        Ok(!self.in_app && (self.is_admin(id)? || self.book()?.worldbuilders.iter().any(|g| g == id)))
     }
 
-    /// Whether anyone may learn of a world and ask to join it: one its GM put
-    /// on the list (`Item::Listing`).
-    fn listed(&self, world: &str) -> bool {
-        self.store.on_the_list(world).unwrap_or(false)
-    }
-
-    /// Whether a world is kept here for others: on a server every world it
+    /// Whether a world is here for others: on a server every world it
     /// holds; in the app the GM's own, offered on the network.
     fn keeps(&self, world: &str) -> bool {
-        !self.in_app || network::answered_here(&self.store, world)
+        if !self.store.holds(world) {
+            return false;
+        }
+        !self.in_app || (self.store.is_gm(world) && self.store.load_network().is_ok_and(|s| s.shared.iter().any(|w| w == world)))
     }
 
-    /// The worlds held and open: name, icon, GM.
+    fn closed(&self, world: &str) -> Answer<bool> {
+        Ok(self.book()?.closed.contains_key(world))
+    }
+
+    fn gm_of(&self, world: &str) -> Answer<Option<store::Member>> {
+        Ok(self.store.db(world)?.members()?.into_iter().find(|m| m.role == Role::Gm))
+    }
+
+    fn is_member(&self, world: &str, id: &str) -> Answer<bool> {
+        Ok(self.store.db(world)?.member(id)?.is_some())
+    }
+
     /// The worlds named to whoever asks — `id`: also those they are GM or a
-    /// member of, all of them for the admin; none: only those on the list.
-    fn offers(&self, id: Option<&str>) -> Answer<Vec<Offer>> {
+    /// member of or let into ahead of time, all of them for the admin; none:
+    /// only those on the list.
+    pub(crate) fn offers(&self, id: Option<&str>) -> Answer<Vec<Offer>> {
         let closed: Vec<String> = self.book()?.closed.keys().cloned().collect();
+        let admin = id.map(|id| self.is_admin(id)).transpose()?.unwrap_or(false);
         let mut out = Vec::new();
-        for meta in self.store.list_worlds()? {
-            let world = meta.public.world_id.to_string();
+        for world in self.store.held_worlds()? {
             if closed.contains(&world) || !self.keeps(&world) {
                 continue;
             }
-            let theirs = id.is_some_and(|id| {
-                self.is_admin(id).unwrap_or(false)
-                    || self.store.gm_of(&world).ok().flatten().as_deref() == Some(id)
-                    || self.store.has_grant(&world, id).unwrap_or(false)
-                    || self.store.expects(&world, id).unwrap_or(false)
-            });
-            if !theirs && !self.listed(&world) {
+            let theirs = match id {
+                Some(id) => admin || self.is_member(&world, id)? || self.store.db(&world)?.invited()?.iter().any(|i| i == id),
+                None => false,
+            };
+            if !theirs && !self.store.on_the_list(&world)? {
                 continue;
             }
-            let gm = self.known(&world)?.gm;
-            out.push(Offer { world, name: meta.public.name.clone(), icon: meta.icon.clone(), gm });
+            let meta = self.store.load_world_meta(&world)?;
+            let gm = meta.gm().map(|g| g.name.clone()).unwrap_or_default();
+            out.push(Offer { world, name: meta.name, icon: meta.icon, gm });
         }
         Ok(out)
     }
@@ -272,50 +168,34 @@ impl Keeper {
         if self.book()?.blocked.contains(&id) {
             return Ok(Reply::NotOffered);
         }
-        // In the app, what is not kept for others is not here for them; one
-        // on its way to another folder is asked for again shortly.
-        if self.in_app && !world.is_empty() {
-            if !self.keeps(world) {
-                return Ok(Reply::NotOffered);
-            }
-            if store::moving(world) {
-                return Ok(Reply::Busy);
-            }
+        if !world.is_empty() && store::moving(world) {
+            return Ok(Reply::Busy);
         }
         match ask {
-            Ask::Worlds => {
-                let asked = self.book()?.asking.contains(&id);
-                return Ok(Reply::Worlds {
-                    worlds: self.offers(Some(&id))?,
-                    host: Some(self.me.clone()),
-                    admin: self.is_admin(&id)?,
-                    may_bring: self.may_bring(&id)?,
-                    asked,
-                });
-            }
-            // Its GM takes their own world away — to another server, say; the admin too,
-            // without closing it first.
-            Ask::Manage { order: Some(Order::Delete { world }) } if self.store.holds(&world) && self.store.gm_of(&world)?.as_deref() == Some(id.as_str()) => {
-                let Some(_writing) = self.claim(&world, true)? else { return Ok(Reply::Busy) };
+            Ask::Worlds => Ok(Reply::Worlds {
+                worlds: self.offers(Some(&id))?,
+                host: Some(self.me.clone()),
+                admin: self.is_admin(&id)? && !self.in_app,
+                may_bring: self.may_bring(&id)?,
+                asked: self.book()?.asking.contains(&id),
+            }),
+            // Its GM takes their own world away — to another server, say.
+            Ask::Manage { order: Some(Order::Delete { world }) } if !self.in_app && self.store.holds(&world) && self.gm_of(&world)?.is_some_and(|g| g.id == id) => {
                 self.store.delete_world(&world)?;
                 println!("{world}: taken away by {}", who.name);
-                return Ok(Reply::Managed { state: ServerState::default() });
+                Ok(Reply::Managed { state: ServerState::default() })
             }
-            Ask::Manage { order } if self.is_admin(&id)? => {
-                let _writing = if let Some(Order::Delete { world }) = &order {
-                    let Some(writing) = self.claim(world, true)? else { return Ok(Reply::Busy) };
-                    writing
-                } else { None };
+            Ask::Manage { order } if !self.in_app && self.is_admin(&id)? => {
                 if let Some(order) = order {
                     self.carry_out(order)?;
                 }
-                return Ok(Reply::Managed { state: self.state()? });
+                Ok(Reply::Managed { state: self.state()? })
             }
-            Ask::Manage { .. } => return Ok(Reply::NotOffered),
+            Ask::Manage { .. } => Ok(Reply::NotOffered),
             // Its GM, or the admin: how the server backs the world up.
             Ask::Backups { plan } => {
-                let gm = self.store.holds(world) && self.store.gm_of(world)?.as_deref() == Some(id.as_str());
-                if !(gm || (self.is_admin(&id)? && self.store.holds(world))) {
+                let gm = self.keeps(world) && self.gm_of(world)?.is_some_and(|g| g.id == id);
+                if self.in_app || !(gm || (self.is_admin(&id)? && self.store.holds(world))) {
                     return Ok(Reply::NotOffered);
                 }
                 if let Some(plan) = plan {
@@ -326,204 +206,175 @@ impl Keeper {
                     book.backups.insert(world.to_string(), BackupPlan { keep: plan.keep.clamp(1, 365), ..plan });
                     self.save(&book)?;
                 }
-                return Ok(Reply::Backups { backups: self.backups_of(world)? });
+                Ok(Reply::Backups { backups: self.backups_of(world)? })
             }
-            Ask::HostWorlds => {
-                if !self.may_bring(&id)? {
-                    let mut book = self.book()?;
-                    if !book.asking.contains(&id) {
-                        book.asking.push(id);
-                        self.save(&book)?;
-                    }
-                }
-                return Ok(Reply::Requested);
-            }
-            _ => {}
-        }
-        if world.is_empty() || self.book()?.closed.contains_key(world) {
-            return Ok(Reply::NotOffered);
-        }
-        // One write at a time; a write waits a moment for the one before
-        // it, reading never waits.
-        let _writing = if writes(&ask) {
-            let Some(writing) = self.claim_soon(world)? else { return Ok(Reply::Busy) };
-            writing
-        } else {
-            None
-        };
-        if !self.store.holds(world) {
-            return self.bring(world, who, ask);
-        }
-        let store = &self.store;
-        if self.book()?.removing.get(world).is_some_and(|r| r.contains(&id)) {
-            return Ok(Reply::NotMember);
-        }
-        if matches!(ask, Ask::Commit { .. } | Ask::Abort { .. } | Ask::Release { .. }) {
-            if store.gm_of(world)?.as_deref() != Some(id.as_str()) && !store.has_grant(world, &id)? {
-                return Ok(Reply::NotMember);
-            }
-            return self.online_command(world, who, ask);
-        }
-        // Its GM: the whole of it, and who asked to join.
-        if store.gm_of(world)?.as_deref() == Some(id.as_str()) {
-            let mut reply = network::answer_member(store, world, &id, ask)?;
-            if let Reply::Digest { requests, approved, removing, admins, no_copy, .. } = &mut reply {
-                (*requests, *approved, *removing) = self.requests(world)?;
-                *admins = self.admin_identities()?;
-                *no_copy = !store.copies(world)?;
-            }
-            return Ok(reply);
-        }
-        // A member by the grant the GM wrote. Anyone else may ask to join a
-        // world on the list; one that is not is as if it were not here — its
-        // GM adds a new player by their id.
-        if !store.has_grant(world, &id)? {
-            let expected = store.expects(world, &id)?;
-            let may_ask = expected || self.listed(world);
-            // Let in ahead of time by their id: whatever they ask, they ask
-            // to join — a device that still takes them for a member, too.
-            if may_ask && (expected || matches!(ask, Ask::Join)) {
-                let mut requests = store.load_requests(world)?;
-                if who.is_genuine() && !requests.iter().any(|r| r.identity.id == who.id) && requests.len() < MAX_REQUESTS {
-                    requests.push(JoinRequest { identity: who.clone(), at: network::now() });
-                    store.save_requests(world, &requests)?;
-                }
-                // Whoever holds the world's keys takes the requests in: those
-                // let in ahead of time are in. A server holds none — the GM's
-                // device does it when it next reads the world; here, at once.
-                if store.holds_token(world) {
-                    network::take_requests(store, world, vec![who.clone()], &[])?;
-                }
-                if !store.has_grant(world, &id)? {
-                    return Ok(Reply::Requested);
-                }
-            } else {
-                return Ok(if may_ask || store.load_requests(world)?.iter().any(|r| r.identity.id == who.id) {
-                    // Whoever asked already knows of it, and waits for the GM.
-                    Reply::NotMember
-                } else {
-                    Reply::NotOffered
-                });
-            }
-        }
-        // Where players may keep copies — in the app, as the GM says — or
-        // work online.
-        if self.in_app {
-            if crate::host::online_only(store, world) {
-                return Ok(network::online(store, world, who, ask));
-            }
-            return network::answer_member(store, world, &id, ask);
-        }
-        // Unencrypted: online, each member with their view and rights.
-        if !store.is_encrypted(world)? {
-            return Ok(network::online(store, world, who, ask));
-        }
-        // Encrypted: what only their keys open — kept while online where
-        // the GM keeps players from copies.
-        let mut reply = network::answer_member(store, world, &id, ask)?;
-        if let Reply::Digest { requests, approved, removing, no_copy, .. } = &mut reply {
-            *no_copy = !store.copies(world)?;
-            // A supporter hears who asked to join, as the GM does.
-            if store.with_journal(world, |j| Ok(j.supporters().contains(&id)))? {
-                (*requests, *approved, *removing) = self.requests(world)?;
-            }
-        }
-        Ok(reply)
-    }
-
-    /// A world new here: brought by a GM the admin lets bring worlds — and
-    /// only their own. Anyone else's waits for the admin.
-    fn bring(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Answer<Reply> {
-        let id = who.id.to_string();
-        if !self.may_bring(&id)? {
-            let mut book = self.book()?;
-            if matches!(ask, Ask::Digest { .. }) && !book.asking.contains(&id) {
-                book.asking.push(id);
-                self.save(&book)?;
-            }
-            return Ok(Reply::Requested);
-        }
-        Ok(match ask {
-            Ask::Digest { .. } => Reply::Digest {
-                digest: aw_store::journal::Journal::digest(&[]),
-                presence: Vec::new(),
-                rolls: Vec::new(),
-                requests: Vec::new(),
-                approved: Vec::new(),
-                removing: Vec::new(),
-                admins: Vec::new(),
-                no_copy: false,
-                mark: None,
-            },
-            // What it has, asked for: all of it.
-            Ask::Swap { have, give } if give.is_empty() => Reply::Records { records: Vec::new(), wanted: have, digest: aw_store::journal::Journal::digest(&[]) },
-            Ask::Swap { have, give } => {
-                if !self.take_brought(world, who, &give)? {
+            // A world brought here: not by just anyone.
+            Ask::MayIBring | Ask::Put { .. } | Ask::Bring { .. } if !self.may_bring(&id)? => {
+                if self.in_app {
                     return Ok(Reply::NotOffered);
                 }
-                let here: HashSet<String> = self.store.inventory(world)?.into_iter().collect();
-                let wanted = have.into_iter().filter(|r| !here.contains(r)).collect();
-                Reply::Records { records: Vec::new(), wanted, digest: aw_store::journal::Journal::digest(&here.into_iter().collect::<Vec<_>>()) }
-            }
-            Ask::Give { records } if !records.is_empty() => {
-                if !self.take_brought(world, who, &records)? {
-                    return Ok(Reply::NotOffered);
+                let mut book = self.book()?;
+                if !book.asking.contains(&id) {
+                    book.asking.push(id);
+                    self.save(&book)?;
                 }
-                Reply::Taken { digest: aw_store::journal::Journal::digest(&self.store.inventory(world)?) }
+                Ok(Reply::Requested)
             }
-            _ => Reply::NotOffered,
-        })
+            Ask::MayIBring => Ok(Reply::Joined),
+            Ask::Put { file, at, data } => self.put(world, &id, &file, at, &data),
+            Ask::Bring { name } => self.bring(world, who, &name),
+            _ if !self.keeps(world) || self.closed(world)? => Ok(match self.gone_to(world) {
+                Some(server) => Reply::Moved { server },
+                None => Reply::NotOffered,
+            }),
+            Ask::Join => Ok(if network::join(&self.store, world, who)? { Reply::Joined } else { Reply::Requested }),
+            _ if !self.is_member(world, &id)? => Ok(Reply::NotMember),
+            Ask::Call { command, args } => {
+                let args: serde_json::Value = serde_json::from_str(&args)?;
+                let db = self.store.db(world)?;
+                if command == "world_sync" {
+                    let since = args.get("since").and_then(|s| s.as_u64()).unwrap_or(0);
+                    let (writes, changed) = others_wrote(&db, world, since, &id, self.host());
+                    let info = store::acting_for(&id, || world_now(&self.store, world))?;
+                    let value = serde_json::json!({ "writes": writes, "changed": changed, "world": info });
+                    return Ok(Reply::Called { value: Some(value.to_string()), error: None });
+                }
+                let before = db.writes();
+                let done = store::acting_for(&id, || remote::call(&self.store, world, &command, &args));
+                note_writes(world, before, db.writes(), &id);
+                Ok(match done {
+                    Ok(value) => Reply::Called { value: Some(serde_json::to_string(&value)?), error: None },
+                    Err(e) => Reply::Called { value: None, error: Some(e.0) },
+                })
+            }
+            // Its GM takes it along — to their own device, or another server.
+            Ask::Files | Ask::Get { .. } if !self.gm_of(world)?.is_some_and(|g| g.id == id) => Ok(Reply::NotOffered),
+            Ask::Files => self.files(world),
+            Ask::Get { file, at } => self.get(world, &file, at),
+        }
     }
 
-    /// The first records of a world brought here. They have to name the one
-    /// bringing it GM — a world of someone else's goes again.
-    fn take_brought(&self, world: &str, who: &IdentityPublic, records: &[String]) -> Answer<bool> {
-        self.store.receive(world, records)?;
-        if self.store.gm_of(world)?.as_deref() != Some(who.id.as_str()) {
-            self.store.delete_world(world)?;
-            return Ok(false);
-        }
-        println!("{world}: brought by {}", who.name);
-        Ok(true)
-    }
-
-    /// Who asked to join a world here — for its GM, who decides. Those let
-    /// in meanwhile are done.
-    /// Who asked to join a world, whom of them an admin let in — and whom
-    /// an admin took out who is in still.
-    fn requests(&self, world: &str) -> Answer<(Vec<IdentityPublic>, Vec<String>, Vec<String>)> {
-        let store = &self.store;
-        let mut requests = store.load_requests(world)?;
-        let before = requests.len();
-        requests.retain(|r| !store.has_grant(world, r.identity.id.as_str()).unwrap_or(false));
-        if requests.len() != before {
-            store.save_requests(world, &requests)?;
-        }
+    /// Notes where a world went from here — or that it is back (`None`).
+    pub(crate) fn moved(&self, world: &str, server: Option<&str>) -> Answer<()> {
         let mut book = self.book()?;
-        let asking: Vec<&str> = requests.iter().map(|r| r.identity.id.as_str()).collect();
-        let approved = book.approved.get(world).cloned().unwrap_or_default();
-        let still: Vec<String> = approved.iter().filter(|id| asking.contains(&id.as_str())).cloned().collect();
-        if still != approved {
-            if still.is_empty() { book.approved.remove(world); } else { book.approved.insert(world.to_string(), still.clone()); }
-            self.save(&book)?;
-        }
-        // Out for good once their grant is gone; until then turned away.
-        let removing = book.removing.get(world).cloned().unwrap_or_default();
-        let inside: Vec<String> = removing.iter().filter(|id| store.has_grant(world, id).unwrap_or(false)).cloned().collect();
-        if inside != removing {
-            if inside.is_empty() { book.removing.remove(world); } else { book.removing.insert(world.to_string(), inside.clone()); }
-            self.save(&book)?;
-        }
-        Ok((requests.into_iter().map(|r| r.identity).collect(), still, inside))
+        match server {
+            Some(code) => book.moved.insert(world.to_string(), code.to_string()),
+            None => book.moved.remove(world),
+        };
+        self.save(&book)
     }
+
+    /// Where a world went from here, by the server's code.
+    pub(crate) fn gone_to(&self, world: &str) -> Option<String> {
+        self.book().ok()?.moved.get(world).cloned().filter(|_| !self.store.holds(world))
+    }
+
+    /// The worlds gone from here to a server.
+    pub(crate) fn gone(&self) -> Vec<String> {
+        self.book().map(|b| b.moved.keys().filter(|w| !self.store.holds(w)).cloned().collect()).unwrap_or_default()
+    }
+
+    /// Whose writes are not noted — the app's own user; a server writes
+    /// nothing of itself.
+    fn host(&self) -> &str {
+        if self.in_app { &self.admin } else { "" }
+    }
+
+    // --- Bringing and fetching worlds -------------------------------------
+
+    /// Where a world brought by `id` arrives, until it is whole.
+    fn incoming(&self, world: &str, id: &str) -> PathBuf {
+        self.data.join("incoming").join(format!("{}-{}", store::dir_name(world), store::dir_name(id)))
+    }
+
+    /// Where a world is copied to be taken away, a piece at a time.
+    fn outgoing(&self, world: &str) -> PathBuf {
+        self.data.join("outgoing").join(store::dir_name(world))
+    }
+
+    /// A piece of a world brought here.
+    fn put(&self, world: &str, id: &str, file: &str, at: u64, data: &str) -> Answer<Reply> {
+        use base64::Engine;
+        let path = self.incoming(world, id).join(safe_file(file)?);
+        let bytes = base64::engine::general_purpose::STANDARD.decode(data.as_bytes()).map_err(|_| AppError("A piece did not arrive whole.".into()))?;
+        let had = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if at == 0 {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+        } else if at != had {
+            return Err(AppError(format!("Expected the piece at {had}.")));
+        }
+        if at + bytes.len() as u64 > MAX_WORLD || size(&self.incoming(world, id)) > MAX_WORLD {
+            return Err(AppError("This world is too large for the server.".into()));
+        }
+        use std::io::Write;
+        let mut out = std::fs::OpenOptions::new().create(true).write(true).truncate(at == 0).append(at != 0).open(&path)?;
+        out.write_all(&bytes)?;
+        Ok(Reply::Taken)
+    }
+
+    /// The world brought here is whole: one whose GM brought it, not here yet.
+    fn bring(&self, world: &str, who: &IdentityPublic, name: &str) -> Answer<Reply> {
+        let from = self.incoming(world, who.id.as_str());
+        let db = WorldDb::open(&from).map_err(|_| AppError("The world did not arrive whole.".into()))?;
+        if db.get("id")?.as_deref() != Some(world) {
+            return Err(AppError("This is another world.".into()));
+        }
+        if !db.members()?.iter().any(|m| m.role == Role::Gm && m.id == who.id.as_str()) {
+            return Err(AppError("Only its GM brings a world.".into()));
+        }
+        drop(db);
+        if self.store.holds(world) {
+            return Err(AppError("This world is here already.".into()));
+        }
+        if self.book()?.closed.contains_key(world) {
+            return Err(AppError("This world was closed here.".into()));
+        }
+        let into = self.store.worlds_dir().join(store::dir_name(world));
+        std::fs::create_dir_all(self.store.worlds_dir())?;
+        std::fs::rename(&from, &into)?;
+        println!("{world}: “{name}” brought by {}", who.name);
+        Ok(Reply::Joined)
+    }
+
+    /// The files of a world, copied as they are now — to be taken away.
+    fn files(&self, world: &str) -> Answer<Reply> {
+        let out = self.outgoing(world);
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out)?;
+        let db = self.store.db(world)?;
+        db.copy_to(&out.join(aw_store::db::FILE))?;
+        let mut files = vec![(aw_store::db::FILE.to_string(), std::fs::metadata(out.join(aw_store::db::FILE))?.len())];
+        for entry in std::fs::read_dir(db.dir().join(aw_store::db::MEDIA)).into_iter().flatten().flatten() {
+            if entry.file_type().is_ok_and(|t| t.is_file()) {
+                files.push((format!("{}/{}", aw_store::db::MEDIA, entry.file_name().to_string_lossy()), entry.metadata()?.len()));
+            }
+        }
+        Ok(Reply::Files { files })
+    }
+
+    /// A piece of one of a world's files — its database as copied for `Files`.
+    fn get(&self, world: &str, file: &str, at: u64) -> Answer<Reply> {
+        use base64::Engine;
+        use std::io::{Read, Seek};
+        let file = safe_file(file)?;
+        let path = if file == aw_store::db::FILE { self.outgoing(world).join(file) } else { self.store.world_dir(world).join(file) };
+        let mut f = std::fs::File::open(&path)?;
+        f.seek(std::io::SeekFrom::Start(at))?;
+        let mut buf = Vec::with_capacity(PIECE);
+        f.take(PIECE as u64).read_to_end(&mut buf)?;
+        Ok(Reply::Piece { data: base64::engine::general_purpose::STANDARD.encode(&buf) })
+    }
+
+    // --- Backups -----------------------------------------------------------
 
     fn plan(&self, world: &str) -> Answer<BackupPlan> {
         Ok(self.book()?.backups.get(world).cloned().unwrap_or_else(default_plan))
     }
 
-    /// The folder of a world's backups here.
     fn backups_dir(&self, world: &str) -> PathBuf {
-        self.backups.join(store::dir_name(world))
+        self.data.join("backups").join(store::dir_name(world))
     }
 
     fn backups_of(&self, world: &str) -> Answer<ServerBackups> {
@@ -531,34 +382,39 @@ impl Keeper {
         Ok(ServerBackups { plan: self.plan(world)?, count: there.len() as u32, last: there.first().map(|(a, _)| a.at).unwrap_or(0) })
     }
 
-    /// Backs up the worlds whose time has come — not one being written right
-    /// now; it comes the next time round.
+    /// Backs up the worlds whose time has come.
     pub(crate) fn due(&self) {
-        self.release_receipts();
-        let Ok(worlds) = self.store.list_worlds() else { return };
-        for meta in worlds {
-            let world = meta.public.world_id.to_string();
+        let Ok(worlds) = self.store.held_worlds() else { return };
+        for world in worlds {
             let Ok(plan) = self.plan(&world) else { continue };
             let Some(period) = backup::period(&plan.every) else { continue };
             let into = self.backups_dir(&world);
             let last = backup::list(&into).first().map(|(a, _)| a.at).unwrap_or(0);
-            if store::now().saturating_sub(last) < period {
+            if store::now().saturating_sub(last) < period || store::moving(&world) {
                 continue;
             }
-            let Ok(Some(Some(_writing))) = self.claim(&world, true) else { continue };
-            let gm = self.known(&world).map(|k| k.gm_id).unwrap_or_default();
-            match backup::copy_world(&self.store.world_dir(&world), &into, &world, &meta.public.name, &gm, Some(plan.keep), |_| Ok(())) {
+            let Ok(db) = self.store.db(&world) else { continue };
+            let name = db.get("name").ok().flatten().unwrap_or_default();
+            match backup::copy_world(&db, &into, &world, &name, "", Some(plan.keep)) {
                 Ok(at) => println!("{world}: backed up to {}", at.display()),
                 Err(e) => eprintln!("{world}: backup failed: {}", e.0),
             }
         }
     }
 
+    // --- Managing ------------------------------------------------------------
+
+    /// Does what the GM of a world would — for an admin's order.
+    fn as_gm<T>(&self, world: &str, f: impl FnOnce() -> Answer<T>) -> Answer<T> {
+        let gm = self.gm_of(world)?.ok_or_else(|| AppError("This world has no GM.".into()))?;
+        store::acting_for(&gm.id, f)
+    }
+
     fn carry_out(&self, order: Order) -> Answer<()> {
         let mut book = self.book()?;
         match order {
             Order::Allow { id } => {
-                if !is_id(&id) {
+                if !is_player_id(&id) {
                     return Err(AppError("That is no id.".into()));
                 }
                 book.asking.retain(|a| a != &id);
@@ -571,7 +427,7 @@ impl Keeper {
                 book.worldbuilders.retain(|g| g != &id);
             }
             Order::Admin { id, on: true } => {
-                if !is_id(&id) {
+                if !is_player_id(&id) {
                     return Err(AppError("That is no id.".into()));
                 }
                 if id != self.admin && !book.admins.contains(&id) {
@@ -579,32 +435,20 @@ impl Keeper {
                 }
                 book.blocked.retain(|b| b != &id);
             }
-            Order::Admin { id, on: false } if id == self.admin => return Err(AppError("The first admin stays — named when the server starts.".into())),
-            Order::Admin { id, on: false } => {
-                book.admins.retain(|a| a != &id);
-                book.identities.remove(&id);
-            }
+            Order::Admin { id, .. } if id == self.admin => return Err(AppError("The first admin stays — named when the server starts.".into())),
+            Order::Admin { id, on: false } => book.admins.retain(|a| a != &id),
             Order::Approve { world, id } => {
-                let approved = book.approved.entry(world).or_default();
-                if !approved.contains(&id) {
-                    approved.push(id);
-                }
+                let request = self.store.db(&world)?.requests()?.into_iter().find(|r| r.id == id).ok_or_else(|| AppError("There is no such request.".into()))?;
+                self.as_gm(&world, || admit(&self.store, &world, card_of(&request)?, Vec::new()))?;
             }
             Order::Remove { world, id } => {
-                if !self.store.holds(&world) {
-                    return Err(AppError("There is no such world here.".into()));
-                }
-                let (gm, supporter) = self.store.with_journal(&world, |j| Ok((j.world_item().is_some_and(|(.., g)| g.id.as_str() == id), j.supporters().contains(&id))))?;
-                if gm || supporter {
+                if self.store.db(&world)?.member(&id)?.is_some_and(|m| m.role != Role::Player) {
                     return Err(AppError("Only players are taken out here — the GM takes out supporters.".into()));
                 }
-                let removing = book.removing.entry(world).or_default();
-                if !removing.contains(&id) {
-                    removing.push(id);
-                }
+                self.as_gm(&world, || remove_member(&self.store, &world, &id))?;
             }
             Order::Close { world } => {
-                let name = self.store.load_world_meta(&world).map(|m| m.public.name).unwrap_or_default();
+                let name = self.store.load_world_meta(&world).map(|m| m.name).unwrap_or_default();
                 book.closed.insert(world, name);
             }
             Order::Open { world } => {
@@ -618,33 +462,28 @@ impl Keeper {
                     self.store.delete_world(&world)?;
                 }
             }
-            Order::Block { id } if id != self.admin && !book.admins.contains(&id) => {
+            Order::Block { id } | Order::Kick { id } if id == self.admin || book.admins.contains(&id) => {
+                return Err(AppError("An admin cannot be turned away.".into()));
+            }
+            Order::Block { id } => {
                 if !book.blocked.contains(&id) {
                     book.blocked.push(id);
                 }
             }
-            Order::Block { .. } => return Err(AppError("An admin cannot be turned away.".into())),
-            Order::Kick { id } if id != self.admin && !book.admins.contains(&id) => {
+            Order::Kick { id } => {
                 if !book.blocked.contains(&id) {
                     book.blocked.push(id.clone());
                 }
                 book.worldbuilders.retain(|w| w != &id);
                 book.asking.retain(|a| a != &id);
-                // Out of every world they play in; a world's GM or supporter
-                // only its GM takes out — turned away, they get none of it.
+                // Out of every world they play in; a GM or supporter only
+                // their GM takes out — turned away, they get none of it.
                 for world in self.store.held_worlds()? {
-                    let (member, gm, supporter) = self.store.with_journal(&world, |j| {
-                        Ok((j.grant(&id).is_some(), j.world_item().is_some_and(|(.., g)| g.id.as_str() == id), j.supporters().contains(&id)))
-                    })?;
-                    if member && !gm && !supporter {
-                        let removing = book.removing.entry(world).or_default();
-                        if !removing.contains(&id) {
-                            removing.push(id.clone());
-                        }
+                    if self.store.db(&world)?.member(&id)?.is_some_and(|m| m.role == Role::Player) {
+                        self.as_gm(&world, || remove_member(&self.store, &world, &id))?;
                     }
                 }
             }
-            Order::Kick { .. } => return Err(AppError("An admin cannot be kicked.".into())),
             Order::Unblock { id } => book.blocked.retain(|b| b != &id),
         }
         self.save(&book)
@@ -657,32 +496,25 @@ impl Keeper {
             Person { id: id.to_string(), name, last, blocked: book.blocked.iter().any(|b| b == id) }
         };
         let mut worlds = Vec::new();
-        for meta in self.store.list_worlds()? {
-            let world = meta.public.world_id.to_string();
-            let known = self.known(&world)?;
-            let requests = self.store.load_requests(&world).unwrap_or_default().into_iter().map(|r| person(r.identity.id.as_str())).collect();
-            let removing = book.removing.get(&world).cloned().unwrap_or_default();
-            let supporters = self.store.with_journal(&world, |j| Ok(j.supporters())).unwrap_or_default();
-            let members = self.store.with_journal(&world, |j| Ok(j.granted_members())).unwrap_or_default().into_iter()
-                .filter(|m| !removing.iter().any(|r| r == m.id.as_str()))
-                .map(|m| Person { name: m.name.clone(), ..person(m.id.as_str()) })
-                .collect();
+        for world in self.store.held_worlds()? {
+            let db = self.store.db(&world)?;
+            let members = db.members()?;
+            let gm = members.iter().find(|m| m.role == Role::Gm);
             worlds.push(HeldWorld {
-                name: meta.public.name.clone(),
-                gm: known.gm,
-                gm_id: known.gm_id,
-                bytes: size(&self.store.world_dir(&world)),
-                encrypted: known.encrypted,
+                name: db.get("name")?.unwrap_or_default(),
+                gm: gm.map(|g| g.name.clone()).unwrap_or_default(),
+                gm_id: gm.map(|g| g.id.clone()).unwrap_or_default(),
+                bytes: size(db.dir()),
                 closed: book.closed.contains_key(&world),
-                requests,
-                members,
-                supporters,
+                requests: db.requests()?.into_iter().map(|r| Person { name: r.name.clone(), ..person(&r.id) }).collect(),
+                supporters: members.iter().filter(|m| m.role == Role::Supporter).map(|m| m.id.clone()).collect(),
+                members: members.iter().filter(|m| m.role != Role::Gm).map(|m| Person { name: m.name.clone(), ..person(&m.id) }).collect(),
                 world,
             });
         }
         // Closed and gone: by the name it had.
         for (world, name) in book.closed.iter().filter(|(w, _)| !self.store.holds(w)) {
-            worlds.push(HeldWorld { world: world.clone(), name: name.clone(), gm: String::new(), gm_id: String::new(), bytes: 0, encrypted: true, closed: true, requests: Vec::new(), members: Vec::new(), supporters: Vec::new() });
+            worlds.push(HeldWorld { world: world.clone(), name: name.clone(), gm: String::new(), gm_id: String::new(), bytes: 0, closed: true, requests: Vec::new(), members: Vec::new(), supporters: Vec::new() });
         }
         worlds.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         let mut users: Vec<Person> = book.users.keys().map(|id| person(id)).collect();
@@ -697,12 +529,57 @@ impl Keeper {
     }
 }
 
-/// The app's own keeper, by profile: the GM's device answering others.
-static HERE: std::sync::OnceLock<Mutex<HashMap<PathBuf, Arc<Keeper>>>> = std::sync::OnceLock::new();
+/// Who wrote last, by world: the writes from and to, and by whom — for
+/// telling each member what the others changed.
+static WRITTEN: std::sync::OnceLock<Mutex<BTreeMap<String, std::collections::VecDeque<(u64, u64, String)>>>> = std::sync::OnceLock::new();
+/// How many writes are noted per world.
+const NOTED: usize = 500;
 
-/// The keeper of the GM's worlds on this device — what answers whoever asks
-/// this app, under a server's rules. Its notes (who came, who is turned
-/// away) lie in the profile's `host/`.
+fn note_writes(world: &str, before: u64, after: u64, who: &str) {
+    if after <= before {
+        return;
+    }
+    let Ok(mut all) = WRITTEN.get_or_init(Default::default).lock() else { return };
+    let noted = all.entry(world.to_string()).or_default();
+    noted.push_back((before, after, who.to_string()));
+    while noted.len() > NOTED {
+        noted.pop_front();
+    }
+}
+
+/// How far a world's writes are, and whether someone other than `who`
+/// wrote since `since`. Writes noted for nobody are `host`'s own.
+pub(crate) fn others_wrote(db: &WorldDb, world: &str, since: u64, who: &str, host: &str) -> (u64, bool) {
+    let now = db.writes();
+    // Opened anew since — a server started again, say.
+    if now < since {
+        return (now, true);
+    }
+    if now == since {
+        return (now, false);
+    }
+    let Ok(all) = WRITTEN.get_or_init(Default::default).lock() else { return (now, true) };
+    let noted = all.get(world).map(|n| n.iter().filter(|(_, to, _)| *to > since).collect::<Vec<_>>()).unwrap_or_default();
+    if noted.iter().any(|(.., by)| by != who) {
+        return (now, true);
+    }
+    let covered: u64 = noted.iter().map(|(from, to, _)| (*to).min(now).saturating_sub((*from).max(since))).sum();
+    (now, covered < now - since && who != host)
+}
+
+/// A file of a world as named on the network: `world.sqlite`, or a picture
+/// in `media/` — nothing else, nowhere else.
+fn safe_file(file: &str) -> Answer<&str> {
+    let plain = |name: &str| !name.is_empty() && !name.starts_with('.') && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    let ok = file == aw_store::db::FILE || file.strip_prefix("media/").is_some_and(plain);
+    if ok { Ok(file) } else { Err(AppError("No such file in a world.".into())) }
+}
+
+/// The app's own keeper, by profile: the GM's device answering others.
+static HERE: std::sync::OnceLock<Mutex<BTreeMap<PathBuf, Arc<Keeper>>>> = std::sync::OnceLock::new();
+
+/// The keeper of the GM's worlds on this device. Its notes (who came, who
+/// is turned away) lie in the profile's `host/`.
 pub(crate) fn here(store: &Store) -> Answer<Arc<Keeper>> {
     let mut all = HERE.get_or_init(Default::default).lock().map_err(AppError::from)?;
     if let Some(keeper) = all.get(store.profile_dir()) {
@@ -716,21 +593,13 @@ pub(crate) fn here(store: &Store) -> Answer<Arc<Keeper>> {
     Ok(keeper)
 }
 
-impl Keeper {
-    /// Answers someone whose identity is proven.
-    pub(crate) fn answer_to(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Answer<Reply> {
-        self.reply(world, who, ask)
-    }
-
-}
-
 impl Host for Keeper {
     fn offers(&self) -> Vec<Offer> {
         Keeper::offers(self, None).unwrap_or_default()
     }
-    /// Every world: one not here yet may be brought.
-    fn serves(&self, _world: &str) -> bool {
-        true
+    /// On a server every world: one not here yet may be brought.
+    fn serves(&self, world: &str) -> bool {
+        !self.in_app || world.is_empty() || self.keeps(world) || self.gone_to(world).is_some()
     }
     fn answer(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Reply {
         let what = format!("{ask:?}").chars().take(40).collect::<String>();
@@ -742,6 +611,7 @@ impl Host for Keeper {
         })
     }
 }
+
 /// What a folder takes on disk.
 fn size(dir: &Path) -> u64 {
     std::fs::read_dir(dir)
@@ -756,1274 +626,186 @@ fn size(dir: &Path) -> u64 {
         })
         .unwrap_or(0)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aw_sync::world::{Reach, Server, WorldNet};
-    use aw_model::Level;
-    use aw_store::journal::{Access, Plain};
-    use store::NewPart;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use serde_json::json;
 
-    struct OnlineWire<'a> {
-        keeper: &'a Keeper,
-        who: &'a Identity,
-        alive: AtomicBool,
-        lose_ack: AtomicBool,
-        stop_before_commit: AtomicBool,
-        record_limit: usize,
-        asks: std::sync::atomic::AtomicUsize,
-        swaps: std::sync::atomic::AtomicUsize,
-    }
-
-    impl crate::online::Transport for OnlineWire<'_> {
-        fn ask<'a>(&'a self, world: &'a str, ask: Ask) -> std::pin::Pin<Box<dyn std::future::Future<Output = Answer<Reply>> + Send + 'a>> {
-            Box::pin(async move {
-                if !self.alive.load(Ordering::SeqCst) {
-                    return Err(AppError(crate::online::UNAVAILABLE.into()));
-                }
-                let final_commit = matches!(ask, Ask::Commit { finish: true, .. });
-                if final_commit && self.stop_before_commit.swap(false, Ordering::SeqCst) {
-                    self.alive.store(false, Ordering::SeqCst);
-                    return Err(AppError(crate::online::UNAVAILABLE.into()));
-                }
-                if matches!(ask, Ask::Swap { .. }) { self.swaps.fetch_add(1, Ordering::SeqCst); }
-                let mut reply = crate::online::patiently(std::time::Duration::from_secs(10), || {
-                    self.asks.fetch_add(1, Ordering::SeqCst);
-                    std::future::ready(Ok(self.keeper.answer(world, &self.who.public(), ask.clone())))
-                }).await?;
-                if let Reply::Records { records, .. } = &mut reply {
-                    records.truncate(self.record_limit);
-                }
-                if final_commit && self.lose_ack.swap(false, Ordering::SeqCst) {
-                    self.alive.store(false, Ordering::SeqCst);
-                    return Err(AppError(crate::online::UNAVAILABLE.into()));
-                }
-                Ok(reply)
-            })
-        }
-    }
-
-    fn online_wire<'a>(keeper: &'a Keeper, who: &'a Identity) -> OnlineWire<'a> {
-        OnlineWire { keeper, who, alive: AtomicBool::new(true), lose_ack: AtomicBool::new(false), stop_before_commit: AtomicBool::new(false), record_limit: usize::MAX,
-                     asks: Default::default(), swaps: Default::default() }
-    }
-
-    fn on_server(gm: &Someone, world: &str) -> Server {
-        let server = Server { endpoint: "1".repeat(64), addrs: vec!["127.0.0.1:7447".into()] };
-        let mut settings = gm.store.load_network().unwrap();
-        settings.servers = vec![server.code()];
-        settings.homes.insert(world.into(), server.endpoint.clone());
-        gm.store.save_network(&settings).unwrap();
-        server
-    }
-
-    async fn run_online<T, F, R>(base: &Store, world: &str, server: &Server, wire: &T, run: F) -> Answer<R>
-    where T: crate::online::Transport, F: FnOnce(Store) -> Answer<R> {
-        crate::online::execute(base, world, server, wire, crate::online::Needs::Everything, |cache| std::future::ready(run(cache))).await
-    }
-
-    fn staged_control(keeper: &Keeper, gm: &Someone, world: &str, transaction: &str) -> Ask {
-        let before = gm.store.inventory(world).unwrap();
-        gm.store.control(world, aw_store::journal::Item::Copies { players: false }, "staged").unwrap();
-        let added: Vec<_> = gm.store.inventory(world).unwrap().into_iter().filter(|id| !before.contains(id)).collect();
-        Ask::Commit { transaction: transaction.into(), base: aw_store::journal::Journal::digest(&keeper.store.inventory(world).unwrap()),
-            records: gm.store.records(world, &added).unwrap(), parts: Vec::new(), finish: false, piece: 0 }
-    }
-
-    #[test]
-    fn a_staged_control_conflicts_instead_of_overwriting_a_newer_server_revision() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, _) = world(&gm, "Eldermere");
-        swap(&keeper, &gm, &world);
-        let original = keeper.store.inventory(&world).unwrap();
-        let staged = staged_control(&keeper, &gm, &world, &"a".repeat(64));
-        let Ask::Commit { transaction, base, .. } = &staged else { unreachable!() };
-        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true, piece: 1 };
-        assert_eq!(keeper.answer(&world, &gm.me.public(), staged), Reply::Staged);
-        assert_eq!(keeper.store.inventory(&world).unwrap(), original);
-        assert!(keeper.store.copies(&world).unwrap());
-        // A second, independently acknowledged command changes the revision.
-        let before = gm.store.inventory(&world).unwrap();
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: true }, "another-command").unwrap();
-        let added: Vec<_> = gm.store.inventory(&world).unwrap().into_iter().filter(|id| !before.contains(id)).collect();
-        keeper.store.receive(&world, &gm.store.records(&world, &added).unwrap()).unwrap();
-        assert_eq!(keeper.answer(&world, &gm.me.public(), finish), Reply::Conflict);
-        assert!(keeper.store.copies(&world).unwrap());
-    }
-
-    #[test]
-    fn a_command_is_staged_in_memory_and_its_receipt_answers_it_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let server = keeper(dir.path(), &gm);
-        let (world, _) = world(&gm, "Eldermere");
-        swap(&server, &gm, &world);
-        let staged = staged_control(&server, &gm, &world, &"b".repeat(64));
-        let Ask::Commit { transaction, base, .. } = &staged else { unreachable!() };
-        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true, piece: 1 };
-        assert_eq!(server.answer(&world, &gm.me.public(), staged.clone()), Reply::Staged);
-        assert!(!dir.path().join("online-transactions").exists(), "nothing of it in files");
-        let reply = server.answer(&world, &gm.me.public(), finish.clone());
-        assert!(matches!(reply, Reply::Committed { .. }));
-        assert!(!server.store.copies(&world).unwrap(), "in the world");
-        assert_eq!(server.answer(&world, &gm.me.public(), finish), reply, "asked again: the same answer");
-
-        // A server started anew has nothing staged: the rest of the command is
-        // refused, not half written.
-        let again = staged_control(&server, &gm, &world, &"c".repeat(64));
-        let Ask::Commit { transaction, base, .. } = &again else { unreachable!() };
-        assert_eq!(server.answer(&world, &gm.me.public(), again.clone()), Reply::Staged);
-        drop(server);
-        let server = keeper(dir.path(), &gm);
-        let before = server.store.inventory(&world).unwrap().len();
-        let finish = Ask::Commit { transaction: transaction.clone(), base: base.clone(), records: Vec::new(), parts: Vec::new(), finish: true, piece: 1 };
-        assert!(server.reply(&world, &gm.me.public(), finish).is_err());
-        assert_eq!(server.store.inventory(&world).unwrap().len(), before);
-    }
-
-    #[test]
-    fn unsigned_online_records_never_reach_the_canonical_journal() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, _) = world(&gm, "Eldermere");
-        swap(&keeper, &gm, &world);
-        let before = keeper.store.inventory(&world).unwrap();
-        let mut staged = staged_control(&keeper, &gm, &world, &"c".repeat(64));
-        if let Ask::Commit { records, finish, .. } = &mut staged {
-            let mut raw: serde_json::Value = serde_json::from_str(&records[0]).unwrap();
-            raw["signature"] = "invalid".into();
-            records[0] = serde_json::to_string(&raw).unwrap();
-            *finish = true;
-        }
-        assert!(keeper.reply(&world, &gm.me.public(), staged).is_err());
-        assert_eq!(keeper.store.inventory(&world).unwrap(), before);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore = "requires loopback UDP sockets"]
-    async fn encrypted_online_commands_use_a_real_server_and_fail_closed_after_disconnect() {
-        struct Nobody;
-        impl Host for Nobody {
-            fn offers(&self) -> Vec<Offer> { Vec::new() }
-            fn answer(&self, _: &str, _: &IdentityPublic, _: Ask) -> Reply { Reply::NotOffered }
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = Arc::new(keeper(dir.path(), &gm));
-        let (world, article) = world(&gm, "Online separation test");
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &gm, &world);
-        let reach = Reach { only: Some(std::net::Ipv4Addr::LOCALHOST), ..Default::default() };
-        let mut endpoint = Some(WorldNet::start(keeper.clone(), reach.clone()).await.unwrap());
-        let server = Server { endpoint: endpoint.as_ref().unwrap().id(), addrs: endpoint.as_ref().unwrap().loopback_addr().ip_addrs().map(ToString::to_string).collect() };
-        let client = WorldNet::start(Arc::new(Nobody), reach).await.unwrap();
-        let authoritative = keeper.store.inventory(&world).unwrap();
-        // A pre-0.1.56 GM folder may contain stale, unsent edits. Upgrading
-        // must read the server, rather than silently publishing this folder.
-        let old = document::code_of(&gm.store, &gm.me, &world, &article).unwrap();
-        document::save(&gm.store, &gm.me, &world, &article, &old.code.replace("Content of Rumours", "Stale local copy must not upload."), &old.base, "old-client").unwrap();
-        for who in [&gm, &bob] {
-            let mut settings = who.store.load_network().unwrap();
-            settings.servers = vec![server.code()];
-            settings.homes.insert(world.clone(), server.endpoint.clone());
-            who.store.save_network(&settings).unwrap();
-        }
-        network::with_servers(&gm.store.for_sync(), &client, &gm.me, &HashSet::new()).await.unwrap();
-        assert_eq!(keeper.store.inventory(&world).unwrap(), authoritative, "migration cannot upload an old working copy");
-        let wire = crate::online::Connection { net: &client, server: &server, me: &gm.me };
-        run_online(&gm.store, &world, &server, &wire, |cache| {
-            let code = document::code_of(&cache, &gm.me, &world, &article)?;
-            assert!(!code.code.contains("Stale local copy must not upload."));
-            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Saved through real encrypted transport."), &code.base, "real-wire")
-        }).await.unwrap();
-        let player = crate::online::Connection { net: &client, server: &server, me: &bob.me };
-        let code = run_online(&bob.store, &world, &server, &player, |cache| {
-            document::code_of(&cache, &bob.me, &world, &article).map(|d| d.code)
-        }).await.unwrap();
-        assert!(code.contains("Saved through real encrypted transport.") && !code.contains("Content of Truth"));
-        assert!(!gm.store.holds(&world) && !bob.store.holds(&world));
-        assert!(!keeper.store.holds_token(&world));
-        assert!(keeper.store.load_keyring(&world).unwrap().attributes().next().is_none());
-        // An explicit move/create on a server still provisions a new world.
-        let fresh = new_world(&gm.store, &gm.me, "Explicit new upload".into()).unwrap().public.world_id.to_string();
-        gm.store.control(&fresh, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        network::live_on(&gm.store, &fresh, Some(server.code())).unwrap();
-        assert!(gm.store.load_network().unwrap().uploading.contains(&fresh));
-        for _ in 0..20 {
-            network::with_servers(&gm.store.for_sync(), &client, &gm.me, &HashSet::new()).await.unwrap();
-            if network::online_worlds(&gm.store).iter().any(|w| w.world == fresh) { break }
-        }
-        assert!(keeper.store.holds(&fresh));
-        assert!(!gm.store.holds(&fresh));
-        assert!(!gm.store.load_network().unwrap().uploading.contains(&fresh));
-        crate::online::close_session(&gm.store, &fresh).await.unwrap();
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-        // Optional disposable profiles for the native UI smoke test. No real
-        // profile, world, or server is used by this fixture.
-        let fixture = std::env::var_os("AW_ONLINE_FIXTURE").map(PathBuf::from);
-        if let Some(path) = &fixture {
-            for who in [&gm, &bob] {
-                let config = dir.path().join(format!("{}-config", who.me.public().name));
-                std::fs::create_dir_all(&config).unwrap();
-                std::fs::write(config.join("locations.json"), serde_json::to_vec(&serde_json::json!({ "profile": who.store.profile_dir(), "worlds": who.store.worlds_dir(), "additional": [] })).unwrap()).unwrap();
-            }
-            std::fs::write(path, serde_json::to_vec(&serde_json::json!({ "root": dir.path(), "gm_config": dir.path().join("Marla-config"), "bob_config": dir.path().join("Bob-config"), "world": world, "article": article, "server": server.code() })).unwrap()).unwrap();
-            while !path.with_extension("offline").exists() { tokio::time::sleep(std::time::Duration::from_millis(200)).await; }
-        }
-        drop(endpoint.take());
-        let failed = run_online(&gm.store, &world, &server, &wire, |_| {
-            panic!("the real server is gone; no local operation may run");
-            #[allow(unreachable_code)] Ok(())
-        }).await;
-        assert!(failed.is_err());
-        assert!(!gm.store.holds(&world));
-        if let Some(path) = &fixture {
-            while !path.with_extension("finish").exists() { tokio::time::sleep(std::time::Duration::from_millis(200)).await; }
-        }
-    }
-
-    #[tokio::test]
-    async fn an_online_gm_has_no_retained_world_and_never_opens_a_copy_when_the_server_is_off() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        swap(&keeper, &gm, &world);
-        let server = on_server(&gm, &world);
-        let token = std::fs::read(gm.store.private_world_dir(&world).join("owner.key")).unwrap();
-        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        assert!(!gm.store.holds(&world), "copies off applies to the GM too");
-        let wire = online_wire(&keeper, &gm.me);
-        let opened = run_online(&gm.store, &world, &server, &wire, |cache| {
-            document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)
-        }).await.unwrap();
-        assert!(opened.contains("Content of Truth"));
-        assert!(!keeper.store.holds_token(&world));
-        assert!(keeper.store.load_keyring(&world).unwrap().attributes().next().is_none());
-        assert!(keeper.store.view_keys(&world, &keeper.store.load_identity().unwrap()).is_err(), "the server cannot decrypt the world");
-        wire.alive.store(false, Ordering::SeqCst);
-        // What the server said a moment ago still counts; then it asks again.
-        tokio::time::sleep(crate::online::FRESH).await;
-        let refused = run_online(&gm.store, &world, &server, &wire, |_| {
-            panic!("a disconnected server world must not execute a local command");
-            #[allow(unreachable_code)] Ok(())
-        }).await;
-        assert!(refused.is_err());
-        assert!(!gm.store.holds(&world));
-        assert_eq!(std::fs::read(gm.store.private_world_dir(&world).join("owner.key")).unwrap(), token);
-        assert!(gm.store.private_world_dir(&world).join("keyring.json").exists());
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_world_on_a_server_leaves_no_copy_even_where_copies_are_allowed() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        assert!(gm.store.copies(&world).unwrap(), "the world allows copies");
-        swap(&keeper, &gm, &world);
-        let server = on_server(&gm, &world);
-        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        assert!(!gm.store.holds(&world), "uploaded, it lies on the server only");
-        let wire = online_wire(&keeper, &gm.me);
-        run_online(&gm.store, &world, &server, &wire, |cache| document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)).await.unwrap();
-        assert!(!gm.store.holds(&world), "working on it leaves nothing here");
-        wire.alive.store(false, Ordering::SeqCst);
-        tokio::time::sleep(crate::online::FRESH).await;
-        let refused = run_online(&gm.store, &world, &server, &wire, |_| {
-            panic!("no server, no world");
-            #[allow(unreachable_code)] Ok(())
-        }).await;
-        assert!(refused.is_err());
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn the_gm_connecting_brings_an_old_grant_up_to_date() {
-        use aw_store::journal::{GrantContent, Item, Sealed};
-        let dir = tempfile::tempdir().unwrap();
-        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &gm);
-        let (world, _) = world(&gm, "Eldermere");
-        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
-        // As an older version wrote it: the roles alone, not his name.
-        let listed = gm.store.load_world_meta(&world).unwrap().member(bob.me.id().as_str()).unwrap().attributes.clone();
-        let parsed: Vec<aw_model::Attribute> = listed.iter().filter_map(|a| a.parse().ok()).collect();
-        let keys = gm.store.load_keyring(&world).unwrap().grant(&bob.me.public(), &parsed).unwrap();
-        let content = serde_json::to_vec(&GrantContent { attributes: listed, keys }).unwrap();
-        let sealed = Sealed::new(&[&bob.me.public(), &gm.me.public()], &content).unwrap();
-        gm.store.control(&world, Item::Grant { member: bob.me.public(), sealed }, "").unwrap();
-        swap(&keeper, &gm, &world);
-        let named = |store: &Store| store.view_keys(&world, &bob.me).map(|h| h.attributes().contains(&"player:bob".parse().unwrap()));
-
-        let server = on_server(&gm, &world);
-        let wire = online_wire(&keeper, &gm.me);
-        run_online(&gm.store, &world, &server, &wire, |cache| Ok(cache.refresh_grants(&world)?)).await.unwrap();
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-
-        let server = on_server(&bob, &world);
-        let wire = online_wire(&keeper, &bob.me);
-        assert!(run_online(&bob.store, &world, &server, &wire, |cache| Ok(named(&cache)?)).await.unwrap(), "his name is his now");
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_player_downloads_every_piece_before_opening_and_copies_off_is_respected() {
-        let dir = tempfile::tempdir().unwrap();
-        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &gm, &world);
-        let server = on_server(&bob, &world);
-        let mut wire = online_wire(&keeper, &bob.me);
-        wire.record_limit = 2;
-        let code = run_online(&bob.store, &world, &server, &wire, |cache| {
-            document::code_of(&cache, &bob.me, &world, &article).map(|d| d.code)
-        }).await.unwrap();
-        assert!(code.contains("Content of Rumours") && !code.contains("Content of Truth"));
-        assert!(!bob.store.holds(&world));
-        assert!(!bob.store.worlds_dir().join(store::dir_name(&world)).exists());
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-        let cache = bob.store.profile_dir().join("online-sessions");
-        assert!(std::fs::read_dir(cache).unwrap().next().is_none(), "closing releases the disposable data");
-    }
-
-    /// As the editor does: what one typed, saved on the state one last kept —
-    /// and what stands then. None: only read.
-    async fn write_online(who: &Someone, world: &str, article: &str, server: &Server, wire: &OnlineWire<'_>, wanted: Option<(String, document::Bases)>) -> document::DocumentCode {
-        use crate::online::{execute, Needs};
-        execute(&who.store, world, server, wire, Needs::Articles(vec![article.to_string()]), |cache| {
-            std::future::ready((|| {
-                if let Some((text, base)) = &wanted {
-                    document::save(&cache, &who.me, world, article, text, base, &format!("s-{}", who.me.public().name))?;
-                }
-                document::code_of(&cache, &who.me, world, article)
-            })())
-        })
-        .await
-        .unwrap()
-    }
-
-    #[tokio::test]
-    async fn two_who_type_in_one_part_at_once_both_keep_what_they_typed() {
-        let dir = tempfile::tempdir().unwrap();
-        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &gm, &world);
-        let (gm_server, bob_server) = (on_server(&gm, &world), on_server(&bob, &world));
-        let (gm_wire, bob_wire) = (online_wire(&keeper, &gm.me), online_wire(&keeper, &bob.me));
-        let who = [(&gm, &gm_server, &gm_wire), (&bob, &bob_server, &bob_wire)];
-        let mut kept = Vec::new();
-        for (w, server, wire) in who {
-            kept.push(write_online(w, &world, &article, server, wire, None).await);
-        }
-        let typed = ["-the-GM-adds-this.", "Bob writes that. "];
-        for n in 0..typed[0].len().max(typed[1].len()) {
-            for (i, (w, server, wire)) in who.into_iter().enumerate() {
-                let Some(c) = typed[i].chars().nth(n) else { continue };
-                let now = &kept[i].code;
-                // The GM at the part's end, Bob at its start: one paragraph, both.
-                let text = if i == 0 {
-                    now.replacen("\n</block>", &format!("{c}\n</block>"), 1)
-                } else {
-                    let at = now.find("Content of Rumours").unwrap();
-                    format!("{}{c}{}", &now[..at], &now[at..])
-                };
-                kept[i] = write_online(w, &world, &article, server, wire, Some((text, kept[i].base.clone()))).await;
-            }
-        }
-        // The sessions read the server again — each with what the other wrote.
-        tokio::time::sleep(crate::online::FRESH).await;
-        let gm_code = write_online(&gm, &world, &article, &gm_server, &gm_wire, None).await.code;
-        let bob_code = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await.code;
-        assert!(gm_code.contains("Bob writes that. Content of Rumours-the-GM-adds-this."), "{gm_code}");
-        assert_eq!(gm_code.lines().nth(4), bob_code.lines().nth(4), "both read the same");
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn two_who_type_at_one_spot_at_once_both_keep_what_they_typed() {
-        let dir = tempfile::tempdir().unwrap();
-        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &gm, &world);
-        let (gm_server, bob_server) = (on_server(&gm, &world), on_server(&bob, &world));
-        let (gm_wire, bob_wire) = (online_wire(&keeper, &gm.me), online_wire(&keeper, &bob.me));
-        let who = [(&gm, &gm_server, &gm_wire), (&bob, &bob_server, &bob_wire)];
-        let mut kept = Vec::new();
-        for (w, server, wire) in who {
-            kept.push(write_online(w, &world, &article, server, wire, None).await);
-        }
-        let typed = ["-the-GM-adds-this.", "+Bob-writes-that."];
-        for n in 0..typed[0].len().max(typed[1].len()) {
-            for (i, (w, server, wire)) in who.into_iter().enumerate() {
-                let Some(c) = typed[i].chars().nth(n) else { continue };
-                let now = &kept[i].code;
-                // The GM at the part's end, Bob at its start: one paragraph, both.
-                // Both at the paragraph's end — each after what they typed.
-                let mine: String = typed[i].chars().take(n).collect();
-                let at = now.find(&format!("Content of Rumours")).unwrap() + "Content of Rumours".len();
-                let at = now[at..].find(&mine).map_or(at, |k| at + k + mine.len());
-                let text = format!("{}{c}{}", &now[..at], &now[at..]);
-                kept[i] = write_online(w, &world, &article, server, wire, Some((text, kept[i].base.clone()))).await;
-            }
-        }
-        // The sessions read the server again — each with what the other wrote.
-        tokio::time::sleep(crate::online::FRESH).await;
-        let gm_code = write_online(&gm, &world, &article, &gm_server, &gm_wire, None).await.code;
-        let bob_code = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await.code;
-        assert!(gm_code.contains("-the-GM-adds-this.") && gm_code.contains("+Bob-writes-that."), "{gm_code}");
-        assert_eq!(gm_code.lines().nth(4), bob_code.lines().nth(4), "both read the same");
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn one_who_writes_around_what_came_in_keeps_it_and_their_own() {
-        let dir = tempfile::tempdir().unwrap();
-        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &gm, &world);
-        let (gm_server, bob_server) = (on_server(&gm, &world), on_server(&bob, &world));
-        let (gm_wire, bob_wire) = (online_wire(&keeper, &gm.me), online_wire(&keeper, &bob.me));
-        let gm0 = write_online(&gm, &world, &article, &gm_server, &gm_wire, None).await;
-        let _ = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await;
-        // The GM starts a word; Bob reads it.
-        let gm1 = write_online(&gm, &world, &article, &gm_server, &gm_wire, Some((gm0.code.replace("Rumours\n", "Rumours G\n"), gm0.base.clone()))).await;
-        tokio::time::sleep(crate::online::FRESH).await;
-        let bob1 = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await;
-        assert!(bob1.code.contains("Rumours G\n"), "{}", bob1.code);
-        // Both go on, neither seeing the other: the GM after the G, Bob before it.
-        let _ = write_online(&gm, &world, &article, &gm_server, &gm_wire, Some((gm1.code.replace("Rumours G\n", "Rumours GM 1\n"), gm1.base.clone()))).await;
-        // Bob's session reads the GM's on the way — his save builds on what he saw.
-        tokio::time::sleep(crate::online::FRESH).await;
-        let bob2 = write_online(&bob, &world, &article, &bob_server, &bob_wire, Some((bob1.code.replace("Rumours G\n", "Rumours Bob 16  G\n"), bob1.base.clone()))).await;
-        assert!(bob2.code.contains("Bob 16"), "his own, at once: {}", bob2.code);
-        tokio::time::sleep(crate::online::FRESH).await;
-        let bob3 = write_online(&bob, &world, &article, &bob_server, &bob_wire, None).await;
-        let gm3 = write_online(&gm, &world, &article, &gm_server, &gm_wire, None).await;
-        assert!(bob3.code.contains("Bob 16") && bob3.code.contains("M 1"), "{}", bob3.code);
-        assert_eq!(gm3.code.lines().nth(4), bob3.code.lines().nth(4));
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_world_opens_with_its_frame_and_documents_follow_as_they_are_read() {
-        use crate::online::{execute, Needs};
-        use std::future::ready;
-        let dir = tempfile::tempdir().unwrap();
-        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &gm, &world);
-        let server = on_server(&bob, &world);
-        let wire = online_wire(&keeper, &bob.me);
-        let parts = |cache: &Store| cache.load_articles(&world).map(|all| all.iter().map(|a| a.layers.len()).sum::<usize>());
-
-        // Opened: the document's name, not its parts.
-        let (names, held) = execute(&bob.store, &world, &server, &wire, Needs::Frame, |cache| {
-            ready((|| Ok::<_, AppError>((cache.load_articles(&world)?.iter().map(|a| a.slug.clone()).collect::<Vec<_>>(), parts(&cache)?)))())
-        }).await.unwrap();
-        assert!(names.contains(&"tavern".to_string()));
-        assert_eq!(held, names.len(), "of each, only its base");
-
-        // Read: whole — and Bob writes in it, on the server's world as he read it.
-        let code = execute(&bob.store, &world, &server, &wire, Needs::Articles(vec![article.clone()]), |cache| {
-            ready((|| {
-                let code = document::code_of(&cache, &bob.me, &world, &article)?;
-                let text = code.code.replace("Content of Rumours", "Content of Rumours. A dragon was seen.");
-                document::save(&cache, &bob.me, &world, &article, &text, &code.base, "s-bob")?;
-                Ok::<_, AppError>(code.code)
-            })())
-        }).await.unwrap();
-        assert!(code.contains("Content of Rumours") && !code.contains("Content of Truth"));
-        swap(&keeper, &gm, &world);
-        let gm_code = document::code_of(&gm.store, &gm.me, &world, &article).unwrap().code;
-        assert!(gm_code.contains("A dragon was seen."), "on the server, and so with the GM");
-
-        // The GM, with only the frame, changes the world's structure — built
-        // on the server's world, not on what the session holds of it.
-        let gm_server = on_server(&gm, &world);
-        let gm_wire = online_wire(&keeper, &gm.me);
-        execute(&gm.store, &world, &gm_server, &gm_wire, Needs::Frame, |cache| ready(cache.set_moderation(&world, true).map_err(AppError::from))).await.unwrap();
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-        let moderated = execute(&bob.store, &world, &server, &wire, Needs::Frame, |cache| ready(cache.moderated(&world).map_err(AppError::from))).await.unwrap();
-        assert!(moderated);
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn an_edit_is_on_the_server_before_the_command_reports_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        swap(&keeper, &gm, &world);
-        let server = on_server(&gm, &world);
-        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        let wire = online_wire(&keeper, &gm.me);
-        let before = keeper.store.inventory(&world).unwrap();
-        run_online(&gm.store, &world, &server, &wire, |cache| {
-            let code = document::code_of(&cache, &gm.me, &world, &article)?;
-            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Saved on the server."), &code.base, "online-edit")
-        }).await.unwrap();
-        assert_ne!(keeper.store.inventory(&world).unwrap(), before);
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-        let code = run_online(&gm.store, &world, &server, &wire, |cache| {
-            document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)
-        }).await.unwrap();
-        assert!(code.contains("Saved on the server."), "a new session reads the confirmed edit");
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_connection_lost_before_commit_never_becomes_a_later_offline_upload() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        swap(&keeper, &gm, &world);
-        let server = on_server(&gm, &world);
-        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        let wire = online_wire(&keeper, &gm.me);
-        let before = keeper.store.inventory(&world).unwrap();
-        wire.stop_before_commit.store(true, Ordering::SeqCst);
-        let failed = run_online(&gm.store, &world, &server, &wire, |cache| {
-            let code = document::code_of(&cache, &gm.me, &world, &article)?;
-            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Must not appear later."), &code.base, "lost-connection")
-        }).await;
-        assert!(failed.is_err());
-        assert_eq!(keeper.store.inventory(&world).unwrap(), before, "staging changes no canonical records");
-        wire.alive.store(true, Ordering::SeqCst);
-        let code = run_online(&gm.store, &world, &server, &wire, |cache| {
-            document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)
-        }).await.unwrap();
-        assert!(!code.contains("Must not appear later."));
-        assert_eq!(keeper.store.inventory(&world).unwrap(), before);
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_read_right_after_the_server_asks_nothing_and_a_failed_save_downloads_nothing_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        swap(&keeper, &gm, &world);
-        let server = on_server(&gm, &world);
-        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        let wire = online_wire(&keeper, &gm.me);
-        let read = |cache: Store| document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code);
-        run_online(&gm.store, &world, &server, &wire, read).await.unwrap();
-        let asked = wire.asks.load(Ordering::SeqCst);
-        assert!(asked > 0, "the first command reads the server");
-        for _ in 0..5 {
-            run_online(&gm.store, &world, &server, &wire, read).await.unwrap();
-        }
-        assert_eq!(wire.asks.load(Ordering::SeqCst), asked, "reads right after read nothing from the network");
-
-        wire.stop_before_commit.store(true, Ordering::SeqCst);
-        let failed = run_online(&gm.store, &world, &server, &wire, |cache| {
-            let code = document::code_of(&cache, &gm.me, &world, &article)?;
-            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Not sent."), &code.base, "lost")
-        }).await;
-        assert!(failed.is_err());
-        wire.alive.store(true, Ordering::SeqCst);
-        let swaps = wire.swaps.load(Ordering::SeqCst);
-        let code = run_online(&gm.store, &world, &server, &wire, read).await.unwrap();
-        assert!(!code.contains("Not sent."), "what was not acknowledged is gone here too");
-        assert_eq!(wire.swaps.load(Ordering::SeqCst), swaps, "the acknowledged world stays on this device, not downloaded again");
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn what_another_member_wrote_comes_by_itself_without_naming_everything() {
-        let dir = tempfile::tempdir().unwrap();
-        let (gm, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        admit(&gm.store, &world, bob.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &gm, &world);
-        let server = on_server(&gm, &world);
-        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        let (marla_wire, bob_wire) = (online_wire(&keeper, &gm.me), online_wire(&keeper, &bob.me));
-        let read = |cache: Store| document::code_of(&cache, &bob.me, &world, &article).map(|d| d.code);
-        let first = run_online(&bob.store, &world, &server, &bob_wire, read).await.unwrap();
-        assert!(first.contains("Content of Rumours"));
-        let swaps = bob_wire.swaps.load(Ordering::SeqCst);
-
-        run_online(&gm.store, &world, &server, &marla_wire, |cache| {
-            let code = document::code_of(&cache, &gm.me, &world, &article)?;
-            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "Written by Marla."), &code.base, "marla")
-        }).await.unwrap();
-        tokio::time::sleep(crate::online::FRESH).await;
-        let after = run_online(&bob.store, &world, &server, &bob_wire, read).await.unwrap();
-        assert!(after.contains("Written by Marla."), "{after}");
-        assert_eq!(bob_wire.swaps.load(Ordering::SeqCst), swaps, "only what is new, not everything by name");
-        crate::online::close_session(&bob.store, &world).await.unwrap();
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[test]
-    fn a_second_admin_supports_every_world_and_lets_players_in_without_being_in_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let (marla, olaf, eve) = (someone(dir.path(), "Marla"), someone(dir.path(), "Olaf"), someone(dir.path(), "Eve"));
-        let keeper = keeper(dir.path(), &marla);
-        let (world, _) = world(&marla, "Eldermere");
-        marla.store.set_listed(&world, true).unwrap();
-        swap(&keeper, &marla, &world);
-        let digest = || {
-            let Reply::Digest { requests, approved, admins, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
-            (requests, approved, admins)
-        };
-
-        // Marla makes Olaf an admin; he shows up, and is a supporter of her world.
-        manage(&keeper, &marla, Some(Order::Admin { id: olaf.me.id().to_string(), on: true }));
-        keeper.answer("", &olaf.me.public(), Ask::Worlds);
-        let (_, _, admins) = digest();
-        assert_eq!(admins.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), vec!["Marla", "Olaf"]);
-        marla.store.set_server_admins(&world, admins).unwrap();
-        let (supporters, sealed) = marla.store.with_journal(&world, |j| Ok((j.supporters(), j.keys_for(olaf.me.id().as_str()).is_some()))).unwrap();
-        assert_eq!(supporters, vec![olaf.me.id().to_string()], "Marla is the GM, not a supporter");
-        assert!(sealed, "the GM's keys lie sealed for Olaf");
-        swap(&keeper, &marla, &world);
-
-        // Eve asks; Olaf lets her in, without being in the world himself.
-        assert_eq!(keeper.answer(&world, &eve.me.public(), Ask::Join), Reply::Requested);
-        let Reply::Managed { state } = manage(&keeper, &olaf, Some(Order::Approve { world: world.clone(), id: eve.me.id().to_string() })) else { panic!("Olaf manages") };
-        assert_eq!(state.worlds.iter().find(|w| w.world == world).unwrap().requests[0].name, "Eve");
-        let (requests, approved, _) = digest();
-        assert_eq!(approved, vec![eve.me.id().to_string()]);
-        // Marla's device holds the keys: Eve is in at once.
-        crate::network::take_requests(&marla.store, &world, requests, &approved).unwrap();
-        assert!(marla.store.load_world_meta(&world).unwrap().member(eve.me.id().as_str()).is_some());
-        swap(&keeper, &marla, &world);
-        assert!(matches!(swap(&keeper, &eve, &world), Reply::Records { .. }));
-        assert!(digest().1.is_empty(), "done with");
-
-        // Olaf takes her out again: turned away at once, out for good once
-        // Marla's device hears of it.
-        assert!(matches!(manage(&keeper, &olaf, Some(Order::Remove { world: world.clone(), id: marla.me.id().to_string() })), Reply::Failed { .. }));
-        assert!(marla.store.is_gm(&world), "not the GM");
-        let Reply::Managed { state } = manage(&keeper, &olaf, Some(Order::Remove { world: world.clone(), id: eve.me.id().to_string() })) else { panic!("Olaf manages") };
-        assert!(state.worlds.iter().find(|w| w.world == world).unwrap().members.is_empty(), "Eve is on her way out");
-        assert_eq!(swap(&keeper, &eve, &world), Reply::NotMember);
-        let Reply::Digest { removing, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
-        assert_eq!(removing, vec![eve.me.id().to_string()]);
-        crate::network::take_out(&marla.store, &world, &removing).unwrap();
-        assert!(marla.store.load_world_meta(&world).unwrap().member(eve.me.id().as_str()).is_none());
-        swap(&keeper, &marla, &world);
-        let Reply::Digest { removing, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
-        assert!(removing.is_empty(), "done with");
-
-        // Olaf kicks Dan: turned away, and on his way out of Marla's world.
-        let dan = someone(dir.path(), "Dan");
-        admit(&marla.store, &world, dan.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &marla, &world);
-        keeper.answer(&world, &dan.me.public(), Ask::Worlds);
-        let Reply::Managed { state } = manage(&keeper, &olaf, Some(Order::Kick { id: dan.me.id().to_string() })) else { panic!("Olaf manages") };
-        assert!(state.users.iter().any(|p| p.id == dan.me.id().as_str() && p.blocked));
-        assert_eq!(swap(&keeper, &dan, &world), Reply::NotOffered);
-        let Reply::Digest { removing, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
-        assert_eq!(removing, vec![dan.me.id().to_string()]);
-        assert!(matches!(manage(&keeper, &olaf, Some(Order::Kick { id: marla.me.id().to_string() })), Reply::Failed { .. }), "not an admin");
-        // An admin cannot be turned away; the first one stays.
-        assert!(matches!(manage(&keeper, &olaf, Some(Order::Block { id: marla.me.id().to_string() })), Reply::Failed { .. }));
-        assert!(matches!(manage(&keeper, &olaf, Some(Order::Admin { id: marla.me.id().to_string(), on: false })), Reply::Failed { .. }));
-    }
-
-    #[test]
-    fn a_world_not_listed_shows_itself_to_the_id_its_gm_let_in_and_nobody_else() {
-        let dir = tempfile::tempdir().unwrap();
-        let (marla, bob, eve) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"), someone(dir.path(), "Eve"));
-        let keeper = keeper(dir.path(), &marla);
-        let (world, _) = world(&marla, "Eldermere");
-        // The GM lets Bob in ahead of time, by his id alone.
-        let mut meta = marla.store.load_world_meta(&world).unwrap();
-        meta.invited.push(bob.me.id().to_string());
-        marla.store.save_world_meta(&meta).unwrap();
-        swap(&keeper, &marla, &world);
-
-        let named = |who: &Someone| {
-            let Reply::Worlds { worlds, .. } = keeper.answer("", &who.me.public(), Ask::Worlds) else { panic!() };
-            worlds.into_iter().map(|w| w.name).collect::<Vec<_>>()
-        };
-        assert_eq!(named(&bob), vec!["Eldermere"]);
-        assert!(named(&eve).is_empty(), "nobody else learns of it");
-        assert_eq!(keeper.answer(&world, &eve.me.public(), Ask::Join), Reply::NotOffered);
-        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::Requested);
-
-        // The GM's device takes him in by itself; the server passes the world on.
-        let Reply::Digest { requests, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
-        crate::network::take_requests(&marla.store, &world, requests, &[]).unwrap();
-        assert!(marla.store.load_world_meta(&world).unwrap().member(bob.me.id().as_str()).is_some());
-        swap(&keeper, &marla, &world);
-        assert!(matches!(swap(&keeper, &bob, &world), Reply::Records { .. }));
-        assert!(named(&eve).is_empty());
-    }
-
-    #[test]
-    fn a_player_taken_out_of_a_world_not_listed_loses_it_and_comes_back_by_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let (marla, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &marla);
-        let (world, _) = world(&marla, "Eldermere");
-        let named = |who: &Someone| {
-            let Reply::Worlds { worlds, .. } = keeper.answer("", &who.me.public(), Ask::Worlds) else { panic!() };
-            worlds.into_iter().map(|w| w.name).collect::<Vec<_>>()
-        };
-        let let_in = || {
-            let Reply::Digest { requests, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
-            crate::network::take_requests(&marla.store, &world, requests, &[]).unwrap();
-            swap(&keeper, &marla, &world);
-        };
-        crate::network::invite(&marla.store, &world, bob.me.id().as_str()).unwrap();
-        swap(&keeper, &marla, &world);
-        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::Requested);
-        let_in();
-        assert!(matches!(swap(&keeper, &bob, &world), Reply::Records { .. }));
-
-        // Taken out: the world is gone for him, and asking again goes nowhere.
-        marla.store.remove_member(&world, bob.me.id().as_str()).unwrap();
-        swap(&keeper, &marla, &world);
-        assert!(named(&bob).is_empty(), "{:?}", named(&bob));
-        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::NotOffered);
-        assert_eq!(swap(&keeper, &bob, &world), Reply::NotOffered);
-
-        // Let in by id again: he sees it, asks, and is in.
-        crate::network::invite(&marla.store, &world, bob.me.id().as_str()).unwrap();
-        swap(&keeper, &marla, &world);
-        assert_eq!(named(&bob), vec!["Eldermere"]);
-        // His device, still taking him for a member, asks for news: that asks to join.
-        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Requested);
-        let_in();
-        assert!(marla.store.load_world_meta(&world).unwrap().member(bob.me.id().as_str()).is_some());
-        assert!(matches!(swap(&keeper, &bob, &world), Reply::Records { .. }));
-    }
-
-    #[tokio::test]
-    async fn a_save_while_someone_else_writes_waits_its_turn() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, article) = world(&gm, "Eldermere");
-        swap(&keeper, &gm, &world);
-        let server = on_server(&gm, &world);
-        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        let wire = online_wire(&keeper, &gm.me);
-        let other = async {
-            let writing = keeper.claim(&world, true).unwrap().unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            drop(writing);
-        };
-        let save = run_online(&gm.store, &world, &server, &wire, |cache| {
-            let code = document::code_of(&cache, &gm.me, &world, &article)?;
-            document::save(&cache, &gm.me, &world, &article, &code.code.replace("Content of Rumours", "After the other one."), &code.base, "busy")
-        });
-        let ((), saved) = tokio::join!(other, save);
-        saved.unwrap();
-        let read = run_online(&gm.store, &world, &server, &wire, |cache| document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)).await.unwrap();
-        assert!(read.contains("After the other one."));
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn new_gm_keys_survive_a_lost_commit_acknowledgement() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &gm);
-        let (world, _) = world(&gm, "Eldermere");
-        gm.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        swap(&keeper, &gm, &world);
-        let server = on_server(&gm, &world);
-        crate::online::adopt_uploaded(&gm.store, &world, &server).await.unwrap();
-        let wire = online_wire(&keeper, &gm.me);
-        wire.lose_ack.store(true, Ordering::SeqCst);
-        let created = std::sync::Mutex::new(String::new());
-        let failed = run_online(&gm.store, &world, &server, &wire, |cache| {
-            let id = cache.create_article(&world, "place".into(), "new-knowledge".into(),
-                vec![part("knowledge:new", "gm", "New knowledge", true)], "new-key")?;
-            *created.lock().unwrap() = id.to_string();
-            Ok(())
-        }).await;
-        assert!(failed.is_err(), "no success is reported without acknowledgement");
-        assert!(gm.store.load_keyring(&world).unwrap().current_epoch(&"knowledge:new".parse().unwrap()).is_some());
-        wire.alive.store(true, Ordering::SeqCst);
-        let article = created.lock().unwrap().clone();
-        let code = run_online(&gm.store, &world, &server, &wire, |cache| {
-            document::code_of(&cache, &gm.me, &world, &article).map(|d| d.code)
-        }).await.unwrap();
-        assert!(code.contains("New knowledge"), "the published ciphertext still opens after reconnecting");
-        assert!(!keeper.store.holds_token(&world));
-        assert!(keeper.store.load_keyring(&world).unwrap().attributes().next().is_none());
-        crate::online::close_session(&gm.store, &world).await.unwrap();
-    }
-
-    #[test]
-    fn removing_a_server_address_does_not_turn_its_world_into_a_local_world() {
-        let dir = tempfile::tempdir().unwrap();
-        let gm = someone(dir.path(), "Marla");
-        let (world, _) = world(&gm, "Eldermere");
-        on_server(&gm, &world);
-        let mut settings = gm.store.load_network().unwrap();
-        settings.servers.clear();
-        gm.store.save_network(&settings).unwrap();
-        assert!(crate::online::requires_online(&gm.store, &world));
-        assert!(crate::online::server_for(&gm.store, &world).is_err());
-        assert!(!crate::online::direct_world_command_allowed("document_save"));
-        assert!(!crate::online::direct_world_command_allowed("view"));
-        assert!(!crate::online::direct_world_command_allowed("world_delete"));
-    }
-
+    /// Someone with a profile of their own.
     struct Someone {
         store: Store,
         me: Identity,
     }
 
-    /// Opening a big world from a server, measured: `AW_BENCH` names a data
-    /// folder with `profile/` (its GM's) and `worlds/` (the world, in the
-    /// shared format). Run alone: `cargo test -p aw-desktop --release
-    /// bench_open -- --ignored --nocapture`.
-    #[tokio::test]
-    #[ignore]
-    async fn bench_open_a_big_server_world() {
-        let Ok(data) = std::env::var("AW_BENCH") else { return };
-        let data = PathBuf::from(data);
-        let folder = std::fs::read_dir(data.join("worlds")).unwrap().flatten().find(|e| e.path().join("world.json").exists()).unwrap().path();
-        let name = folder.file_name().unwrap().to_string_lossy().to_string();
-        let world = name.replacen('-', ":", 1);
-        let dir = tempfile::tempdir_in(data.parent().unwrap()).unwrap();
-        // The server holds it as a server does: one state, written in place.
-        let there = dir.path().join("server").join("worlds").join(&name);
-        std::fs::create_dir_all(&there).unwrap();
-        std::fs::copy(folder.join("world.json"), there.join("world.json")).unwrap();
-        let mut states: Vec<PathBuf> = std::fs::read_dir(&folder).unwrap().flatten().map(|e| e.path()).filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("state-")).collect();
-        states.sort();
-        std::fs::copy(states.last().unwrap(), there.join("state.sqlite")).unwrap();
-        std::os::unix::fs::symlink(folder.join("media"), there.join("media")).unwrap();
-        // The GM: identity and keys, no world.
-        let gm_dir = dir.path().join("gm");
-        let private = gm_dir.join("profile").join("worlds").join(&name);
-        std::fs::create_dir_all(&private).unwrap();
-        for file in ["owner.key", "keyring.json", "state.json"] {
-            let _ = std::fs::copy(data.join("profile").join("worlds").join(&name).join(file), private.join(file));
+    impl Someone {
+        fn card(&self) -> IdentityPublic {
+            self.me.public()
         }
-        std::fs::copy(data.join("profile").join("identity.json"), gm_dir.join("profile").join("identity.json")).unwrap();
-        let gm = Someone { store: Store::new(gm_dir), me: Identity::load(&data.join("profile").join("identity.json")).unwrap() };
-        store::keep_worlds_alone();
-        let keeper = keeper(dir.path(), &gm);
-        let server = on_server(&gm, &world);
-        let wire = online_wire(&keeper, &gm.me);
-
-        let start = std::time::Instant::now();
-        let (count, home) = crate::online::execute(&gm.store, &world, &server, &wire, crate::online::Needs::Frame, |cache| {
-            std::future::ready((|| Ok::<_, AppError>((cache.load_articles(&world)?.len(), cache.load_world_meta(&world)?.home)))())
-        }).await.unwrap();
-        let opened = start.elapsed();
-        let start = std::time::Instant::now();
-        let code = crate::online::execute(&gm.store, &world, &server, &wire, crate::online::Needs::Articles(vec![home.clone()]), |cache| {
-            std::future::ready(document::code_of(&cache, &gm.me, &world, &home).map(|d| d.code))
-        }).await.unwrap();
-        let read = start.elapsed();
-        let start = std::time::Instant::now();
-        let all = run_online(&gm.store, &world, &server, &wire, |cache| Ok(cache.load_articles(&world)?.iter().map(|a| a.layers.len()).sum::<usize>())).await.unwrap();
-        println!("{count} documents; opened in {opened:?}; the start document ({} bytes) in {read:?}; all {all} parts in {:?} more; {} asks", code.len(), start.elapsed(), wire.asks.load(Ordering::SeqCst));
-        crate::online::close_session(&gm.store, &world).await.unwrap();
     }
 
-    fn someone(dir: &Path, name: &str) -> Someone {
-        let store = Store::new(dir.join(name));
+    struct Place(PathBuf);
+
+    impl Drop for Place {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    fn place(tag: &str) -> Place {
+        let dir = std::env::temp_dir().join(format!("aw-keeper-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        Place(dir)
+    }
+
+    fn someone(at: &Place, name: &str) -> Someone {
+        let store = Store::new(at.0.join(name));
         let me = Identity::create(name).unwrap();
         store.save_identity(&me).unwrap();
         Someone { store, me }
     }
 
-    fn keeper(dir: &Path, admin: &Someone) -> Keeper {
-        let store = Store::new(dir.join("server"));
-        store.save_identity(&Identity::create("aw-server").unwrap()).unwrap();
-        Keeper::open(store, dir, admin.me.id().to_string()).unwrap()
+    /// A server whose first admin is `admin`.
+    fn server(at: &Place, admin: &Someone) -> Keeper {
+        let store = Store::new(at.0.join("server"));
+        store.save_identity(&Identity::create("Server").unwrap()).unwrap();
+        Keeper::open(store, &at.0.join("server-data"), admin.me.id().to_string()).unwrap()
     }
 
-    fn part(view: &str, edit: &str, title: &str, is_base: bool) -> NewPart {
-        NewPart {
-            is_base,
-            level: Level::Open,
-            view: view.parse().unwrap(),
-            access: Access { section: title.into(), own: view.into(), edit: edit.into() },
-            plain: Plain { title: title.into(), text: format!("Content of {title}"), ..Plain::default() },
+    fn call(keeper: &Keeper, world: &str, who: &Someone, command: &str, args: serde_json::Value) -> Result<serde_json::Value, String> {
+        match keeper.answer(world, &who.card(), Ask::Call { command: command.into(), args: args.to_string() }) {
+            Reply::Called { value: Some(v), .. } => Ok(serde_json::from_str(&v).unwrap()),
+            Reply::Called { error, .. } => Err(error.unwrap_or_default()),
+            other => Err(format!("{other:?}")),
         }
     }
 
-    /// A world with a document: the players' rumours, the GM's truth.
-    fn world(gm: &Someone, name: &str) -> (String, String) {
-        let world = new_world(&gm.store, &gm.me, name.into()).unwrap().public.world_id.to_string();
-        let article = gm
-            .store
-            .create_article(
-                &world,
-                "place".into(),
-                "tavern".into(),
-                vec![part("players", "gm", "Tavern", true), part("players", "players", "Rumours", false), part("gm", "gm", "Truth", false)],
-                "",
-            )
-            .unwrap()
-            .to_string();
-        (world, article)
-    }
-
-    /// What `swap` does over the network, without it: one round both ways.
-    fn swap(keeper: &Keeper, who: &Someone, world: &str) -> Reply {
-        match keeper.answer(world, &who.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) {
-            Reply::Digest { no_copy, .. } => {
-                if !who.store.is_gm(world) {
-                    who.store.hold_fleeting(world, no_copy).unwrap();
-                }
+    /// Brings a GM's world to the server, as the app does.
+    fn bring_world(keeper: &Keeper, gm: &Someone, world: &str) -> Reply {
+        use base64::Engine;
+        let out = gm.store.private_world_dir(world).join("bringing");
+        std::fs::create_dir_all(&out).unwrap();
+        gm.store.db(world).unwrap().copy_to(&out.join(aw_store::db::FILE)).unwrap();
+        let mut files = vec![(aw_store::db::FILE.to_string(), out.join(aw_store::db::FILE))];
+        for e in std::fs::read_dir(gm.store.world_dir(world).join("media")).into_iter().flatten().flatten() {
+            files.push((format!("media/{}", e.file_name().to_string_lossy()), e.path()));
+        }
+        for (file, path) in files {
+            let data = base64::engine::general_purpose::STANDARD.encode(std::fs::read(path).unwrap());
+            match keeper.answer(world, &gm.card(), Ask::Put { file, at: 0, data }) {
+                Reply::Taken => {}
+                other => return other,
             }
-            other => return other,
         }
-        let have = who.store.inventory(world).unwrap();
-        let reply = keeper.answer(world, &who.me.public(), Ask::Swap { have, give: Vec::new() });
-        let Reply::Records { records, wanted, .. } = &reply else { return reply };
-        who.store.receive(world, records).unwrap();
-        let give = who.store.records(world, wanted).unwrap();
-        let have = who.store.inventory(world).unwrap();
-        keeper.answer(world, &who.me.public(), Ask::Swap { have, give })
+        keeper.answer(world, &gm.card(), Ask::Bring { name: "Eldermere".into() })
     }
 
-    fn manage(keeper: &Keeper, who: &Someone, order: Option<Order>) -> Reply {
-        keeper.answer("", &who.me.public(), Ask::Manage { order })
+    fn new_world_of(gm: &Someone) -> String {
+        new_world(&gm.store, &gm.me, "Eldermere".into()).unwrap().id
     }
 
-    fn state(keeper: &Keeper, admin: &Someone) -> ServerState {
-        let Reply::Managed { state } = manage(keeper, admin, None) else { panic!("the admin manages") };
-        state
-    }
-
-    fn titles(who: &Someone, world: &str) -> Vec<String> {
-        let held = who.store.view_keys(world, &who.me).unwrap();
-        let mut out: Vec<String> =
-            build_view(&who.store.load_articles(world).unwrap(), &held).into_iter().flat_map(|a| a.layers.into_iter().map(|l| l.title)).collect();
-        out.sort();
-        out
+    fn layer(text: &str, policy: &str) -> serde_json::Value {
+        json!({ "title": "", "text": text, "policy": policy, "level": "", "section": "", "edit": "", "fields": null })
     }
 
     #[test]
-    fn a_world_comes_a_little_at_a_time_and_while_it_is_written_nobody_waits() {
-        let dir = tempfile::tempdir().unwrap();
-        let marla = someone(dir.path(), "Marla");
-        let keeper = keeper(dir.path(), &marla);
-        let (eldermere, _) = world(&marla, "Eldermere");
-        let all = marla.store.inventory(&eldermere).unwrap();
+    fn a_player_works_in_a_world_on_a_server_as_far_as_it_lets_them() {
+        let at = place("member");
+        let (marla, olaf, eve) = (someone(&at, "Marla"), someone(&at, "Olaf"), someone(&at, "Eve"));
+        let keeper = server(&at, &marla);
+        let world = new_world_of(&marla);
+        assert_eq!(bring_world(&keeper, &marla, &world), Reply::Joined);
+        // Its GM works in it there, in their own name.
+        let info = call(&keeper, &world, &marla, "world_connect", json!({})).unwrap();
+        assert_eq!(info["is_gm"], true);
+        let tower = call(&keeper, &world, &marla, "article_create", json!({
+            "articleType": "", "slug": "tower", "name": "The Tower", "visibility": "all",
+            "layers": [layer("Everyone sees the tower.", "all"), layer("A dragon sleeps below.", "gm")],
+        })).unwrap();
+        assert!(tower.as_str().is_some_and(|t| t.starts_with("art:")));
 
-        // Named once, given in pieces: the first piece brings the world here.
-        let Reply::Records { wanted, .. } = keeper.answer(&eldermere, &marla.me.public(), Ask::Swap { have: all.clone(), give: Vec::new() }) else { panic!("the server wants it") };
-        let order = marla.store.in_order(&eldermere, &wanted).unwrap();
-        for piece in order.chunks(2) {
-            let records = marla.store.records(&eldermere, piece).unwrap();
-            assert!(matches!(keeper.answer(&eldermere, &marla.me.public(), Ask::Give { records }), Reply::Taken { .. }));
-        }
-        let mut there = keeper.store.inventory(&eldermere).unwrap();
-        let mut here = all;
-        there.sort();
-        here.sort();
-        assert_eq!(there, here);
-        assert_eq!(keeper.offers(Some(marla.me.id().as_str())).unwrap().iter().map(|o| o.gm.clone()).collect::<Vec<_>>(), vec!["Marla"]);
+        // A stranger asks to join; the GM lets them in.
+        assert_eq!(call(&keeper, &world, &olaf, "view", json!({})).unwrap_err(), "NotMember");
+        assert_eq!(keeper.answer(&world, &olaf.card(), Ask::Join), Reply::Requested);
+        let asking = call(&keeper, &world, &marla, "join_requests", json!({})).unwrap();
+        assert_eq!(asking[0]["name"], "Olaf");
+        call(&keeper, &world, &marla, "join_answer", json!({ "id": olaf.me.id().to_string(), "accept": true })).unwrap();
+        assert_eq!(keeper.answer(&world, &olaf.card(), Ask::Join), Reply::Joined);
 
-        // Being written: reading goes on; another write waits a moment, then
-        // hears busy. The world is listed as last known.
-        let writing = keeper.claim(&eldermere, true).unwrap().unwrap();
-        assert!(matches!(keeper.answer(&eldermere, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Digest { .. }));
-        let started = std::time::Instant::now();
-        let record = marla.store.records(&eldermere, &marla.store.inventory(&eldermere).unwrap()[..1]).unwrap();
-        assert_eq!(keeper.answer(&eldermere, &marla.me.public(), Ask::Give { records: record }), Reply::Busy);
-        assert!(started.elapsed() >= WRITE_WAIT);
-        let Reply::Worlds { worlds, .. } = keeper.answer("", &marla.me.public(), Ask::Worlds) else { panic!("the worlds") };
-        assert_eq!(worlds.iter().map(|o| o.gm.clone()).collect::<Vec<_>>(), vec!["Marla"]);
-        assert!(!state(&keeper, &marla).worlds.is_empty());
-        drop(writing);
-        assert!(matches!(keeper.answer(&eldermere, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }), Reply::Digest { .. }));
+        // The player sees what is there for players — not what is the GM's.
+        let seen = call(&keeper, &world, &olaf, "view", json!({})).unwrap().to_string();
+        assert!(seen.contains("Everyone sees the tower."), "{seen}");
+        assert!(!seen.contains("A dragon sleeps below."), "{seen}");
+        let info = call(&keeper, &world, &olaf, "world_connect", json!({})).unwrap();
+        assert_eq!(info["role"], "player");
+        assert!(call(&keeper, &world, &olaf, "world_icon_set", json!({ "icon": "🐉" })).is_err(), "only the GM");
+        // Someone else gets nothing.
+        assert_eq!(call(&keeper, &world, &eve, "view", json!({})).unwrap_err(), "NotMember");
+        assert!(!matches!(keeper.answer(&world, &eve.card(), Ask::Files), Reply::Files { .. }));
+
+        // What the player writes, the GM is told of; their own writing not.
+        let synced = call(&keeper, &world, &marla, "world_sync", json!({ "since": 0 })).unwrap();
+        let since = synced["writes"].as_u64().unwrap();
+        call(&keeper, &world, &marla, "world_icon_set", json!({ "icon": "🏰" })).unwrap();
+        let mine = call(&keeper, &world, &marla, "world_sync", json!({ "since": since })).unwrap();
+        assert_eq!(mine["changed"], false);
+        let since = mine["writes"].as_u64().unwrap();
+        call(&keeper, &world, &olaf, "member_colour_set", json!({ "colour": "#336699" })).unwrap();
+        assert_eq!(call(&keeper, &world, &marla, "world_sync", json!({ "since": since })).unwrap()["changed"], true);
     }
 
     #[test]
-    fn a_world_here_is_backed_up_by_the_server_as_its_gm_asks() {
-        let dir = tempfile::tempdir().unwrap();
-        let marla = someone(dir.path(), "Marla");
-        let tim = someone(dir.path(), "Tim");
-        let keeper = keeper(dir.path(), &marla);
-        let (eldermere, _) = world(&marla, "Eldermere");
-        swap(&keeper, &marla, &eldermere);
-        assert!(keeper.store.holds(&eldermere));
-        let backups = |who: &Someone, plan: Option<BackupPlan>| keeper.answer(&eldermere, &who.me.public(), Ask::Backups { plan });
-
-        // Daily, seven kept — until its GM says otherwise. Nobody else asks.
-        let Reply::Backups { backups: first } = backups(&marla, None) else { panic!("its GM asks") };
-        assert_eq!((first.plan.every.as_str(), first.plan.keep, first.count), ("daily", 7, 0));
-        assert_eq!(backups(&tim, None), Reply::NotOffered);
-        assert_eq!(backups(&tim, Some(BackupPlan { every: "off".into(), keep: 1 })), Reply::NotOffered);
-
-        // Due: backed up once, then not again before a day is over.
-        keeper.due();
-        keeper.due();
-        let Reply::Backups { backups: after } = backups(&marla, None) else { panic!() };
-        assert_eq!(after.count, 1);
-        assert!(after.last > 0);
-        let there = backup::list(&keeper.backups_dir(&eldermere));
-        assert!(there[0].1.join("world").is_dir(), "the world's folder, as it was");
-
-        // Being written: not now, the next time round.
-        let writing = keeper.claim(&eldermere, true).unwrap().unwrap();
-        keeper.due();
-        drop(writing);
-
-        // Weekly, three kept — on disk, after a restart too. Nonsense is refused.
-        assert!(matches!(backups(&marla, Some(BackupPlan { every: "weekly".into(), keep: 3 })), Reply::Backups { .. }));
-        assert!(matches!(backups(&marla, Some(BackupPlan { every: "hourly".into(), keep: 3 })), Reply::Failed { .. }));
-        let again = Keeper::open(keeper.store.clone(), dir.path(), marla.me.id().to_string()).unwrap();
-        assert_eq!(again.plan(&eldermere).unwrap(), BackupPlan { every: "weekly".into(), keep: 3 });
+    fn its_gm_takes_a_world_back_whole() {
+        let at = place("fetch");
+        let marla = someone(&at, "Marla");
+        let keeper = server(&at, &marla);
+        let world = new_world_of(&marla);
+        assert_eq!(bring_world(&keeper, &marla, &world), Reply::Joined);
+        assert_eq!(bring_world(&keeper, &marla, &world), Reply::Failed { error: "This world is here already.".into() });
+        let Reply::Files { files } = keeper.answer(&world, &marla.card(), Ask::Files) else { panic!("its GM gets the files") };
+        let (name, size) = &files[0];
+        assert_eq!(name, aw_store::db::FILE);
+        let Reply::Piece { data } = keeper.answer(&world, &marla.card(), Ask::Get { file: name.clone(), at: 0 }) else { panic!("a piece") };
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(data).unwrap();
+        assert_eq!(bytes.len() as u64, *size);
+        let back = at.0.join("back");
+        std::fs::create_dir_all(&back).unwrap();
+        std::fs::write(back.join(aw_store::db::FILE), bytes).unwrap();
+        assert_eq!(WorldDb::open(&back).unwrap().get("id").unwrap().as_deref(), Some(world.as_str()));
+        // Nothing but a world's own files.
+        assert!(matches!(keeper.answer(&world, &marla.card(), Ask::Get { file: "../server.json".into(), at: 0 }), Reply::Failed { .. }));
+        // Its GM takes it away from there.
+        assert!(matches!(keeper.answer("", &marla.card(), Ask::Manage { order: Some(Order::Delete { world: world.clone() }) }), Reply::Managed { .. }));
+        assert!(!keeper.store.holds(&world));
     }
 
     #[test]
-    fn the_admin_lets_gms_in_and_closes_and_nobody_brings_what_is_not_theirs() {
-        let dir = tempfile::tempdir().unwrap();
-        let (marla, olaf, eve) = (someone(dir.path(), "Marla"), someone(dir.path(), "Olaf"), someone(dir.path(), "Eve"));
-        let keeper = keeper(dir.path(), &marla);
-        let (eldermere, _) = world(&marla, "Eldermere");
-        // Named to everyone who asks the server — Thule is not.
-        marla.store.set_listed(&eldermere, true).unwrap();
-        let (thule, _) = world(&olaf, "Thule");
-
-        // The admin brings theirs; another GM waits for the admin.
-        assert!(matches!(swap(&keeper, &marla, &eldermere), Reply::Records { .. }));
-        assert!(keeper.store.holds(&eldermere));
-        assert_eq!(swap(&keeper, &olaf, &thule), Reply::Requested);
-        assert!(!keeper.store.holds(&thule));
-        assert_eq!(state(&keeper, &marla).asking.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), vec!["Olaf"]);
-        manage(&keeper, &marla, Some(Order::Allow { id: olaf.me.id().to_string() }));
-        assert!(matches!(swap(&keeper, &olaf, &thule), Reply::Records { .. }));
-        assert!(keeper.store.holds(&thule));
-
-        // Who may bring worlds is told; whoever may not asks.
-        let Reply::Worlds { may_bring, .. } = keeper.answer("", &eve.me.public(), Ask::Worlds) else { panic!() };
-        assert!(!may_bring);
-        assert_eq!(keeper.answer("", &eve.me.public(), Ask::HostWorlds), Reply::Requested);
-        let Reply::Worlds { asked: true, .. } = keeper.answer("", &eve.me.public(), Ask::Worlds) else { panic!("Eve asked") };
-        let Reply::Worlds { may_bring: true, .. } = keeper.answer("", &olaf.me.public(), Ask::Worlds) else { panic!("Olaf may") };
-        manage(&keeper, &marla, Some(Order::Refuse { id: eve.me.id().to_string() }));
-
-        // Its GM takes a world away; nobody else does.
-        let (gone, _) = world(&olaf, "Gone");
-        swap(&keeper, &olaf, &gone);
-        assert_eq!(keeper.answer("", &eve.me.public(), Ask::Manage { order: Some(Order::Delete { world: gone.clone() }) }), Reply::NotOffered);
-        assert!(keeper.store.holds(&gone));
-        assert!(matches!(keeper.answer("", &olaf.me.public(), Ask::Manage { order: Some(Order::Delete { world: gone.clone() }) }), Reply::Managed { .. }));
-        assert!(!keeper.store.holds(&gone));
-        // The admin takes their own away too, without closing it first.
-        let (mine, _) = world(&marla, "Mine");
-        swap(&keeper, &marla, &mine);
-        assert!(keeper.store.holds(&mine));
-        assert!(matches!(keeper.answer("", &marla.me.public(), Ask::Manage { order: Some(Order::Delete { world: mine.clone() }) }), Reply::Managed { .. }));
-        assert!(!keeper.store.holds(&mine));
-
-        // A world of someone else's is not taken in.
-        let (khom, _) = world(&marla, "Khom");
-        let records = marla.store.records(&khom, &marla.store.inventory(&khom).unwrap()).unwrap();
-        let have = marla.store.inventory(&khom).unwrap();
-        assert_eq!(keeper.answer(&khom, &olaf.me.public(), Ask::Swap { have, give: records }), Reply::NotOffered);
-        assert!(!keeper.store.holds(&khom));
-
-        // Only the admin manages; they see each world's name, GM, form and size.
-        assert_eq!(manage(&keeper, &olaf, None), Reply::NotOffered);
-        let seen = state(&keeper, &marla);
-        let thule_there = seen.worlds.iter().find(|w| w.world == thule).unwrap();
-        assert_eq!((thule_there.name.as_str(), thule_there.gm.as_str(), thule_there.encrypted), ("Thule", "Olaf", true));
-        assert!(thule_there.bytes > 0);
-        assert_eq!(seen.admins.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), vec!["Marla"]);
-        assert_eq!(seen.worldbuilders.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), vec!["Olaf"]);
-
+    fn only_whom_the_admin_lets_brings_worlds() {
+        let at = place("bring");
+        let (marla, olaf) = (someone(&at, "Marla"), someone(&at, "Olaf"));
+        let keeper = server(&at, &marla);
+        let world = new_world_of(&olaf);
+        assert_eq!(bring_world(&keeper, &olaf, &world), Reply::Requested);
+        let Reply::Managed { state } = keeper.answer("", &marla.card(), Ask::Manage { order: None }) else { panic!("the admin manages") };
+        assert_eq!(state.asking[0].name, "Olaf");
+        assert_eq!(keeper.answer("", &olaf.card(), Ask::Manage { order: None }), Reply::NotOffered);
+        keeper.answer("", &marla.card(), Ask::Manage { order: Some(Order::Allow { id: olaf.me.id().to_string() }) });
+        assert_eq!(bring_world(&keeper, &olaf, &world), Reply::Joined);
         // Closed, nobody gets it — its GM neither; deleted only once closed.
-        assert!(matches!(manage(&keeper, &marla, Some(Order::Delete { world: thule.clone() })), Reply::Failed { .. }));
-        manage(&keeper, &marla, Some(Order::Close { world: thule.clone() }));
-        assert_eq!(swap(&keeper, &olaf, &thule), Reply::NotOffered);
-        let Reply::Worlds { worlds, .. } = keeper.answer("", &eve.me.public(), Ask::Worlds) else { panic!() };
-        assert_eq!(worlds.iter().map(|w| w.name.clone()).collect::<Vec<_>>(), vec!["Eldermere"]);
-        manage(&keeper, &marla, Some(Order::Delete { world: thule.clone() }));
-        assert!(!keeper.store.holds(&thule));
-        assert_eq!(swap(&keeper, &olaf, &thule), Reply::NotOffered, "and it does not come back");
-        assert!(state(&keeper, &marla).worlds.iter().any(|w| w.name == "Thule" && w.closed));
-
-        // Turned away: whatever they ask. The admin cannot be.
-        manage(&keeper, &marla, Some(Order::Block { id: eve.me.id().to_string() }));
-        assert_eq!(keeper.answer("", &eve.me.public(), Ask::Worlds), Reply::NotOffered);
-        assert_eq!(keeper.answer(&eldermere, &eve.me.public(), Ask::Join), Reply::NotOffered);
-        assert!(matches!(manage(&keeper, &marla, Some(Order::Block { id: marla.me.id().to_string() })), Reply::Failed { .. }));
-        manage(&keeper, &marla, Some(Order::Unblock { id: eve.me.id().to_string() }));
-        assert_eq!(keeper.answer(&eldermere, &eve.me.public(), Ask::Join), Reply::Requested);
-
-        // Started anew, it knows all of it still.
-        drop(keeper);
-        let keeper = Keeper::open(Store::new(dir.path().join("server")), dir.path(), marla.me.id().to_string()).unwrap();
-        let again = state(&keeper, &marla);
-        assert_eq!(again.worldbuilders.len(), 1);
-        assert!(again.worlds.iter().any(|w| w.name == "Thule" && w.closed));
-        assert!(again.users.iter().any(|u| u.name == "Eve" && !u.blocked));
+        assert!(matches!(keeper.answer("", &marla.card(), Ask::Manage { order: Some(Order::Delete { world: world.clone() }) }), Reply::Failed { .. }));
+        keeper.answer("", &marla.card(), Ask::Manage { order: Some(Order::Close { world: world.clone() }) });
+        assert_eq!(keeper.answer(&world, &olaf.card(), Ask::Join), Reply::NotOffered);
+        assert!(matches!(keeper.answer("", &marla.card(), Ask::Manage { order: Some(Order::Delete { world: world.clone() }) }), Reply::Managed { .. }));
+        assert!(!keeper.store.holds(&world));
     }
 
     #[test]
-    fn an_encrypted_world_goes_to_its_members_and_without_copies_only_while_online() {
-        let dir = tempfile::tempdir().unwrap();
-        let (marla, bob, eve) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"), someone(dir.path(), "Eve"));
-        let keeper = keeper(dir.path(), &marla);
-        let (world, _) = world(&marla, "Eldermere");
-        marla.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        swap(&keeper, &marla, &world);
-
-        // Not on the list: to a stranger it is not there at all.
-        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::NotOffered);
-        let Reply::Worlds { worlds, .. } = keeper.answer("", &bob.me.public(), Ask::Worlds) else { panic!() };
-        assert!(worlds.is_empty(), "not named to a stranger");
-        // On the list: asked through the server, decided by the GM.
-        marla.store.set_listed(&world, true).unwrap();
-        swap(&keeper, &marla, &world);
-        assert_eq!(keeper.answer(&world, &bob.me.public(), Ask::Join), Reply::Requested);
-        assert_eq!(swap(&keeper, &bob, &world), Reply::NotMember);
-        let Reply::Digest { requests, .. } = keeper.answer(&world, &marla.me.public(), Ask::Digest { presence: None, rolls: Vec::new() }) else { panic!() };
-        assert_eq!(requests, vec![bob.me.public()]);
-        admit(&marla.store, &world, bob.me.public(), Vec::new()).unwrap();
-        swap(&keeper, &marla, &world);
-
-        // Bob gets it — held only while online — and opens his part alone.
-        assert!(matches!(swap(&keeper, &bob, &world), Reply::Records { .. }));
-        assert!(bob.store.holds(&world) && bob.store.is_fleeting(&world));
-        let seen = titles(&bob, &world);
-        assert!(seen.contains(&"Rumours".to_string()) && !seen.contains(&"Truth".to_string()), "{seen:?}");
-        assert_eq!(swap(&keeper, &eve, &world), Reply::NotMember, "on the list, a stranger may ask");
-
-        // With copies, he keeps it; the next start does not take it.
-        marla.store.control(&world, aw_store::journal::Item::Copies { players: true }, "").unwrap();
-        swap(&keeper, &marla, &world);
-        swap(&keeper, &bob, &world);
-        swap(&keeper, &bob, &world);
-        assert!(bob.store.holds(&world) && !bob.store.is_fleeting(&world));
-        marla.store.control(&world, aw_store::journal::Item::Copies { players: false }, "").unwrap();
-        swap(&keeper, &marla, &world);
-        swap(&keeper, &bob, &world);
-        swap(&keeper, &bob, &world);
-        assert!(bob.store.is_fleeting(&world));
-        bob.store.forget_fleeting();
-        assert!(!bob.store.holds(&world), "gone with the next start");
-        // Still a member: fetched again once online.
-        assert_eq!(bob.store.fleeting_worlds(), vec![world.clone()]);
-        swap(&keeper, &bob, &world);
-        assert!(bob.store.is_fleeting(&world) && titles(&bob, &world).contains(&"Rumours".to_string()));
-    }
-
-    #[test]
-    fn an_unencrypted_world_is_read_and_written_by_the_server_in_the_members_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let (marla, bob) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"));
-        let keeper = keeper(dir.path(), &marla);
-        let (world, article) = world(&marla, "Eldermere");
-        marla.store.set_encrypted(&world, false).unwrap();
-        admit(&marla.store, &world, bob.me.public(), Vec::new()).unwrap();
-        // The grant names Bob's attributes as they are — and no keys.
-        let open = marla.store.with_journal(&world, |j| Ok(j.grant(bob.me.id().as_str()).map(|(_, s)| s.is_plain()))).unwrap();
-        assert_eq!(open, Some(true));
-        marla.store.add_host(&world, keeper.me.id.as_str()).unwrap();
-        swap(&keeper, &marla, &world);
-
-        // Bob works online: the server shows him his part, not the GM's.
-        assert_eq!(swap(&keeper, &bob, &world), Reply::OnlineOnly);
-        assert!(!bob.store.holds(&world));
-        let call = |command: &str, args: serde_json::Value| -> Result<serde_json::Value, String> {
-            match keeper.answer(&world, &bob.me.public(), Ask::Call { command: command.into(), args: args.to_string() }) {
-                Reply::Called { value: Some(v), .. } => Ok(serde_json::from_str(&v).unwrap()),
-                Reply::Called { error: Some(e), .. } => Err(e),
-                other => panic!("{other:?}"),
-            }
-        };
-        let opened = call("document_open", serde_json::json!({ "article": article })).unwrap();
-        let code = opened["code"].as_str().unwrap().to_string();
-        assert!(code.contains("Content of Rumours") && !code.contains("Content of Truth"), "{code}");
-
-        // He writes into his part — and not into the one he only sees.
-        let save = |text: String| call("document_save", serde_json::json!({ "article": article, "text": text, "base": opened["base"], "session": "s1" }));
-        save(code.replace("Content of Rumours", "Bob heard something.")).unwrap();
-        assert!(save(code.replace("<name=Tavern>", "<name=Bob's tavern>")).is_err());
-        call("session_end", serde_json::json!({ "session": "s1" })).unwrap();
-
-        // The GM gets it, written in Bob's name.
-        swap(&keeper, &marla, &world);
-        let text = document::code_of(&marla.store, &marla.me, &world, &article).unwrap().code;
-        assert!(text.contains("Bob heard something.") && text.contains("<name=Tavern>"), "{text}");
-        let versions = document::article_versions_in(&marla.store, world.clone(), article.clone()).unwrap();
-        assert!(versions.iter().any(|v| v.author == "Bob"), "{:?}", versions.iter().map(|v| &v.author).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn in_an_unencrypted_world_the_server_acts_for_a_supporter_in_their_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let (marla, bob, carla, dan) = (someone(dir.path(), "Marla"), someone(dir.path(), "Bob"), someone(dir.path(), "Carla"), someone(dir.path(), "Dan"));
-        let keeper = keeper(dir.path(), &marla);
-        let (world, _) = world(&marla, "Eldermere");
-        marla.store.set_encrypted(&world, false).unwrap();
-        for who in [&bob, &carla, &dan] {
-            admit(&marla.store, &world, who.me.public(), Vec::new()).unwrap();
+    fn a_world_file_is_named_plainly() {
+        assert!(safe_file("world.sqlite").is_ok());
+        assert!(safe_file("media/abc_12.preview.webp").is_ok());
+        for bad in ["../x", "media/../world.sqlite", "media/.hidden", "media/a/b", "other.db", "media/"] {
+            assert!(safe_file(bad).is_err(), "{bad}");
         }
-        marla.store.set_supporters(&world, vec![bob.me.id().to_string()]).unwrap();
-        marla.store.add_host(&world, keeper.me.id.as_str()).unwrap();
-        swap(&keeper, &marla, &world);
-        let call = |who: &Someone, command: &str, args: serde_json::Value| -> Result<serde_json::Value, String> {
-            match keeper.answer(&world, &who.me.public(), Ask::Call { command: command.into(), args: args.to_string() }) {
-                Reply::Called { value: Some(v), .. } => Ok(serde_json::from_str(&v).unwrap()),
-                Reply::Called { error: Some(e), .. } => Err(e),
-                other => panic!("{other:?}"),
-            }
-        };
-
-        // Bob sees the members as the GM does; Carla only herself.
-        let info = call(&bob, "world_info", serde_json::json!({})).unwrap();
-        assert_eq!(info["members"].as_array().unwrap().len(), 4, "{}", info["members"]);
-        assert_eq!(call(&carla, "world_info", serde_json::json!({})).unwrap()["members"].as_array().unwrap().len(), 1);
-
-        // He makes Carla a rogue and takes Dan out — the server writes it in his name.
-        call(&bob, "member_attributes_set", serde_json::json!({ "member": carla.me.id().to_string(), "attributes": ["class:rogue"] })).unwrap();
-        call(&bob, "member_remove", serde_json::json!({ "id": dan.me.id().to_string() })).unwrap();
-        assert!(matches!(swap(&keeper, &dan, &world), Reply::NotMember | Reply::NotOffered), "out at once");
-        // Not the GM, nor the role gm; and Carla is no supporter.
-        assert!(call(&bob, "member_remove", serde_json::json!({ "id": marla.me.id().to_string() })).is_err());
-        assert!(call(&bob, "member_attributes_set", serde_json::json!({ "member": carla.me.id().to_string(), "attributes": ["gm"] })).is_err());
-        assert!(call(&carla, "member_remove", serde_json::json!({ "id": bob.me.id().to_string() })).is_err());
-
-        // Marla's device takes it in as her own word.
-        swap(&keeper, &marla, &world);
-        crate::answer_proposals(&marla.store, &world).unwrap();
-        let meta = marla.store.load_world_meta(&world).unwrap();
-        assert!(meta.member(dan.me.id().as_str()).is_none());
-        assert!(meta.member(carla.me.id().as_str()).unwrap().attributes.contains(&"class:rogue".to_string()));
-        assert!(marla.store.with_journal(&world, |j| Ok(j.acted_on().is_empty())).unwrap());
     }
 }

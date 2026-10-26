@@ -5,13 +5,17 @@ use super::*;
 use crate::store::GalleryImage;
 
 /// The largest file taken in — a detailed map may be big, but not without end.
-const MAX_UPLOAD: u64 = 1024 * 1024 * 1024;
+pub(crate) const MAX_UPLOAD: u64 = 1024 * 1024 * 1024;
 
 #[cfg(feature = "gui")]
 /// Uploads an image under a name; returns its id.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn image_upload(app: tauri::AppHandle, world: String, path: String, name: String, folder: String) -> Answer<String> {
-    let store = store(&app)?;
+    image_upload_in(&store(&app)?, world, path, name, folder)
+}
+
+/// `image_upload` for whom the store is given.
+pub(crate) fn image_upload_in(store: &Store, world: String, path: String, name: String, folder: String) -> Answer<String> {
     if std::fs::metadata(&path)?.len() > MAX_UPLOAD {
         return Err(AppError("This file is too large.".into()));
     }
@@ -19,11 +23,26 @@ pub fn image_upload(app: tauri::AppHandle, world: String, path: String, name: St
     Ok(store.upload_image(&world, &raw, &name, &folder)?)
 }
 
+/// An image brought by its content rather than a path — from a member
+/// working on a server. `data` base64.
+pub(crate) fn image_put_in(store: &Store, world: String, name: String, folder: String, data: String) -> Answer<String> {
+    use base64::Engine;
+    let raw = base64::engine::general_purpose::STANDARD.decode(data.as_bytes()).map_err(|_| AppError("This image did not arrive whole.".into()))?;
+    if raw.len() as u64 > MAX_UPLOAD {
+        return Err(AppError("This file is too large.".into()));
+    }
+    Ok(store.upload_image(&world, &raw, &name, &folder)?)
+}
+
 #[cfg(feature = "gui")]
 /// Gives an image a new name — its uploader or the GM.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn image_rename(app: tauri::AppHandle, world: String, image: String, name: String) -> Answer<()> {
-    let store = store(&app)?;
+    image_rename_in(&store(&app)?, world, image, name)
+}
+
+/// `image_rename` for whom the store is given.
+pub(crate) fn image_rename_in(store: &Store, world: String, image: String, name: String) -> Answer<()> {
     Ok(store.rename_image(&world, &image, &name)?)
 }
 
@@ -32,7 +51,11 @@ pub fn image_rename(app: tauri::AppHandle, world: String, image: String, name: S
 /// what the others see in its place.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn image_defaults_set(app: tauri::AppHandle, world: String, image: String, defaults: aw_store::media::ImageDefaults) -> Answer<()> {
-    let store = store(&app)?;
+    image_defaults_set_in(&store(&app)?, world, image, defaults)
+}
+
+/// `image_defaults_set` for whom the store is given.
+pub(crate) fn image_defaults_set_in(store: &Store, world: String, image: String, defaults: aw_store::media::ImageDefaults) -> Answer<()> {
     Ok(store.set_image_defaults(&world, &image, defaults)?)
 }
 
@@ -40,7 +63,11 @@ pub fn image_defaults_set(app: tauri::AppHandle, world: String, image: String, d
 /// Puts an image into a folder of the gallery.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn image_move(app: tauri::AppHandle, world: String, image: String, folder: String) -> Answer<()> {
-    let store = store(&app)?;
+    image_move_in(&store(&app)?, world, image, folder)
+}
+
+/// `image_move` for whom the store is given.
+pub(crate) fn image_move_in(store: &Store, world: String, image: String, folder: String) -> Answer<()> {
     Ok(store.move_image(&world, &image, &folder)?)
 }
 

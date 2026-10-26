@@ -21,12 +21,15 @@ mod backup;
 mod transfer;
 mod network;
 mod keys;
+mod remote;
+mod keeper;
+pub mod server;
 
 use aw_crypto::{Identity, IdentityPublic};
 use aw_model::{editor, markdown, names, template_text, types, Attribute, Policy, Template, WorldCalendar, WorldDate};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use store::{Access, Document, Layer, Member, Reader, Role, Store, WorldMeta};
+use store::{Access, Document, Layer, Reader, Role, Store, WorldMeta};
 #[cfg(feature = "gui")]
 use tauri::Manager;
 
@@ -403,7 +406,11 @@ fn manages(store: &Store, world: &str) -> Answer<bool> {
 #[cfg(feature = "gui")]
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_status(app: tauri::AppHandle) -> Answer<Option<IdentityInfo>> {
-    let store = store(&app)?;
+    identity_status_in(&store(&app)?)
+}
+
+/// `identity_status` for whom the store is given.
+pub(crate) fn identity_status_in(store: &Store) -> Answer<Option<IdentityInfo>> {
     if !store.has_identity() {
         return Ok(None);
     }
@@ -414,7 +421,11 @@ fn identity_status(app: tauri::AppHandle) -> Answer<Option<IdentityInfo>> {
 #[cfg(feature = "gui")]
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_create(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> {
-    let store = store(&app)?;
+    identity_create_in(&store(&app)?, name)
+}
+
+/// `identity_create` for whom the store is given.
+pub(crate) fn identity_create_in(store: &Store, name: String) -> Answer<IdentityInfo> {
     let identity = Identity::create(name)?;
     store.save_identity(&identity)?;
     Ok(info_from(&store, &identity))
@@ -425,7 +436,11 @@ fn identity_create(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> 
 /// this device holds show the new name.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_rename(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> {
-    let store = store(&app)?;
+    identity_rename_in(&store(&app)?, name)
+}
+
+/// `identity_rename` for whom the store is given.
+pub(crate) fn identity_rename_in(store: &Store, name: String) -> Answer<IdentityInfo> {
     let mut identity = store.load_identity()?;
     identity.rename(name);
     store.save_identity(&identity)?;
@@ -446,7 +461,11 @@ fn identity_rename(app: tauri::AppHandle, name: String) -> Answer<IdentityInfo> 
 /// admit you. No private keys are in it.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn identity_export(app: tauri::AppHandle, path: String) -> Answer<String> {
-    let store = store(&app)?;
+    identity_export_in(&store(&app)?, path)
+}
+
+/// `identity_export` for whom the store is given.
+pub(crate) fn identity_export_in(store: &Store, path: String) -> Answer<String> {
     let identity = store.load_identity()?;
     let path = with_extension(&path, "awid");
     std::fs::write(&path, serde_json::to_vec_pretty(&identity.public()).map_err(AppError::from)?)
@@ -508,7 +527,11 @@ fn avatar_remove(app: tauri::AppHandle) -> Answer<()> {
 // Off the main thread: while the store works, the window keeps drawing and taking keys.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<WorldInfo>> {
-    let store = store(&app)?;
+    worlds_list_in(&store(&app)?)
+}
+
+/// `worlds_list` for whom the store is given.
+pub(crate) fn worlds_list_in(store: &Store) -> Answer<Vec<WorldInfo>> {
     let mut out = Vec::new();
     for id in store.held_worlds()? {
         let Ok(meta) = store.load_world_meta(&id) else { continue };
@@ -518,6 +541,7 @@ fn worlds_list(app: tauri::AppHandle) -> Answer<Vec<WorldInfo>> {
         }
         out.push(world_info(&store, &meta)?);
     }
+    out.extend(network::remote_worlds(store)?);
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
@@ -530,9 +554,18 @@ enum Destination {
     Server { server: String },
 }
 
-/// Servers are reached again once the network is built on the new world format.
-fn no_servers_yet() -> AppError {
-    AppError("Worlds on a server are not available in this build yet.".into())
+#[cfg(feature = "gui")]
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Tells the app's windows of something that happened — nothing without them.
+pub(crate) fn tell_windows(event: &str, payload: serde_json::Value) {
+    #[cfg(feature = "gui")]
+    if let Some(app) = APP.get() {
+        use tauri::Emitter;
+        let _ = app.emit(event, payload);
+    }
+    #[cfg(not(feature = "gui"))]
+    let _ = (event, payload);
 }
 
 #[cfg(feature = "gui")]
@@ -540,17 +573,26 @@ fn no_servers_yet() -> AppError {
 #[cfg_attr(feature = "gui", tauri::command(async))]
 async fn world_create(app: tauri::AppHandle, name: String, destination: Destination) -> Answer<WorldInfo> {
     let store = store(&app)?;
-    tauri::async_runtime::spawn_blocking(move || match destination {
-        Destination::Local { path } => {
-            let store = if path.is_empty() { store } else { store.destination(Path::new(&path))? };
+    let (made, server) = {
+        let store = store.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Answer<(WorldMeta, Option<String>)> {
+            let (store, server) = match destination {
+                Destination::Local { path } if path.is_empty() => (store, None),
+                Destination::Local { path } => (store.destination(Path::new(&path))?, None),
+                Destination::Server { server } => (store, Some(server)),
+            };
             let identity = store.load_identity()?;
-            let meta = new_world(&store, &identity, name)?;
-            world_info(&store, &meta)
-        }
-        Destination::Server { .. } => Err(no_servers_yet()),
-    })
-    .await
-    .map_err(AppError::from)?
+            Ok((new_world(&store, &identity, name)?, server))
+        })
+        .await
+        .map_err(AppError::from)??
+    };
+    // On a server: made here, then brought there — it lies there alone.
+    if let Some(server) = server {
+        network::move_world(&store, &made.id, Some(server), None, &|_, _| {}).await?;
+        return network::connect(&store, &made.id).await;
+    }
+    world_info(&store, &made)
 }
 
 #[cfg(feature = "gui")]
@@ -566,7 +608,7 @@ async fn world_copy(app: tauri::AppHandle, world: String, destination: Destinati
         let target = match destination {
             Destination::Local { path } if path.is_empty() => store.clone(),
             Destination::Local { path } => store.destination(Path::new(&path))?,
-            Destination::Server { .. } => return Err(no_servers_yet()),
+            Destination::Server { .. } => return Err(AppError("Copy the world here, then move the copy onto the server.".into())),
         };
         let name = copy_name(&store, &store.load_world_meta(&world)?.name)?;
         let tell = |done: usize, total: usize| {
@@ -627,9 +669,23 @@ fn copy_world(from: &Store, to: &Store, world: &str, name: &str, tell: &dyn Fn(u
 async fn world_move(app: tauri::AppHandle, world: String, destination: Destination) -> Answer<WorldInfo> {
     use tauri::Emitter;
     let store = store(&app)?;
+    let tell = |done: u64, total: u64| {
+        let _ = app.emit("copy-progress", ("transfer", done, total));
+    };
+    if network::remote_of(&store, &world).is_some() {
+        let (server, folder) = match destination {
+            Destination::Server { server } => (Some(server), None),
+            Destination::Local { path } => (None, (!path.is_empty()).then(|| PathBuf::from(path))),
+        };
+        network::move_world(&store, &world, server, folder, &tell).await?;
+        return network::connect(&store, &world).await;
+    }
     must_be_gm(&store, &world, "moves a world")?;
     match destination {
-        Destination::Server { .. } => return Err(no_servers_yet()),
+        Destination::Server { server } => {
+            network::move_world(&store, &world, Some(server), None, &tell).await?;
+            return network::connect(&store, &world).await;
+        }
         Destination::Local { path } => {
             if !path.is_empty() {
                 let (moving, world) = (store.clone(), world.clone());
@@ -714,7 +770,11 @@ fn create_type_page(store: &Store, world: &str, template: &Template) -> Answer<S
 /// Admits a player to the world — from their player card.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_add(app: tauri::AppHandle, world: String, path: String, attributes: Vec<String>) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    member_add_in(&store(&app)?, world, path, attributes)
+}
+
+/// `member_add` for whom the store is given.
+pub(crate) fn member_add_in(store: &Store, world: String, path: String, attributes: Vec<String>) -> Answer<WorldInfo> {
     let raw = std::fs::read(&path).map_err(AppError::from)?;
     let card: IdentityPublic = serde_json::from_slice(&raw).map_err(AppError::from)?;
     admit(&store, &world, card, attributes)?;
@@ -767,11 +827,25 @@ pub(crate) fn admit(store: &Store, world: &str, card: IdentityPublic, attributes
     Ok(())
 }
 
+/// The card of someone who asked to join.
+pub(crate) fn card_of(request: &aw_store::db::Request) -> Answer<IdentityPublic> {
+    Ok(serde_json::from_value(serde_json::json!({ "id": request.id, "name": request.name, "verify_key": request.verify_key, "seal_key": request.seal_key }))?)
+}
+
+/// Whether an id is a whole player id: `id:` and 16 hex characters.
+pub(crate) fn is_player_id(id: &str) -> bool {
+    id.strip_prefix("id:").is_some_and(|body| body.len() == 16 && body.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
 #[cfg(feature = "gui")]
 /// One's own colour in a world — on one's name and the documents assigned to one.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_colour_set(app: tauri::AppHandle, world: String, colour: String) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    member_colour_set_in(&store(&app)?, world, colour)
+}
+
+/// `member_colour_set` for whom the store is given.
+pub(crate) fn member_colour_set_in(store: &Store, world: String, colour: String) -> Answer<WorldInfo> {
     let db = store.db(&world)?;
     let me = store.actor()?;
     let mut member = db.member(&me)?.ok_or_else(|| AppError("You are not a member of this world.".into()))?;
@@ -787,7 +861,11 @@ fn member_colour_set(app: tauri::AppHandle, world: String, colour: String) -> An
 /// takes over as soon as it is.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_replace(app: tauri::AppHandle, world: String, old: String, new: String) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    member_replace_in(&store(&app)?, world, old, new)
+}
+
+/// `member_replace` for whom the store is given.
+pub(crate) fn member_replace_in(store: &Store, world: String, old: String, new: String) -> Answer<WorldInfo> {
     replace_member(&store, &world, &old, &new)?;
     world_now(&store, &world)
 }
@@ -795,8 +873,7 @@ fn member_replace(app: tauri::AppHandle, world: String, old: String, new: String
 pub(crate) fn replace_member(store: &Store, world: &str, old: &str, new: &str) -> Answer<()> {
     must_be_gm(store, world, "gives a player a new id")?;
     let new = new.trim();
-    let valid = new.strip_prefix("id:").is_some_and(|body| body.len() == 16 && body.chars().all(|c| c.is_ascii_hexdigit()));
-    if !valid {
+    if !is_player_id(new) {
         return Err(AppError("That is no player id. It is the whole id — id: and 16 characters.".into()));
     }
     let db = store.db(world)?;
@@ -808,8 +885,7 @@ pub(crate) fn replace_member(store: &Store, world: &str, old: &str, new: &str) -
     store.set_setting(world, "takeovers", &takeovers)?;
     // Asking already: at once.
     if let Some(request) = db.requests()?.into_iter().find(|r| r.id == new) {
-        let card: IdentityPublic = serde_json::from_value(serde_json::json!({ "id": request.id, "name": request.name, "verify_key": request.verify_key, "seal_key": request.seal_key }))?;
-        return admit(store, world, card, Vec::new());
+        return admit(store, world, card_of(&request)?, Vec::new());
     }
     // Otherwise once it shows up, as anyone let in ahead of time.
     let mut invited = db.invited()?;
@@ -824,7 +900,11 @@ pub(crate) fn replace_member(store: &Store, world: &str, old: &str, new: &str) -
 /// Takes a member out of the world — or an id let in ahead of time.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_remove(app: tauri::AppHandle, world: String, id: String) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    member_remove_in(&store(&app)?, world, id)
+}
+
+/// `member_remove` for whom the store is given.
+pub(crate) fn member_remove_in(store: &Store, world: String, id: String) -> Answer<WorldInfo> {
     remove_member(&store, &world, &id)?;
     world_now(&store, &world)
 }
@@ -853,7 +933,11 @@ pub(crate) fn remove_member(store: &Store, world: &str, id: &str) -> Answer<()> 
 /// Switches review on or off: whether what players write waits for the GM.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_moderation_set(app: tauri::AppHandle, world: String, on: bool) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    world_moderation_set_in(&store(&app)?, world, on)
+}
+
+/// `world_moderation_set` for whom the store is given.
+pub(crate) fn world_moderation_set_in(store: &Store, world: String, on: bool) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "decides about review")?;
     store.set_setting(&world, "moderated", &on)?;
     world_now(&store, &world)
@@ -863,7 +947,11 @@ fn world_moderation_set(app: tauri::AppHandle, world: String, on: bool) -> Answe
 /// Sets how many versions of each document stay — the GM's.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_versions_set(app: tauri::AppHandle, world: String, max: u32) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    world_versions_set_in(&store(&app)?, world, max)
+}
+
+/// `world_versions_set` for whom the store is given.
+pub(crate) fn world_versions_set_in(store: &Store, world: String, max: u32) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "decides how many versions stay")?;
     if max == 0 {
         return Err(AppError("At least one version stays.".into()));
@@ -906,9 +994,15 @@ fn app_restart(app: tauri::AppHandle) {
 /// Whether the world's server names it to everyone who asks — the GM's.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_listed_set(app: tauri::AppHandle, world: String, listed: bool) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    world_listed_set_in(&store(&app)?, world, listed)
+}
+
+/// `world_listed_set` for whom the store is given.
+pub(crate) fn world_listed_set_in(store: &Store, world: String, listed: bool) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "decides who sees the world")?;
     store.set_setting(&world, "listed", &listed)?;
+    // Named on the local network now, or no more.
+    network::republish();
     world_now(&store, &world)
 }
 
@@ -925,7 +1019,11 @@ fn world_switch_progress(app: tauri::AppHandle, world: String) -> Answer<Option<
 /// sides, each once, in the order given.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_dice_set(app: tauri::AppHandle, world: String, sides: Vec<u32>) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    world_dice_set_in(&store(&app)?, world, sides)
+}
+
+/// `world_dice_set` for whom the store is given.
+pub(crate) fn world_dice_set_in(store: &Store, world: String, sides: Vec<u32>) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "chooses the world's dice")?;
     let mut kept: Vec<u32> = Vec::new();
     for n in sides.into_iter().filter(|n| (2..=1000).contains(n)) {
@@ -955,7 +1053,11 @@ pub(crate) fn navigation_load_in(store: &Store, world: String) -> Answer<Option<
 /// Sets the side bar's entries — the GM's.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn navigation_set(app: tauri::AppHandle, world: String, entries: Vec<aw_model::navigation::NavEntry>) -> Answer<()> {
-    let store = store(&app)?;
+    navigation_set_in(&store(&app)?, world, entries)
+}
+
+/// `navigation_set` for whom the store is given.
+pub(crate) fn navigation_set_in(store: &Store, world: String, entries: Vec<aw_model::navigation::NavEntry>) -> Answer<()> {
     must_be_gm(&store, &world, "sets the side bar")?;
     store.set_navigation(&world, &entries)?;
     Ok(())
@@ -965,7 +1067,11 @@ fn navigation_set(app: tauri::AppHandle, world: String, entries: Vec<aw_model::n
 /// Trusts a member — their writing counts without review — or no longer.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn member_trust_set(app: tauri::AppHandle, world: String, member: String, trusted: bool) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    member_trust_set_in(&store(&app)?, world, member, trusted)
+}
+
+/// `member_trust_set` for whom the store is given.
+pub(crate) fn member_trust_set_in(store: &Store, world: String, member: String, trusted: bool) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "decides about review")?;
     let db = store.db(&world)?;
     let mut m = db.member(&member)?.ok_or_else(|| AppError("There is no such member.".into()))?;
@@ -979,7 +1085,11 @@ fn member_trust_set(app: tauri::AppHandle, world: String, member: String, truste
 /// named any more are players again.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_supporters_set(app: tauri::AppHandle, world: String, ids: Vec<String>) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    world_supporters_set_in(&store(&app)?, world, ids)
+}
+
+/// `world_supporters_set` for whom the store is given.
+pub(crate) fn world_supporters_set_in(store: &Store, world: String, ids: Vec<String>) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "names supporters")?;
     let db = store.db(&world)?;
     for mut m in db.members()? {
@@ -1001,7 +1111,11 @@ fn world_supporters_set(app: tauri::AppHandle, world: String, ids: Vec<String>) 
 /// the new GM, and the old one is a player of it.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_take_over(app: tauri::AppHandle, world: String) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    world_take_over_in(&store(&app)?, world)
+}
+
+/// `world_take_over` for whom the store is given.
+pub(crate) fn world_take_over_in(store: &Store, world: String) -> Answer<WorldInfo> {
     let me = store.actor()?;
     let db = store.db(&world)?;
     if !db.member(&me)?.is_some_and(|m| m.role == Role::Supporter) {
@@ -1016,7 +1130,11 @@ fn world_take_over(app: tauri::AppHandle, world: String) -> Answer<WorldInfo> {
 /// the one who was is a player of it.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn gm_handover(app: tauri::AppHandle, world: String, member: Option<String>) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    gm_handover_in(&store(&app)?, world, member)
+}
+
+/// `gm_handover` for whom the store is given.
+pub(crate) fn gm_handover_in(store: &Store, world: String, member: Option<String>) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "can hand the world over")?;
     let Some(member) = member else { return world_now(&store, &world) };
     if member == store.actor()? || store.db(&world)?.member(&member)?.is_none() {
@@ -1047,8 +1165,20 @@ fn hand_world(store: &Store, world: &str, to: &str) -> Answer<()> {
 /// `confirmation` has to be the world's name. The check deliberately lives
 /// here too and not only in the interface: what is deleted, nobody brings back.
 #[cfg_attr(feature = "gui", tauri::command(async))]
-fn world_delete(app: tauri::AppHandle, world: String, confirmation: String) -> Answer<()> {
+async fn world_delete(app: tauri::AppHandle, world: String, confirmation: String) -> Answer<()> {
     let store = store(&app)?;
+    // On a server: its GM deletes it there; a player leaves it.
+    if let Some(info) = network::remote_worlds(&store)?.into_iter().find(|w| w.id == world) {
+        if confirmation.trim() != info.name.trim() {
+            return Err(AppError(format!("To delete, the name has to match exactly: {:?}", info.name)));
+        }
+        return network::leave(&store, &world, info.is_gm).await;
+    }
+    world_delete_in(&store, world, confirmation)
+}
+
+/// `world_delete` for whom the store is given.
+pub(crate) fn world_delete_in(store: &Store, world: String, confirmation: String) -> Answer<()> {
     must_be_gm(&store, &world, "deletes a world")?;
     let meta = store.load_world_meta(&world)?;
     if confirmation.trim() != meta.name.trim() {
@@ -1062,7 +1192,11 @@ fn world_delete(app: tauri::AppHandle, world: String, confirmation: String) -> A
 /// Sets the world's emoji.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn world_icon_set(app: tauri::AppHandle, world: String, icon: String) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    world_icon_set_in(&store(&app)?, world, icon)
+}
+
+/// `world_icon_set` for whom the store is given.
+pub(crate) fn world_icon_set_in(store: &Store, world: String, icon: String) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "sets the world's icon")?;
     let mut meta = store.load_world_meta(&world)?;
     // A few characters are enough for any emoji including variation selectors.
@@ -1076,7 +1210,11 @@ fn world_icon_set(app: tauri::AppHandle, world: String, icon: String) -> Answer<
 /// written stay the same days; they are only written in the new calendar.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn calendar_set(app: tauri::AppHandle, world: String, calendar: WorldCalendar) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    calendar_set_in(&store(&app)?, world, calendar)
+}
+
+/// `calendar_set` for whom the store is given.
+pub(crate) fn calendar_set_in(store: &Store, world: String, calendar: WorldCalendar) -> Answer<WorldInfo> {
     must_be_gm(&store, &world, "sets the calendar")?;
     calendar.validate().map_err(AppError::from)?;
     let mut meta = store.load_world_meta(&world)?;
@@ -1091,7 +1229,11 @@ fn calendar_set(app: tauri::AppHandle, world: String, calendar: WorldCalendar) -
 /// A role to give — `class:rogue`, `knowledge:crypt`. The GM's or a supporter's.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn attribute_create(app: tauri::AppHandle, world: String, attribute: String) -> Answer<Vec<String>> {
-    let store = store(&app)?;
+    attribute_create_in(&store(&app)?, world, attribute)
+}
+
+/// `attribute_create` for whom the store is given.
+pub(crate) fn attribute_create_in(store: &Store, world: String, attribute: String) -> Answer<Vec<String>> {
     if !manages(&store, &world)? {
         return Err(AppError("Only the GM or a supporter makes roles.".into()));
     }
@@ -1108,7 +1250,11 @@ fn attribute_create(app: tauri::AppHandle, world: String, attribute: String) -> 
 /// Takes a role away from everyone, and out of the roles to give.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn attribute_revoke(app: tauri::AppHandle, world: String, attribute: String) -> Answer<u32> {
-    let store = store(&app)?;
+    attribute_revoke_in(&store(&app)?, world, attribute)
+}
+
+/// `attribute_revoke` for whom the store is given.
+pub(crate) fn attribute_revoke_in(store: &Store, world: String, attribute: String) -> Answer<u32> {
     must_be_gm(&store, &world, "takes roles away")?;
     let made: Vec<String> = store.setting(&world, "roles", Vec::<String>::new())?;
     store.set_setting(&world, "roles", &made.into_iter().filter(|a| *a != attribute).collect::<Vec<_>>())?;
@@ -1332,10 +1478,14 @@ fn article_create(
     visibility: String,
     layers: Vec<NewLayer>,
 ) -> Answer<String> {
-    let store = store(&app)?;
-    must_be_gm(&store, &world, "makes documents with access of their own")?;
-    let layers = names_stored(&store, &world, &article_type, layers)?;
-    create_document(&store, &world, article_type, slug, name, visibility, layers)
+    article_create_in(&store(&app)?, world, article_type, slug, name, visibility, layers)
+}
+
+/// `article_create` for whom the store is given.
+pub(crate) fn article_create_in(store: &Store, world: String, article_type: String, slug: String, name: String, visibility: String, layers: Vec<NewLayer>) -> Answer<String> {
+    must_be_gm(store, &world, "makes documents with access of their own")?;
+    let layers = names_stored(store, &world, &article_type, layers)?;
+    create_document(store, &world, article_type, slug, name, visibility, layers)
 }
 
 /// Names as written in new texts, ids as stored — the same as when a
@@ -1620,7 +1770,11 @@ fn type_access_apply(app: tauri::AppHandle, world: String, article_type: String,
 /// is no trash bin.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn article_delete(app: tauri::AppHandle, world: String, article: String, confirmation: String) -> Answer<()> {
-    let store = store(&app)?;
+    article_delete_in(&store(&app)?, world, article, confirmation)
+}
+
+/// `article_delete` for whom the store is given.
+pub(crate) fn article_delete_in(store: &Store, world: String, article: String, confirmation: String) -> Answer<()> {
     must_be_gm(&store, &world, "deletes documents")?;
     // A page belongs to its owner and goes only with it: the world's with
     // the world, a type's with the type.
@@ -1685,24 +1839,23 @@ fn template_read(
     text: String,
     base: Template,
 ) -> Answer<editor::ReadResult> {
-    // What the supertypes and groups bring along may be bound as well.
-    let templates = store(&app)?.load_templates(&world)?;
-    Ok(editor::read(&text, base, &directory(&app, &world)?, &templates))
+    template_read_in(&store(&app)?, world, text, base)
 }
 
-#[cfg(feature = "gui")]
+/// `template_read` for whom the store is given.
+pub(crate) fn template_read_in(store: &Store, world: String, text: String, base: Template) -> Answer<editor::ReadResult> {
+    // What the supertypes and groups bring along may be bound as well.
+    let templates = store.load_templates(&world)?;
+    Ok(editor::read(&text, base, &directory(store, &world)?, &templates))
+}
+
 /// Which types exist in this world — id and name.
 ///
 /// The text carries the name of a type, what is stored is its id. Without the
 /// directory neither could be translated into the other, nor could it be said
 /// that a name does not occur at all.
-fn directory(app: &tauri::AppHandle, world: &str) -> Result<template_text::Directory, AppError> {
-    Ok(template_text::Directory::new(
-        store(app)?
-            .load_templates(world)?
-            .into_iter()
-            .map(|t| (t.id, t.name)),
-    ))
+fn directory(store: &Store, world: &str) -> Result<template_text::Directory, AppError> {
+    Ok(template_text::Directory::new(store.load_templates(world)?.into_iter().map(|t| (t.id, t.name))))
 }
 
 #[cfg(feature = "gui")]
@@ -1711,9 +1864,13 @@ fn directory(app: &tauri::AppHandle, world: &str) -> Result<template_text::Direc
 fn template_write(
     app: tauri::AppHandle,
     world: String,
-    mut template: Template,
+    template: Template,
 ) -> Answer<String> {
-    let store = store(&app)?;
+    template_write_in(&store(&app)?, world, template)
+}
+
+/// `template_write` for whom the store is given.
+pub(crate) fn template_write_in(store: &Store, world: String, mut template: Template) -> Answer<String> {
     let known = known_to_me(&store, &world)?;
     for part in template.blocks.iter_mut().flat_map(|b| b.parts.iter_mut()) {
         part.text = names::written(&part.text, &known, &template.id);
@@ -1743,7 +1900,7 @@ fn template_write(
             *key = p.label.clone();
         }
     }
-    Ok(template_text::to_text(&template, &directory(&app, &world)?))
+    Ok(template_text::to_text(&template, &directory(store, &world)?))
 }
 
 #[cfg(feature = "gui")]
@@ -1875,6 +2032,10 @@ pub fn run() {
         // Runs after the plugin has restored things: first the remembered size
         // stands, then it is clamped into the usable area.
         .setup(|app| {
+            let _ = APP.set(app.handle().clone());
+            if let Err(e) = network::start(app.handle()) {
+                applog::line("network", &e.0);
+            }
             if let Ok(dir) = profile::config_dir(app.handle()) {
                 applog::set_fallback(dir);
             }
@@ -1904,8 +2065,20 @@ pub fn run() {
             network::network_sync,
             network::network_worlds,
             network::join_requests,
+            network::join_answer,
+            network::member_invite,
             network::world_connect,
             network::world_disconnect,
+            network::world_call,
+            network::network_enable,
+            network::network_internet,
+            network::network_port,
+            network::network_servers,
+            network::network_share,
+            network::network_join,
+            network::server_host_worlds,
+            network::server_manage,
+            network::server_backups,
             profile::storage_status,
             profile::storage_locations,
             profile::storage_choose,

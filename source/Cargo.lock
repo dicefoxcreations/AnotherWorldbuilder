@@ -308,9 +308,6 @@ name = "aw-sync"
 version = "0.1.64"
 dependencies = [
  "aw-crypto",
- "aw-model",
- "aw-policy",
- "aw-store",
  "getrandom 0.4.3",
  "hex",
  "iroh",

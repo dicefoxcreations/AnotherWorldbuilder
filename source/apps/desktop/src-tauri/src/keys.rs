@@ -45,7 +45,11 @@ fn backup(store: &Store, passphrase: &str) -> Answer<Vec<u8>> {
 /// Brings the identity back, where this profile has none yet.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn keys_restore(app: tauri::AppHandle, path: String, passphrase: String) -> Answer<IdentityInfo> {
-    let store = store(&app)?;
+    keys_restore_in(&store(&app)?, path, passphrase)
+}
+
+/// `keys_restore` for whom the store is given.
+pub(crate) fn keys_restore_in(store: &Store, path: String, passphrase: String) -> Answer<IdentityInfo> {
     restore(&store, &std::fs::read(&path)?, &passphrase)?;
     Ok(info_from(&store, &store.load_identity()?))
 }

@@ -1,26 +1,20 @@
-//! aw-server — the door keeper of a group's worlds: on a NAS, a small
-//! server, in a container. Always on, so players work when the GM's device
-//! is off.
+//! aw-server — the keeper of a group's worlds: on a NAS, a small server, in
+//! a container. Always on, so players work when the GM's device is off.
 //!
-//! It holds no world's keys. It knows who is who — everyone proves their
-//! identity when they connect — and lets each one in where the world itself
-//! says they belong: its GM, and the members the GM granted. What it passes
-//! on of an encrypted world only the members' own keys open; their apps keep
-//! it while they are online where the GM keeps players from copies. An
-//! unencrypted world it reads, as anyone holding it could, and lets each
-//! member see and change what their view and rights say (see `host`) —
-//! writing in their name, as itself, which the GM vouches for
-//! (`Item::Hosts`).
+//! It knows who is who — everyone proves their identity when they connect —
+//! and lets each one in where the world itself says they belong: its GM, and
+//! its members. Each command a member asks for it does in their name, and
+//! hands them what their view and rights say (see `keeper`).
 //!
 //! Its admin, a GM named when it starts (`--admin`), manages it from the
 //! app: which GMs may bring worlds, which worlds are closed, who is turned
-//! away. Of other GMs' worlds the admin sees name, size and form — no more
-//! than the server itself can read.
+//! away.
 //!
 //! ```text
 //! <data>/profile/      the server's own identity and endpoint key
 //! <data>/worlds/       the worlds, as in the app
 //! <data>/server.json   GMs, closed worlds, who came, who is turned away
+//! <data>/backups/      the worlds' backups
 //! <data>/host-code.txt what GMs and players enter
 //! ```
 
@@ -29,7 +23,7 @@ use aw_sync::world::{Reach, Server, WorldNet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::keeper::{is_id, Keeper};
+use crate::keeper::Keeper;
 
 const USAGE: &str = "aw-server — keeps the worlds of AnotherWorldbuilder for groups
 
@@ -83,7 +77,7 @@ fn options() -> Result<Options, String> {
         o.admin = format!("id:{}", o.admin);
     }
     o.admin = o.admin.to_ascii_lowercase();
-    if !is_id(&o.admin) {
+    if !is_player_id(&o.admin) {
         return Err(format!("Name the admin by their id — id: and 16 characters, under Profile in the app.\n\n{USAGE}"));
     }
     Ok(o)
@@ -118,7 +112,6 @@ pub fn main() {
 
 async fn run(o: Options) -> Answer<()> {
     let (profile, worlds) = (o.data.join("profile"), o.data.join("worlds"));
-    store::keep_worlds_alone();
     std::fs::create_dir_all(&profile)?;
     std::fs::create_dir_all(&worlds)?;
     let store = profile::use_folders(&profile, &worlds, &o.data.join("locks"))?;
@@ -127,14 +120,6 @@ async fn run(o: Options) -> Answer<()> {
         store.save_identity(&Identity::create(&o.name).map_err(|e| AppError(e.to_string()))?)?;
     }
     let keeper = Arc::new(Keeper::open(store.clone(), &o.data, o.admin.clone())?);
-    // Every world read once now, in the background: whoever comes first
-    // does not wait for it.
-    let reading = store.clone();
-    std::thread::spawn(move || {
-        for world in reading.held_worlds().unwrap_or_default() {
-            let _ = reading.digest(&world);
-        }
-    });
     let reach = Reach {
         lan: o.lan,
         internet: true,

@@ -1,5 +1,4 @@
-//! Worlds between devices. On the local network: found over mDNS, swapped
-//! over QUIC — no public relay, no address lookup. Further away: met
-//! through a shared folder that something else keeps in step, then directly.
-pub mod admission;
+//! Worlds between devices: found over mDNS on the local network, asked for
+//! over QUIC — no public relay, no address lookup — wherever their holder
+//! can be reached.
 pub mod world;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, type NetworkView, type ServerEntry, type StorageView, type Upload, type WorldCheck, type WorldInfo } from "../../api/client";
+import { api, type NetworkView, type ServerEntry, type StorageView, type WorldInfo } from "../../api/client";
 import { CloudIcon, FolderIcon, NetworkIcon, ServerIcon } from "../../shared/ui/Icons";
 
 /** The folder a path lies in. */
@@ -25,27 +25,6 @@ export function Reach({ on }: { on: boolean }) {
   return <span className={on ? "reach on" : "reach"} title={on ? "Reachable" : "Not reachable"} />;
 }
 
-/** How far a world on its way to its server is — empty once it is there. */
-export function uploadText(u: Upload | undefined): string {
-  if (!u) return "";
-  if (u.error) return `upload failed: ${u.error}`;
-  const [records, all] = u.records;
-  if (all === 0) return "upload pending";
-  if (records < all) return `uploading ${Math.floor((records * 100) / all)} %`;
-  const [images, every] = u.images;
-  return images < every ? `uploading images ${images} of ${every}` : "";
-}
-
-/** What a check found, in a line. */
-export function checkText(c: WorldCheck): string {
-  const n = (x: number) => x.toLocaleString();
-  const parts = c.lacking - c.repaired;
-  const fixed = c.repaired > 0 ? ` · ${n(c.repaired)} given again` : "";
-  if (c.missing === 0 && parts === 0) return `all there · ${n(c.records)} entries · ${n(c.intact + c.repaired)} image parts intact${fixed}`;
-  const lack = [c.missing > 0 && `${n(c.missing)} entries`, parts > 0 && `${n(parts)} image parts`].filter(Boolean).join(" and ");
-  return `${lack} not there yet${fixed}`;
-}
-
 /**
  * Where a world lives — one answer for the main menu and the world's
  * settings. On this device: in its own folder, or in another one (a drive,
@@ -55,18 +34,15 @@ export function checkText(c: WorldCheck): string {
 export type WorldPlace = { kind: "device" | "folder" | "server" | "host"; name: string; title: string };
 
 export function placeOf(world: WorldInfo, storage: StorageView | null, servers: ServerEntry[]): WorldPlace {
-  if (world.server || world.serverId) {
-    if (!world.server) return { kind: "server", name: "Server unavailable", title: "Add this world's server again to open it." };
+  if (world.server) {
     const server = servers.find((s) => s.code === world.server);
-    return { kind: "server", name: server ? serverName(server) : serverName({ code: world.server, name: "" }), title: serverAddress(world.server) };
+    // Not one of the servers: a GM's app that holds it.
+    if (!server) return { kind: "host", name: "Hosted by its GM", title: serverAddress(world.server) };
+    return { kind: "server", name: serverName(server), title: serverAddress(world.server) };
   }
   const root = parentOf(world.folder);
   const folder = storage?.locations.find((l) => !l.primary && same(l.path, root));
   if (folder) return { kind: "folder", name: nameOf(folder.path), title: folder.path };
-  if (!world.isGm) {
-    const gm = world.members.find((m) => m.role === "gm");
-    return { kind: "host", name: gm ? `Hosted by ${gm.name}` : "Hosted by its GM", title: "" };
-  }
   return { kind: "device", name: "This device", title: world.folder };
 }
 
@@ -83,12 +59,6 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
   const [network, setNetwork] = useState<NetworkView | null>(null);
   const [moving, setMoving] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [checking, setChecking] = useState<[number, number] | null>(null);
-  const [checked, setChecked] = useState<WorldCheck | null>(null);
-  useEffect(() => {
-    const stop = listen<[string, number, number]>("copy-progress", (e) => e.payload[0] === "checking" && setChecking([e.payload[1], e.payload[2]]));
-    return () => void stop.then((un) => un());
-  }, []);
   useEffect(() => {
     const look = () =>
       Promise.all([api.storageStatus(), api.networkSettings()])
@@ -98,27 +68,11 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
         })
         .catch(onError);
     look();
-    // How far it is on its way to a server.
-    const timer = setInterval(look, 3000);
-    return () => clearInterval(timer);
   }, [world.id]);
   if (!network) return null;
   const servers = network.server_list;
   const place = placeOf(world, storage, servers);
-  const server = servers.find((s) => s.code === world.server);
-  const waiting = !!server?.waiting_worlds.includes(world.id);
-  const uploading = uploadText(network.uploads[world.id]);
-  const status =
-    place.kind === "server"
-      ? waiting
-        ? "waits for the server's admin"
-        : uploading ||
-          (checking ? `checking images ${checking[0].toLocaleString()} of ${checking[1].toLocaleString()}` : checked ? checkText(checked) : "") || "online"
-      : place.kind === "host"
-        ? world.online
-          ? "worked on online"
-          : "on this device"
-        : place.title;
+  const status = place.kind === "server" || place.kind === "host" ? "online" : place.title;
   const offer = async (on: boolean) => {
     setBusy(true);
     try {
@@ -127,19 +81,6 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
     } catch (e) {
       onError(e);
     } finally {
-      setBusy(false);
-    }
-  };
-  const check = async () => {
-    setBusy(true);
-    setChecked(null);
-    setChecking([0, 0]);
-    try {
-      setChecked(await api.worldCheck(world.id));
-    } catch (e) {
-      onError(e);
-    } finally {
-      setChecking(null);
       setBusy(false);
     }
   };
@@ -157,18 +98,13 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
             {status}
           </small>
         </span>
-        {world.isGm && place.kind === "server" && !waiting && !uploading && (
-          <button disabled={busy || !server?.reached} title="Whether all of it is on the server, every image checked" onClick={() => void check()}>
-            {checking ? "Checking …" : "Check"}
-          </button>
-        )}
         {world.isGm && (
           <button disabled={busy} onClick={() => setMoving(true)}>
             Move or copy …
           </button>
         )}
       </div>
-      {world.isGm && place.kind !== "server" && (
+      {world.isGm && !world.online && (
         <label className="switch-row">
           <input type="checkbox" checked={world.offered} disabled={busy} onChange={(e) => void offer(e.target.checked)} />
           <span>
@@ -180,8 +116,8 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
         </label>
       )}
       {/* A world on a server is there and nowhere else: no copies of it, the GM's neither. */}
-      {world.isGm && (place.kind === "server" || world.offered) && (
-        <Listed world={world} where={place.kind === "server" ? "on the server" : "on the network"} onChanged={onChanged} onError={onError} />
+      {world.isGm && (world.online || world.offered) && (
+        <Listed world={world} where={world.online ? "on the server" : "on the network"} onChanged={onChanged} onError={onError} />
       )}
       {moving && storage && (
         <MoveDialog world={world} place={place} storage={storage} servers={servers} onStorage={setStorage} onDone={onChanged} onClose={() => setMoving(false)} onError={onError} />
@@ -227,6 +163,11 @@ const STEPS: Record<string, string> = {
   moving: "moving files",
 };
 
+/** Bytes as one reads them. */
+function size(n: number): string {
+  return n < 1024 * 1024 ? `${Math.ceil(n / 1024).toLocaleString()} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 /**
  * Moving or copying a world: into a folder here — its own, a drive's, a
  * cloud folder — or onto a server. Moved, it is there and nowhere else;
@@ -270,7 +211,7 @@ function MoveDialog({
   }));
   const hosts = servers
     .filter((s) => s.may_bring || s.code === world.server)
-    .map((s) => ({ value: `server:${s.code}`, label: `Server · ${serverName(s)}${s.code === world.server ? " · now" : ""}`, title: serverAddress(s.code), off: !s.reached || (!copy && s.code === world.server) }));
+    .map((s) => ({ value: `server:${s.code}`, label: `Server · ${serverName(s)}${s.code === world.server ? " · now" : ""}`, title: serverAddress(s.code), off: !s.reached || copy || s.code === world.server }));
   const choices = [...folders, ...hosts];
   const chosen = choices.find((c) => c.value === to && !c.off) ?? choices.find((c) => !c.off);
   const toServer = chosen?.value.startsWith("server:") ? chosen.value.slice("server:".length) : "";
@@ -291,9 +232,9 @@ function MoveDialog({
   const what = copy
     ? "A new world of its own, with types, documents and images — without players and versions."
     : toServer
-      ? "It lives on the server; players find it there. Your copy as GM stays on this device."
-      : place.kind === "server"
-        ? "The server lets it go; players find it on this device again."
+      ? "It lives on the server alone; players find it there."
+      : world.online
+        ? "It comes here; the server lets it go."
         : leavesShared
           ? "It moves there with everything — and leaves the shared folder for everyone in it."
           : "It moves there with everything.";
@@ -347,7 +288,15 @@ function MoveDialog({
             <div className="progress-bar">
               <div style={{ width: progress ? `${Math.round((progress[1] * 100) / Math.max(1, progress[2]))}%` : "0%" }} />
             </div>
-            <small className="small">{progress ? `${STEPS[progress[0]] ?? progress[0]} ${progress[1].toLocaleString()} of ${progress[2].toLocaleString()}` : copy ? "Copying …" : "Moving …"}</small>
+            <small className="small">
+              {progress
+                ? progress[0] === "transfer"
+                  ? `${size(progress[1])} of ${size(progress[2])}`
+                  : `${STEPS[progress[0]] ?? progress[0]} ${progress[1].toLocaleString()} of ${progress[2].toLocaleString()}`
+                : copy
+                  ? "Copying …"
+                  : "Moving …"}
+            </small>
           </div>
         )}
         <div className="line">

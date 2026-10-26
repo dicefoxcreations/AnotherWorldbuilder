@@ -1125,13 +1125,6 @@ function NetworkArea({
         </>
       )}
       {(view.enabled || view.internet) && <PortField port={view.port} busy={busy} onSave={(port) => apply(api.networkPort(port))} />}
-      <label className="switch-row">
-        <input type="checkbox" checked={view.folders} disabled={busy} onChange={(e) => apply(api.networkFolders(e.target.checked))} />
-        <span>
-          <strong>Peer to peer through shared folders</strong>
-          <small className="small">{view.folders ? "on · devices of a world in a cloud folder meet there and connect directly" : "off · shared folders only swap files"}</small>
-        </span>
-      </label>
 
       <h3>Servers and hosts</h3>
       <Servers view={view} busy={busy} onSave={(servers) => apply(api.networkServers(servers))} onError={onError} />
@@ -1224,7 +1217,6 @@ function Servers({ view, busy, onSave, onError }: { view: NetworkView; busy: boo
                 </>
               )}
             </div>
-            {entry.waiting && <small className="small muted">A world of yours waits for the server's admin.</small>}
             {managing === s && <ServerAdmin server={s} onError={onError} />}
           </Fragment>
         );
@@ -1400,7 +1392,7 @@ function ServerWorlds({ state, busy, order, onDelete }: { state: ServerState; bu
                 <strong>{w.name}</strong>{" "}
                 {w.requests.length > 0 && <span className="badge">{w.requests.length}</span>}
                 <small className="small muted">
-                  {[w.bytes ? bytes(w.bytes) : "deleted", w.encrypted ? "encrypted" : "unencrypted", w.closed && "closed"].filter(Boolean).join(" · ")}
+                  {[w.bytes ? bytes(w.bytes) : "deleted", w.closed && "closed"].filter(Boolean).join(" · ")}
                 </small>
               </span>
               {w.closed ? (

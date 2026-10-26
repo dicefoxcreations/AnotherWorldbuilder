@@ -206,7 +206,11 @@ pub fn dice_log(app: tauri::AppHandle, world: String) -> Answer<DiceLog> {
 /// rolls one by hand (`dice_roll_in`).
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_log_add(app: tauri::AppHandle, world: String, roll: Roll) -> Answer<DiceLog> {
-    let store = store(&app)?;
+    dice_log_add_in(&store(&app)?, world, roll)
+}
+
+/// `dice_log_add` for whom the store is given.
+pub(crate) fn dice_log_add_in(store: &Store, world: String, roll: Roll) -> Answer<DiceLog> {
     let mut log = load_dice(&store, &world);
     if roll.mark == CLEAR {
         if !log.rolls.is_empty() {
@@ -229,7 +233,11 @@ pub fn dice_log_add(app: tauri::AppHandle, world: String, roll: Roll) -> Answer<
 /// Clears the log — the GM's: here, and on every device in the world.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_log_clear(app: tauri::AppHandle, world: String) -> Answer<DiceLog> {
-    let store = store(&app)?;
+    dice_log_clear_in(&store(&app)?, world)
+}
+
+/// `dice_log_clear` for whom the store is given.
+pub(crate) fn dice_log_clear_in(store: &Store, world: String) -> Answer<DiceLog> {
     let mut log = load_dice(&store, &world);
     log.rolls.clear();
     save_dice(&store, &world, &log)?;
@@ -252,7 +260,11 @@ pub(crate) fn dice_clear_in(store: &Store, world: &str) -> Answer<()> {
 /// Sets the favourites — this device's.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn dice_favorites_set(app: tauri::AppHandle, world: String, favorites: Vec<Favorite>) -> Answer<DiceLog> {
-    let store = store(&app)?;
+    dice_favorites_set_in(&store(&app)?, world, favorites)
+}
+
+/// `dice_favorites_set` for whom the store is given.
+pub(crate) fn dice_favorites_set_in(store: &Store, world: String, favorites: Vec<Favorite>) -> Answer<DiceLog> {
     let mut log = load_dice(&store, &world);
     log.favorites = favorites.into_iter().take(40).collect();
     save_dice(&store, &world, &log)?;

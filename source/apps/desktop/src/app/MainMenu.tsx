@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { DeleteDialog, DeleteButton } from "../shared/ui/Delete";
 import { NetworkIcon, ServerIcon } from "../shared/ui/Icons";
 import { api, type NetWorld, type NetworkView, type ServerEntry, type StorageView, type WorldInfo } from "../api/client";
-import { nameOf, placeOf, PlaceIcon, Reach, serverName, uploadText } from "../features/worlds/WorldPlace";
+import { nameOf, placeOf, PlaceIcon, Reach, serverName } from "../features/worlds/WorldPlace";
 import { HeaderTools } from "./HeaderTools";
 
 /** One library, regardless of how a world reaches this device. */
@@ -50,17 +50,17 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
     return () => { live = false; clearInterval(timer); };
   }, [looking, servers.length]);
 
-  const onServer = (w: WorldInfo) => !!w.server || !!w.serverId;
-  const orphaned = worlds.filter(w => onServer(w) && !servers.some(s => s.code === w.server));
+  // On one of the servers — or with another device: its GM's app.
+  const onServer = (w: WorldInfo) => servers.some(s => s.code === w.server);
   const chosen = location || storage?.worlds || "";
   const toServer = chosen.startsWith("server:") ? chosen.slice("server:".length) : "";
   const localPath = toServer ? storage?.worlds ?? "" : chosen;
   const known = new Set(worlds.map(w => w.id));
-  const remoteNetwork = nearby.filter(w => !w.server && !known.has(w.id));
+  const remoteNetwork = nearby.filter(w => !servers.some(s => s.code === w.server) && !known.has(w.id));
   const placed = (w: WorldInfo) => placeOf(w, storage, servers);
   // On this device: in its folder or another one here. With another device: its GM's.
-  const here = worlds.filter(w => !onServer(w) && placed(w).kind !== "host");
-  const hosted = worlds.filter(w => !onServer(w) && placed(w).kind === "host");
+  const here = worlds.filter(w => !w.server);
+  const hosted = worlds.filter(w => w.server && !onServer(w));
   const opened = (id: string) => { setDialog(null); onOpen(id); };
 
   const joinNetwork = async (w: NetWorld) => {
@@ -136,7 +136,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   const serverOf = (code: string) => servers.find(s => s.code === code);
   const worldButton = (w: WorldInfo) => {
     const place = placed(w);
-    const note = serverOf(w.server)?.waiting_worlds.includes(w.id) ? "waits for its admin" : uploadText(network?.uploads[w.id]) || (w.online ? "online" : "");
+    const note = w.online ? "online" : "";
     return <button className="world-card" onClick={() => opened(w.id)}>
     <span className="world-icon">{w.icon}</span><strong>{w.name}</strong>
     <span className="world-location" title={place.title}>
@@ -181,7 +181,6 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
       return <div key={s.code} className="server-section">
         <h4><Reach on={s.reached} /><ServerIcon /> {serverName(s)} <small className="muted">{!s.reached ? "not reached" : s.admin ? "admin" : ""}</small>
           <button className="ghost compact" title="Change its address, or remove it" onClick={() => editServer(s)}>Edit</button></h4>
-        {s.waiting && <p className="small muted">A world of yours waits for the server's admin.</p>}
         {s.reached && !s.may_bring && <p className="small muted line">
           {s.asked ? "You asked to host worlds here — the admin decides." : "Only GMs the admin lets in host worlds here."}
           {!s.asked && <button className="ghost compact" disabled={!!busy} onClick={() => askToHost(s)}>Ask to host worlds</button>}
@@ -193,11 +192,6 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
         </div>
       </div>;
     })}
-    {orphaned.length > 0 && <div className="server-section">
-      <h4><ServerIcon /> Server unavailable</h4>
-      <p className="small muted">Add these worlds' server again to open them. They remain online worlds.</p>
-      <div className="world-grid">{orphaned.map(tile)}</div>
-    </div>}
     {servers.length === 0 && <p className="small muted">None yet.</p>}
 
     {dialog === "server" && <div className="dialog-backdrop" onClick={() => !busy && setDialog(null)}>
@@ -235,7 +229,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
       </section>
     </div>}
     {remove && <DeleteDialog title={`Delete ${remove.icon} ${remove.name}`} name={remove.name}
-      warning="Delete the world folder and this device's private world keys. In a shared folder, the cloud app deletes it for everyone there too."
+      warning={remove.server ? (remove.isGm ? "Deletes the world on its server, for everyone." : "You leave the world; it stays for the others.") : "Deletes the world folder. In a shared folder, the cloud app deletes it for everyone there too."}
       onCancel={() => setRemove(null)} onDelete={async confirmation => {
         try { await api.worldDelete(remove.id, confirmation); setRemove(null); onChanged(); }
         catch (e) { onError(e); }

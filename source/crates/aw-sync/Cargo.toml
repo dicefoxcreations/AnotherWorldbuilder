@@ -6,7 +6,6 @@ edition.workspace = true
 rust-version = "1.91"
 
 [dependencies]
-aw-store.workspace = true
 aw-crypto.workspace = true
 iroh = { version = "=1.2.0", default-features = false, features = ["tls-ring"] }
 mdns-sd = "0.20"
@@ -20,7 +19,5 @@ zstd = "0.13"
 getrandom = "0.4.3"
 
 [dev-dependencies]
-aw-policy.workspace = true
-aw-model.workspace = true
 tempfile = "3"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter"] }

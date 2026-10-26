@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-pub use aw_store::db::{Access, Document, Folder, Image, Layer, Member, Reader, Request, Role, Version, VersionContent, WorldDb};
+pub use aw_store::db::{Access, Document, Folder, Image, Layer, Member, Reader, Role, Version, VersionContent, WorldDb};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -78,12 +78,6 @@ impl WorldMeta {
         self.members.iter().find(|m| m.id == id)
     }
 
-    /// The role of an id. Whoever is not listed is no member at all — and
-    /// reads as a player would who holds no role.
-    pub fn role_of(&self, id: &str) -> Role {
-        self.member(id).map(|m| m.role).unwrap_or_default()
-    }
-
     pub fn gm(&self) -> Option<&Member> {
         self.members.iter().find(|m| m.role == Role::Gm)
     }
@@ -112,19 +106,23 @@ pub struct NetworkSettings {
     /// Servers that keep worlds for the group (`aw-server`), by their code.
     #[serde(default)]
     pub servers: Vec<String>,
-    /// Where a world lives that this device holds nothing of: its server,
-    /// by the server's endpoint id — which stays when its addresses change.
+    /// The worlds worked in on a server — or on a GM's app — by id: this
+    /// device holds nothing of them but where they are.
     #[serde(default)]
-    pub homes: BTreeMap<String, String>,
+    pub remote: BTreeMap<String, RemoteWorld>,
 }
 
-impl NetworkSettings {
-    /// The code of the server a world lives on — none: this device, or a
-    /// server no longer in the list.
-    pub fn home_of(&self, world: &str) -> Option<&String> {
-        let endpoint = self.homes.get(world)?;
-        self.servers.iter().find(|code| code.split('@').next() == Some(endpoint.as_str()))
-    }
+/// A world on a server, as this device knows of it.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct RemoteWorld {
+    pub name: String,
+    #[serde(default)]
+    pub icon: String,
+    /// The server's code.
+    pub server: String,
+    /// Asked to join; not let in yet.
+    #[serde(default)]
+    pub asked: bool,
 }
 
 impl Default for NetworkSettings {
@@ -136,7 +134,7 @@ impl Default for NetworkSettings {
             port: default_port(),
             stun: stun_servers(),
             servers: Vec::new(),
-            homes: BTreeMap::new(),
+            remote: BTreeMap::new(),
         }
     }
 }
@@ -639,14 +637,6 @@ impl Store {
     /// Whether a server names the world to everyone who asks.
     pub fn on_the_list(&self, world_id: &str) -> Result<bool> {
         self.setting(world_id, "listed", false)
-    }
-
-    /// The number of documents.
-    pub fn article_count(&self, world_id: &str) -> Result<usize> {
-        if !self.holds(world_id) {
-            return Ok(0);
-        }
-        Ok(self.db(world_id)?.document_ids()?.len())
     }
 
     /// Deletes a world from this device, for good.

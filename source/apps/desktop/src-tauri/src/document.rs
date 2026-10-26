@@ -1817,7 +1817,7 @@ pub(crate) fn caret_at(store: &Store, world: &str, article: &str, layer: &str, s
 
 /// The history of a document: each editing session is a version — the
 /// layers it changed, as they were before it and as it left them.
-mod history {
+pub(crate) mod history {
     use super::*;
     use store::{Version, VersionContent};
 
@@ -2373,7 +2373,7 @@ mod history {
 }
 
 pub(crate) use history::{waiting_in, with_own_waiting};
-pub use history::{PartChange, SideMarks, VersionDocument, VersionInfo, VersionMarks, WaitingVersion};
+pub use history::{PartChange, VersionDocument, VersionInfo, VersionMarks, WaitingVersion};
 
 #[cfg(feature = "gui")]
 /// The versions of a document, newest first — as far as the reader can see

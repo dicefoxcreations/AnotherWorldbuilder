@@ -356,6 +356,8 @@ pub struct WorldDb {
     /// Counts up with every change of a document — for what is worked out
     /// from all of them and kept until something changes.
     revision: std::sync::atomic::AtomicU64,
+    /// Counts up with every write of anything.
+    writes: std::sync::atomic::AtomicU64,
 }
 
 fn now() -> u64 {
@@ -405,7 +407,7 @@ impl WorldDb {
     fn open_at(dir: &Path) -> Result<Self> {
         let conn = Connection::open(dir.join(FILE))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;")?;
-        Ok(WorldDb { dir: dir.to_path_buf(), conn: Mutex::new(conn), revision: Default::default() })
+        Ok(WorldDb { dir: dir.to_path_buf(), conn: Mutex::new(conn), revision: Default::default(), writes: Default::default() })
     }
 
     fn conn(&self) -> MutexGuard<'_, Connection> {
@@ -425,6 +427,15 @@ impl WorldDb {
         self.revision.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// How often anything was written since the world was opened.
+    pub fn writes(&self) -> u64 {
+        self.writes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn wrote(&self) {
+        self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
     // --- The world's own settings -------------------------------------------
 
     pub fn get(&self, key: &str) -> Result<Option<String>> {
@@ -432,6 +443,7 @@ impl WorldDb {
     }
 
     pub fn set(&self, key: &str, value: &str) -> Result<()> {
+        self.wrote();
         self.conn().execute("INSERT INTO world(key, value) VALUES(?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![key, value])?;
         Ok(())
     }
@@ -442,6 +454,7 @@ impl WorldDb {
     }
 
     pub fn set_json<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
+        self.wrote();
         self.set(key, &json(value)?)
     }
 
@@ -472,6 +485,7 @@ impl WorldDb {
 
     /// Adds a member or changes one; a place without an id is found by its slot.
     pub fn put_member(&self, member: &Member) -> Result<()> {
+        self.wrote();
         let key = if member.id.is_empty() { format!("slot:{}", member.slot) } else { member.id.clone() };
         self.conn().execute(
             "INSERT INTO members(id, name, role, attributes, colour, trusted, verify_key, slot, joined)
@@ -484,6 +498,7 @@ impl WorldDb {
     }
 
     pub fn remove_member(&self, id: &str) -> Result<()> {
+        self.wrote();
         self.conn().execute("DELETE FROM members WHERE id = ?1", [id])?;
         Ok(())
     }
@@ -508,6 +523,7 @@ impl WorldDb {
 
     /// Puts the types as they are now, in their order.
     pub fn save_types(&self, types: &[Template]) -> Result<()> {
+        self.wrote();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM types", [])?;
@@ -641,6 +657,7 @@ impl WorldDb {
 
     /// Writes a document whole, as it is now — made or changed.
     pub fn put_document(&self, doc: &Document) -> Result<()> {
+        self.wrote();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute(
@@ -668,6 +685,7 @@ impl WorldDb {
     }
 
     pub fn delete_document(&self, id: &str) -> Result<()> {
+        self.wrote();
         let conn = self.conn();
         conn.execute("DELETE FROM documents WHERE id = ?1", [id])?;
         conn.execute("DELETE FROM versions WHERE document = ?1", [id])?;
@@ -785,6 +803,7 @@ impl WorldDb {
     }
 
     pub fn put_image(&self, i: &Image) -> Result<()> {
+        self.wrote();
         self.conn().execute(
             "INSERT INTO images(id, file, preview, name, folder, mime, width, height, size, uploaded, uploaded_by, defaults)
              VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
@@ -798,6 +817,7 @@ impl WorldDb {
 
     /// Takes a picture out, its files too.
     pub fn delete_image(&self, id: &str) -> Result<()> {
+        self.wrote();
         if let Some(image) = self.image(id)? {
             for file in [image.file, image.preview].into_iter().filter(|f| !f.is_empty()) {
                 let path = self.dir.join(MEDIA).join(file);
@@ -818,6 +838,7 @@ impl WorldDb {
     }
 
     pub fn save_folders(&self, folders: &[Folder]) -> Result<()> {
+        self.wrote();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM folders", [])?;
@@ -838,6 +859,7 @@ impl WorldDb {
     }
 
     pub fn put_request(&self, r: &Request) -> Result<()> {
+        self.wrote();
         self.conn().execute(
             "INSERT INTO requests(id, name, verify_key, seal_key, at) VALUES(?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET name = excluded.name, verify_key = excluded.verify_key, seal_key = excluded.seal_key",
@@ -847,6 +869,7 @@ impl WorldDb {
     }
 
     pub fn remove_request(&self, id: &str) -> Result<()> {
+        self.wrote();
         self.conn().execute("DELETE FROM requests WHERE id = ?1", [id])?;
         Ok(())
     }
@@ -860,6 +883,7 @@ impl WorldDb {
     }
 
     pub fn set_invited(&self, ids: &[String]) -> Result<()> {
+        self.wrote();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM invited", [])?;
@@ -874,6 +898,7 @@ impl WorldDb {
 
     /// Keeps an editing session as a version — or, while it goes on, its newest state.
     pub fn put_version(&self, v: &Version) -> Result<()> {
+        self.wrote();
         self.conn().execute(
             "INSERT INTO versions(document, session, author, started, ended, arrived, review, content, signature)
              VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -906,18 +931,21 @@ impl WorldDb {
 
     /// One version goes.
     pub fn delete_version(&self, document: &str, session: &str) -> Result<()> {
+        self.wrote();
         self.conn().execute("DELETE FROM versions WHERE document = ?1 AND session = ?2", [document, session])?;
         Ok(())
     }
 
     /// Every version of a document goes.
     pub fn delete_versions(&self, document: &str) -> Result<()> {
+        self.wrote();
         self.conn().execute("DELETE FROM versions WHERE document = ?1", [document])?;
         Ok(())
     }
 
     /// Keeps the newest `keep` versions of a document, the others go.
     pub fn trim_versions(&self, document: &str, keep: usize) -> Result<usize> {
+        self.wrote();
         let gone = self.conn().execute(
             "DELETE FROM versions WHERE document = ?1 AND review = 'counted' AND id NOT IN
                (SELECT id FROM versions WHERE document = ?1 ORDER BY ended DESC, id DESC LIMIT ?2)",

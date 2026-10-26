@@ -1,14 +1,13 @@
-//! Worlds on the local network: offered by their game master, found by
-//! everyone else, joined on request.
+//! Worlds between devices: offered by whoever holds them, found by everyone
+//! else, joined on request, worked in from afar.
 //!
-//! A game master's app announces the worlds it has explicitly shared — name,
+//! A holder announces on the local network the worlds it offers — name,
 //! icon and the game master's name, nothing of their content. Another app
-//! finds them, connects over QUIC and asks to join — or, as a member, swaps
-//! records: each side names what it has, and gets what it lacks. It proves
-//! who it is by signing a fresh challenge with its identity; the host checks
-//! that the identity's id belongs to its keys. Every record is signed on its
-//! own; each side checks each one before it keeps it, no matter who passed
-//! it on.
+//! finds them, connects over QUIC and asks to join — or, as a member, asks
+//! the holder to do what it wants done (`Ask::Call`). It proves who it is
+//! by signing a fresh challenge with its identity; the holder checks that
+//! the identity's id belongs to its keys, and answers as far as the world
+//! lets that member.
 //!
 //! Firewalls let out what a device sends and the answers to it, but nothing
 //! that starts outside. So before connecting, the asking side knocks: it
@@ -17,18 +16,14 @@
 //! for exactly that peer; the asking side's own attempt then gets through.
 //! No port has to be opened by hand.
 //!
-//! Over the internet the same talk runs, once two devices know where the
-//! other is: each one asks its router to open its port (UPnP, PCP, NAT-PMP),
-//! and may ask a STUN server how it looks from outside. Where they are, the
-//! application passes on through the group's shared folder (`add_remote`);
-//! the host answers by connecting towards the one coming (`punch_to`), as on
-//! the local network — both firewalls then let the talk through.
+//! Over the internet the same talk runs: each side asks its router to open
+//! its port (UPnP, PCP, NAT-PMP), and may ask a STUN server how it looks
+//! from outside.
 //!
-//! A server — `aw-server`, on a NAS say — is one more side that holds
-//! worlds and answers, always on: the same talk, at an address the group
-//! is given as a code (`Server`). It holds no keys; it passes on what is
-//! signed, to whom the world itself names as GM or member. Its admin, a GM
-//! named when it starts, manages it (`Ask::Manage`).
+//! Whoever holds a world — `aw-server` on a NAS, or a game master's app —
+//! answers the same way, at an address the group is given as a code
+//! (`Server`): it does what a member asks in their name (`Ask::Call`), as
+//! far as the world lets them. Its admin manages it (`Ask::Manage`).
 //!
 //! Separate from the text experiment in the crate root: its own service, its
 //! own protocol. No relay, no address lookup.
@@ -82,77 +77,36 @@ pub struct Offer {
     pub gm: String,
 }
 
-/// A place in the order a host took records in: the order's name (a new
-/// one each time the host opens the world) and how far along it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Mark {
-    pub epoch: String,
-    pub at: u64,
-}
-
 /// What the asking side wants.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Ask {
-    /// To become a member.
+    /// To become a member — or to be one already, let in ahead of time.
     Join,
-    /// Only a digest of what the host would give — asked often, answered
-    /// cheaply. Brings along where the asking side is writing, if anywhere,
-    /// and the dice it rolled lately for everyone to see.
-    Digest {
-        presence: Option<String>,
-        #[serde(default)]
-        rolls: Vec<String>,
-    },
-    /// Takes `give`, then answers with the records not in `have`.
-    Swap { have: Vec<String>, give: Vec<String> },
-    /// The records that came to the host after `mark` — instead of naming
-    /// everything held, as `Swap` does. Answered with `Reply::Since`.
-    Since { mark: Mark },
-    /// Takes records, and answers nothing back — a world brought over a
-    /// little at a time, without naming everything held each time.
-    Give { records: Vec<String> },
-    /// The frame of a world: everything but the parts of documents besides
-    /// their base — enough to show it and the names of its documents. A
-    /// piece at a time, from where the last one ended (`after`).
-    Frame { after: Option<String> },
-    /// What the frame left out of these documents, by id.
-    Articles { articles: Vec<String> },
-    /// An online command, staged in encrypted pieces. Only `finish` publishes
-    /// the complete command, provided the world still has `base` as its digest.
-    /// A lost connection before finish leaves the world unchanged.
-    Commit {
-        transaction: String,
-        base: String,
-        records: Vec<String>,
-        parts: Vec<(String, String)>,
-        finish: bool,
-        /// Which piece of the command this is, from 0: a server that lost
-        /// those before — it restarted meanwhile — refuses the rest.
-        #[serde(default)]
-        piece: u32,
-    },
-    /// Discards an unfinished online command belonging to the asking member.
-    Abort { transaction: String },
-    /// Retires a receipt after the client has observed a successful commit.
-    Release { transaction: String },
-    /// Parts of images: takes `give` (name, base64), answers with those in
-    /// `want` it has.
-    Parts { want: Vec<String>, give: Vec<(String, String)> },
-    /// The worlds a server holds — asked for no world in particular.
+    /// The worlds a host holds that the asking side may know of — asked for
+    /// no world in particular.
     Worlds,
-    /// A command of the app, done by the host in the asking member's name —
-    /// for a world that stays with the host. `args` as JSON.
+    /// A command of the app, done by the host in the asking member's name.
+    /// `args` as JSON.
     Call { command: String, args: String },
     /// What a server holds and who uses it — asked by its admin, for no
     /// world in particular; with an order, carried out first. A GM may
     /// order one thing too: their own world gone from it (`Order::Delete`).
     Manage { order: Option<Order> },
-    /// To bring worlds to a server — the admin decides.
-    HostWorlds,
     /// How a server backs this world up — asked by its GM or the server's
     /// admin; with a plan (`off`, `daily`, `weekly`; how many stay), set first.
     Backups { plan: Option<BackupPlan> },
+    /// Asks a server's admin to let the asking side bring worlds there.
+    MayIBring,
+    /// A world brought here, a piece of one of its files at a time: `file`
+    /// is `world.sqlite` or `media/<name>`, `data` base64 from `at` on.
+    Put { file: String, at: u64, data: String },
+    /// The world brought here is whole: take it in, as `name`.
+    Bring { name: String },
+    /// The files a world consists of, with their sizes — to take it away.
+    Files,
+    /// A piece of one of them, from `at` on.
+    Get { file: String, at: u64 },
 }
 
 /// How often a server backs a world up by itself, and how many backups stay.
@@ -181,11 +135,9 @@ pub enum Order {
     Refuse { id: String },
     /// An admin besides the first, or no more.
     Admin { id: String, on: bool },
-    /// Lets someone who asked into a world: the next device holding its
-    /// keys — its GM's, a supporter's — lets them in.
+    /// Lets someone who asked into a world.
     Approve { world: String, id: String },
-    /// Takes a player out of a world: the server gives it to them no more,
-    /// at once; the next device holding its keys takes them out for good.
+    /// Takes a player out of a world.
     Remove { world: String, id: String },
     /// Nobody gets it any more, its GM neither; it stays as it is.
     Close { world: String },
@@ -194,13 +146,12 @@ pub enum Order {
     Delete { world: String },
     /// Turned away, whatever they ask.
     Block { id: String },
-    /// Turned away, and taken out of every world here they play in — the
-    /// next device holding a world's keys takes them out for good.
+    /// Turned away, and taken out of every world here they play in.
     Kick { id: String },
     Unblock { id: String },
 }
 
-/// A world on a server, as its admin sees it — nothing of its content.
+/// A world on a server, as its admin sees it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeldWorld {
     pub world: String,
@@ -209,15 +160,14 @@ pub struct HeldWorld {
     pub gm_id: String,
     /// On disk.
     pub bytes: u64,
-    pub encrypted: bool,
     pub closed: bool,
     /// Who asked to join it — for an admin to let in.
     #[serde(default)]
     pub requests: Vec<Person>,
-    /// Its players, as their grants name them — for an admin to take out.
+    /// Its players — for an admin to take out.
     #[serde(default)]
     pub members: Vec<Person>,
-    /// Of them, and of the admins, who supports the world, by id.
+    /// Of them, who supports the world, by id.
     #[serde(default)]
     pub supporters: Vec<String>,
 }
@@ -252,68 +202,25 @@ pub struct ServerState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Reply {
-    /// Of everything the host would give, by name — and where the others
-    /// are writing right now.
-    Digest {
-        digest: String,
-        presence: Vec<String>,
-        /// The dice the others rolled lately.
-        #[serde(default)]
-        rolls: Vec<String>,
-        /// Who asked a server to join — told the GM and the supporters, who
-        /// decide.
-        #[serde(default)]
-        requests: Vec<IdentityPublic>,
-        /// Of them, whom an admin let in: the device holding the keys lets
-        /// them in without asking.
-        #[serde(default)]
-        approved: Vec<String>,
-        /// Whom an admin took out: the device holding the keys takes them
-        /// out for good.
-        #[serde(default)]
-        removing: Vec<String>,
-        /// The server's admins — the world's supporters too, for whom its GM
-        /// seals their keys.
-        #[serde(default)]
-        admins: Vec<IdentityPublic>,
-        /// A member keeps no copy: the world is theirs while they are online.
-        #[serde(default)]
-        no_copy: bool,
-        /// Where the host's order of arrivals stands — for `Ask::Since`.
-        #[serde(default)]
-        mark: Option<Mark>,
-    },
-    /// The records the asking side lacks, exactly as signed; the names of
-    /// those the host lacks; and the digest after this swap.
-    Records { records: Vec<String>, wanted: Vec<String>, digest: String },
-    /// What came after the mark asked for — as many as fit — and the mark
-    /// after the last of them. No mark: the host's order is another one
-    /// now; ask with `Swap`.
-    Since { records: Vec<String>, mark: Option<Mark>, digest: String },
-    /// A piece of the frame — as much as fits — and where the next one
-    /// starts; none: that was the last. The host's mark and count as it was
-    /// asked: what came meanwhile follows with `Since`. `total`: how many
-    /// records the frame has in all.
-    Frame { records: Vec<String>, next: Option<String>, mark: Option<Mark>, seq: u64, total: usize },
-    /// What the frame left out of the documents named in `done` — those that
-    /// did not fit are asked for again.
-    Articles { records: Vec<String>, done: Vec<String> },
-    /// Parts of images asked for (name, base64) — as many as fit — and the
-    /// parts the host still lacks.
-    Parts { parts: Vec<(String, String)>, want: Vec<String> },
+    /// A member now — or one already.
+    Joined,
+    /// The request waits for the GM and the supporters — or, a world brought
+    /// to a server, for its admin.
+    Requested,
     /// Not a member; one may ask to join.
     NotMember,
-    /// The request waits for the game master — or, a world brought to a
-    /// server, for its admin.
-    Requested,
-    /// This world is not offered (any more).
+    /// This world is not here for the asking side.
+    NotOffered,
     /// What was asked went wrong on the host — and why, for the asking side
     /// to say rather than take for a lost connection.
     Failed { error: String },
-    NotOffered,
-    /// The worlds a server holds — and who the server is: what it writes
-    /// in a member's name it signs as itself. `admin`: the asking side is
-    /// its admin; `may_bring`: it may bring worlds; `asked`: it asked to.
+    /// The world is being moved or written whole right now — ask again in a while.
+    Busy,
+    /// The world lives elsewhere now: on this server, by its code.
+    Moved { server: String },
+    /// The worlds a host holds that the asking side may know of — and who
+    /// the host is. `admin`: the asking side is its admin; `may_bring`: it
+    /// may bring worlds; `asked`: it asked to.
     Worlds {
         worlds: Vec<Offer>,
         #[serde(default)]
@@ -336,19 +243,12 @@ pub enum Reply {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
-    /// This world stays with its host: a member works on it online, with
-    /// `Call`, and gets no copy.
-    OnlineOnly,
-    /// What was given is taken; the digest after it.
-    Taken { digest: String },
-    /// The world is being written right now — ask again in a while.
-    Busy,
-    /// Encrypted pieces are staged, but have not changed the world yet.
-    Staged,
-    /// The complete online command is durable on the server.
-    Committed { digest: String },
-    /// Another command changed the world before this one was committed.
-    Conflict,
+    /// A piece brought is kept.
+    Taken,
+    /// The files of a world, with their sizes.
+    Files { files: Vec<(String, u64)> },
+    /// A piece of a file, base64 — none left: the file is whole.
+    Piece { data: String },
 }
 
 /// The side that holds worlds — implemented by the application.
@@ -466,8 +366,6 @@ struct Found {
     offer: Offer,
     addr: EndpointAddr,
     fullname: String,
-    /// Met through the shared folder, not on the local network.
-    remote: bool,
 }
 
 /// What the network does besides answering.
@@ -703,10 +601,10 @@ impl WorldNet {
                                     }
                                     let offer = Offer { world: prop("world"), name: prop("name"), icon: prop("icon"), gm: prop("gm") };
                                     if offer.world.is_empty() { continue; }
-                                    map.insert(offer.world.clone(), Found { offer, addr, fullname: info.get_fullname().to_string(), remote: false });
+                                    map.insert(offer.world.clone(), Found { offer, addr, fullname: info.get_fullname().to_string() });
                                 }
                                 ServiceEvent::ServiceRemoved(_, fullname) => {
-                                    map.retain(|_, f| f.fullname != fullname || f.remote);
+                                    map.retain(|_, f| f.fullname != fullname);
                                 }
                                 _ => {}
                             }
@@ -776,6 +674,19 @@ impl WorldNet {
         self.found
             .lock()
             .map(|m| m.values().map(|f| f.offer.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The worlds found on the local network, each with the code of the
+    /// host that offers it — asked like any server.
+    pub fn found_hosts(&self) -> Vec<(Offer, Server)> {
+        self.found
+            .lock()
+            .map(|m| {
+                m.values()
+                    .map(|f| (f.offer.clone(), Server { endpoint: f.addr.id.to_string(), addrs: f.addr.ip_addrs().map(|a| a.to_string()).collect() }))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -966,39 +877,6 @@ impl WorldNet {
     pub fn home_address(&self) -> Option<SocketAddr> {
         let ip = own_ipv4()?;
         (self.port() != 0).then(|| SocketAddr::new(ip.into(), self.port()))
-    }
-
-    /// The endpoint asked for a world, if it is known.
-    pub fn host_of(&self, world: &str) -> Option<String> {
-        self.found.lock().ok()?.get(world).map(|f| f.addr.id.to_string())
-    }
-
-    /// Forgets a world met through the shared folder — none of its devices answers.
-    pub fn drop_remote(&self, world: &str) {
-        if let Ok(mut map) = self.found.lock() {
-            if map.get(world).is_some_and(|f| f.remote) {
-                map.remove(world);
-            }
-        }
-    }
-
-    /// A world held by a device met through the shared folder — asked like
-    /// one found on the local network, at the addresses it left there.
-    pub fn add_remote(&self, offer: Offer, endpoint: &str, addrs: &[SocketAddr]) -> Result<()> {
-        let id: EndpointId = endpoint.parse()?;
-        let mut map = self.found.lock().map_err(|_| "finds poisoned")?;
-        // Found on the local network too: that stays, the outside addresses join it.
-        let mut addr = match map.get(&offer.world) {
-            Some(f) if f.addr.id == id => f.addr.clone(),
-            _ => EndpointAddr::new(id),
-        };
-        for a in addrs {
-            addr = addr.with_ip_addr(*a);
-        }
-        let remote = map.get(&offer.world).is_none_or(|f| f.remote);
-        let fullname = map.get(&offer.world).map(|f| f.fullname.clone()).unwrap_or_else(|| format!("remote:{endpoint}"));
-        map.insert(offer.world.clone(), Found { offer, addr, fullname, remote });
-        Ok(())
     }
 
     /// Opens the way for someone about to connect from outside: connects
@@ -1255,7 +1133,7 @@ async fn serve_stream(conn: &Connection, mut send: SendStream, mut recv: RecvStr
     let reply = if offered {
         let ask: Ask = tokio::time::timeout(Duration::from_secs(120), read(&mut recv, MAX_ANSWER)).await??;
         let (world, who) = (hello.world.clone(), hello.identity.clone());
-        // Answering reads, checks and writes records — off the network threads.
+        // Answering reads and writes the world — off the network threads.
         tokio::task::spawn_blocking(move || host.answer(&world, &who, ask)).await?
     } else {
         Reply::NotOffered

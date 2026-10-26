@@ -102,8 +102,6 @@ export type NetworkView = {
   stun: string[];
   /** Whether the network actually runs — it can fail to start. */
   running: boolean;
-  /** Peer to peer through shared folders. */
-  folders: boolean;
   /** The port asked for. */
   port: number;
   /** What players enter to reach this device as host — empty while nothing is reachable. */
@@ -114,21 +112,13 @@ export type NetworkView = {
   server_list: ServerEntry[];
   /** The worlds this device could offer: those it is GM of. */
   worlds: SharedWorld[];
-  /** Worlds on their way to their server, by id. */
-  uploads: Record<string, Upload>;
 };
 
-/** How far a world has come over to its server: records and image parts, [there, all]. */
-export type Upload = { records: [number, number]; images: [number, number]; error?: string | null };
-
-/** A server as it answered last: its name (empty until it answered), whether this device is its admin, whether a world waits for the admin. */
+/** A server as it answered last: its name (empty until it answered), whether this device is its admin. */
 export type ServerEntry = {
   code: string;
   name: string;
   admin: boolean;
-  waiting: boolean;
-  /** This GM's worlds waiting for the admin, by id. */
-  waiting_worlds: string[];
   /** This device may bring worlds there. */
   may_bring: boolean;
   /** It asked to. */
@@ -137,7 +127,7 @@ export type ServerEntry = {
 };
 
 /** A world on a server, as its admin sees it — nothing of its content. */
-export type HeldWorld = { world: string; name: string; gm: string; gm_id: string; bytes: number; encrypted: boolean; closed: boolean; requests: Person[]; members: Person[]; supporters: string[] };
+export type HeldWorld = { world: string; name: string; gm: string; gm_id: string; bytes: number; closed: boolean; requests: Person[]; members: Person[]; supporters: string[] };
 /** Someone a server knows; `last` in seconds since 1970, 0: not yet. */
 export type Person = { id: string; name: string; last: number; blocked: boolean };
 /** What a server's admin sees. */
@@ -173,14 +163,13 @@ export type ServerBackupPlan = { every: "off" | "daily" | "weekly"; keep: number
 export type ServerBackups = { plan: ServerBackupPlan; count: number; last: number };
 export type BackupView = { plan: BackupPlan; folder: string; backups: { at: number; path: string }[] };
 
-export type WorldCheck = { records: number; missing: number; new: number; parts: number; intact: number; lacking: number; repaired: number };
 
 export type WorldDestination = { kind: "local"; path: string } | { kind: "server"; server: string };
 
 /** A world held here, and whether it is offered or kept somewhere. */
 /** How far switching a world's encryption is. */
 export type SwitchProgress = { step: number; steps: number; what: string; done: number; total: number };
-export type SharedWorld = { id: string; name: string; icon: string; shared: boolean; encrypted: boolean; copies: boolean; server: string };
+export type SharedWorld = { id: string; name: string; icon: string; shared: boolean; server: string };
 
 /** A world found on the network. */
 export type NetWorld = {
@@ -1079,8 +1068,6 @@ export const api = {
   worldDisconnect: (world: string) => invoke<void>("world_disconnect", { world }),
   worldCreate: async (name: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_create", { name, destination })),
   worldCopy: async (world: string, destination: WorldDestination) => toWorld(await invoke<Raw>("world_copy", { world, destination })),
-  /** Whether all of a GM's world is on its server: entries by name, image parts by their bytes. */
-  worldCheck: (world: string) => invoke<WorldCheck>("world_check", { world }),
   /** A world's backups: how often, how many stay, where — and those there are. */
   backupView: (world: string) => invoke<BackupView>("backup_view", { world }),
   backupPlanSet: (world: string, plan: BackupPlan) => invoke<BackupView>("backup_plan_set", { world, plan }),
@@ -1125,7 +1112,6 @@ export const api = {
   browserForget: (id: string) => invoke<BrowserView>("browser_forget", { id }),
   networkEnable: (enabled: boolean) => invoke<NetworkView>("network_enable", { enabled }),
   networkInternet: (enabled: boolean, stun: string[]) => invoke<NetworkView>("network_internet", { enabled, stun }),
-  networkFolders: (enabled: boolean) => invoke<NetworkView>("network_folders", { enabled }),
   networkPort: (port: number | null) => invoke<NetworkView>("network_port", { port }),
   worldSwitchProgress: (world: string) => invoke<SwitchProgress | null>("world_switch_progress", { world }),
   networkServers: (servers: string[]) => invoke<NetworkView>("network_servers", { servers }),

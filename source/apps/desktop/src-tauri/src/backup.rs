@@ -10,7 +10,6 @@
 //! without the app.
 
 use super::*;
-use std::collections::BTreeMap;
 
 const FORMAT: &str = "aw-backup";
 /// The backups of world format 5.
@@ -234,7 +233,11 @@ pub fn backup_now(app: tauri::AppHandle, world: String) -> Answer<View> {
 /// Opens the folder of a world's backups.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn backup_open(app: tauri::AppHandle, world: String) -> Answer<()> {
-    let store = store(&app)?;
+    backup_open_in(&store(&app)?, world)
+}
+
+/// `backup_open` for whom the store is given.
+pub(crate) fn backup_open_in(store: &Store, world: String) -> Answer<()> {
     let at = folder(&store, &world, &plan(&store, &world)?)?;
     std::fs::create_dir_all(&at)?;
     profile::reveal(&at)
@@ -244,7 +247,11 @@ pub fn backup_open(app: tauri::AppHandle, world: String) -> Answer<()> {
 /// Brings a world back from the backup whose `backup.awbackup` is at `path`.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn backup_restore(app: tauri::AppHandle, path: String) -> Answer<WorldInfo> {
-    let store = store(&app)?;
+    backup_restore_in(&store(&app)?, path)
+}
+
+/// `backup_restore` for whom the store is given.
+pub(crate) fn backup_restore_in(store: &Store, path: String) -> Answer<WorldInfo> {
     let world = restore(&store, Path::new(&path))?;
     world_now(&store, &world)
 }
