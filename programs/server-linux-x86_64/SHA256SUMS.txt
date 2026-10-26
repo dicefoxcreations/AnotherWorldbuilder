@@ -1,0 +1,2 @@
+2b18dca29b0678e2be8dfc5c8cb24974769a2c785c1e815356a002787218359a  aw-server
+efdbcf524172e9c8df14f48cef5130bdb5d88d872fc0cad2aa888c9d549bc60c  aw-server-0.2.0-docker.tar

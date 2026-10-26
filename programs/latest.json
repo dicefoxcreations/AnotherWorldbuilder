@@ -1,15 +1,15 @@
 {
-  "version": "0.1.64",
-  "notes": "Writing together keeps what everyone wrote; views by editors; rights for a whole type; one section embedded.",
-  "pub_date": "2026-10-26T09:16:25.244Z",
+  "version": "0.2.0",
+  "notes": "0.2.0: world format 5 – worlds lie in one place (this device, a server, or with mailboxes), no encryption, plain files. Update the server too; move 0.1 worlds as packages.",
+  "pub_date": "2026-10-26T23:17:26.038Z",
   "platforms": {
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUWRWRTNzVWlHNWV1TkFjRjVsT0dBNVl4Uy94bHN0MWtocHgwS1pGVUVkcmQ5bzlCSmZhSk9VbzU5UFdqNVdQbTVkTHVCY2hqWElxZFBXa0I5T1pJc0FnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDA1MzYyCWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjEuNjRfYW1kNjQuQXBwSW1hZ2UKYXJGVFB1VGhsaTBQUTlMQ1pGRGJ6WVFURHZET1F2UkFxaGFoT2QrYTkvRnlWQ3F4N0U3c3VhMHdXb1ltTnRTU0dBeTV1U1l1K3Bndjd1K2pCa0YyQ3c9PQo=",
-      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.1.64/AnotherWorldbuilder_0.1.64_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUWJUbmsvUXNmVmNPTDVKVVp2NzFsU0l1Mk1GY21NNHNXYmNLbWNWM2I3RXRhWTlMSjlvdTJWSlVXc3Y3SGFQQTgxVmdTdHZUdlRjQ0V3RDNQVlFyRHdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDU1MzMzCWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjIuMF9hbWQ2NC5BcHBJbWFnZQozeGdpSmh2ekFpNGlzeGw4NHRTNzVVUTdwcjh6KzBvSUUyY1psb2hwUnk1cHcxYU8wVHV4Q1JHSTdmek13U3Z1b2xNczFiNENzOWRYZHJndHhtSXZEZz09Cg==",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.2.0/AnotherWorldbuilder_0.2.0_amd64.AppImage"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUWIxSDM1YkI1VnhaS0NXYTdjS1dYY1ErTDFRSlEvaG8zUXZGT3VJWi85OHYwWW9vRVp2YU9jeUg1VWJyUEkxNGd5QmhKZHpCb3NDSlkrOEdyYkM4OHdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDA2MTg1CWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjEuNjRfeDY0LXNldHVwLmV4ZQpGUndscGxJdk5BMWszTFBuUEZhUGZRV2ZiNHpBWWJyeVNYdzFTemhrSWFYb0Z3QXBFY0tRUkJCTkp2a2dnQ2d5VWNMUFQzQ0lYc0ZnK0sxYkVEYTVDZz09Cg==",
-      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.1.64/AnotherWorldbuilder_0.1.64_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUVl0MHNlYnM2VWpZSUpFYVI3VHJOb01Scktpdm10TDVkR1ROdXFtOURGRGpsbnlYNE0vTUZkcmtXOTNLMHhaNFFsSzR2Vmd5TU5DSW4rV2NBVzhsblE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMDU2NjQxCWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjIuMF94NjQtc2V0dXAuZXhlCkdtWk5DZWtGTGxRN3EwT1VCS2xocFh4MTd1VDJ2RWMxMnZjVC9XYlJZUkxnWEoyR3pZY0NaUkszaTBsZjI5ZG1UWGYzMVc4cUs0L2Y3UjFnckdnN0NBPT0K",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.2.0/AnotherWorldbuilder_0.2.0_x64-setup.exe"
     }
   }
 }

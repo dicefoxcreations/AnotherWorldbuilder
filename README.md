@@ -88,9 +88,9 @@ The current version is under **[Releases](../../releases/latest)**:
 
 | File | For |
 | --- | --- |
-| `AnotherWorldbuilder_<version>_amd64.AppImage` | Linux, no installation |
+| `AnotherWorldbuilder_<version>_amd64.AppImage` | Linux, no installation; updates itself |
 | `AnotherWorldbuilder_<version>_amd64.deb` | Linux (Debian, Ubuntu), installed |
-| `AnotherWorldbuilder.exe` | Windows, no installation (needs WebView2) |
+| `AnotherWorldbuilder_<version>_x64-setup.exe` | Windows installer, for the current user; updates itself |
 | `Example-world.zip` | The example world above |
 | `DnD-5e-template.zip` | Template for D&D 5e: types and outline only, no content |
 | `aw-server`, `aw-server-<version>-docker.tar` | The server for a group |
