@@ -42,21 +42,15 @@ const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS roles(name TEXT PRIMARY KEY, label TEXT NOT NULL DEFAULT '');
     CREATE TABLE IF NOT EXISTS types(id TEXT PRIMARY KEY, position INTEGER NOT NULL, definition TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS documents(
-        id TEXT PRIMARY KEY, type TEXT NOT NULL DEFAULT '', slug TEXT NOT NULL DEFAULT '', name TEXT NOT NULL,
-        view TEXT NOT NULL, edit TEXT NOT NULL, level TEXT NOT NULL,
-        infobox_view TEXT, infobox_edit TEXT, infobox_level TEXT,
-        own_order TEXT NOT NULL DEFAULT '[]',
+        id TEXT PRIMARY KEY, type TEXT NOT NULL DEFAULT '', slug TEXT NOT NULL DEFAULT '',
         created INTEGER NOT NULL, created_by TEXT NOT NULL, changed INTEGER NOT NULL, changed_by TEXT NOT NULL,
         proposed INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE IF NOT EXISTS parts(
-        document TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, key TEXT NOT NULL,
-        section TEXT NOT NULL, position INTEGER NOT NULL, title TEXT NOT NULL DEFAULT '',
-        view TEXT NOT NULL, edit TEXT NOT NULL, level TEXT NOT NULL, text TEXT NOT NULL,
-        PRIMARY KEY(document, key));
-    CREATE TABLE IF NOT EXISTS properties(
-        document TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, name TEXT NOT NULL,
-        position INTEGER NOT NULL, value TEXT NOT NULL, view TEXT, edit TEXT, level TEXT,
-        PRIMARY KEY(document, name));
+    CREATE TABLE IF NOT EXISTS layers(
+        document TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, id TEXT NOT NULL,
+        position INTEGER NOT NULL, base INTEGER NOT NULL DEFAULT 0, section TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '', view TEXT NOT NULL, edit TEXT NOT NULL, level TEXT NOT NULL,
+        text TEXT NOT NULL DEFAULT '', fields TEXT NOT NULL DEFAULT '{}', images TEXT NOT NULL DEFAULT '[]',
+        PRIMARY KEY(document, id));
     CREATE TABLE IF NOT EXISTS versions(
         id INTEGER PRIMARY KEY, document TEXT NOT NULL, session TEXT NOT NULL, author TEXT NOT NULL,
         started INTEGER NOT NULL, ended INTEGER NOT NULL, arrived INTEGER NOT NULL,
@@ -199,40 +193,35 @@ impl Reader {
     }
 }
 
-/// A part of a document: a stretch of text with its own access.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Part {
-    pub key: String,
-    /// The section of the type it belongs to — or its own key.
+/// A layer of a document: a stretch of it with its own access. The base
+/// layer carries the document's name, who sees it as a whole and its own
+/// settings; the others its parts and its property values.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Layer {
+    pub id: String,
+    /// The document's own: its name (`title`), its view and edit rule.
+    pub base: bool,
+    /// The section of the type it belongs to — `properties` for the property
+    /// values, `properties:<key>` for one with access of its own.
     pub section: String,
     pub title: String,
     pub access: Access,
     pub text: String,
-}
-
-/// A property's value, with access of its own where it has one.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PropertyValue {
-    pub name: String,
-    pub value: String,
-    pub access: Option<Access>,
+    /// Field key → value: property values, a base layer's own settings.
+    pub fields: serde_json::Map<String, serde_json::Value>,
+    /// The pictures it shows, by id.
+    pub images: Vec<String>,
 }
 
 /// A document, whole or as one reader sees it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     pub id: String,
     /// Its type by id — empty for a document without one.
     pub doc_type: String,
     pub slug: String,
-    pub name: String,
-    pub access: Access,
-    /// The infobox's own access — `None`: as the document's.
-    pub infobox: Option<Access>,
-    /// The order of its own sections, by key.
-    pub own_order: Vec<String>,
-    pub parts: Vec<Part>,
-    pub properties: Vec<PropertyValue>,
+    /// The base layer first, then the others in their order.
+    pub layers: Vec<Layer>,
     pub created: u64,
     pub created_by: String,
     pub changed: u64,
@@ -242,22 +231,31 @@ pub struct Document {
 }
 
 impl Document {
+    pub fn base(&self) -> Option<&Layer> {
+        self.layers.iter().find(|l| l.base)
+    }
+
+    /// Its name, as the base layer says.
+    pub fn name(&self) -> &str {
+        self.base().map(|l| l.title.as_str()).unwrap_or_default()
+    }
+
     /// The document as `reader` may see it — `None` where they may not see
-    /// it at all. Parts and properties they may not see are not there.
+    /// it at all: whoever does not see its base does not see it, not even
+    /// where a part of it would be theirs. Layers they may not see are not
+    /// there.
     pub fn seen_by(&self, reader: &Reader) -> Option<Document> {
-        if !reader.sees(&self.access) {
+        if !reader.sees(&self.base()?.access) {
             return None;
         }
-        let infobox = self.infobox.as_ref().unwrap_or(&self.access);
         let mut seen = self.clone();
-        seen.parts.retain(|p| reader.sees(&p.access));
-        seen.properties.retain(|p| reader.sees(p.access.as_ref().unwrap_or(infobox)));
+        seen.layers.retain(|l| reader.sees(&l.access));
         Some(seen)
     }
 }
 
 /// One editing session on a document, as it ended.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Version {
     pub document: String,
     pub session: String,
@@ -272,27 +270,21 @@ pub struct Version {
     pub signature: String,
 }
 
-/// What a version holds: the parts and properties it changed, whole.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// What a version holds: the layers it changed, whole.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct VersionContent {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parts: Vec<Part>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub properties: Vec<PropertyValue>,
+    pub layers: Vec<Layer>,
 }
 
 impl Version {
-    /// The version as `reader` may see it: only the parts and properties
-    /// they may see — `None` where nothing of it is left.
+    /// The version as `reader` may see it: only the layers they may see —
+    /// `None` where nothing of it is left.
     pub fn seen_by(&self, document: &Document, reader: &Reader) -> Option<Version> {
-        reader.sees(&document.access).then_some(())?;
-        let infobox = document.infobox.as_ref().unwrap_or(&document.access);
+        reader.sees(&document.base()?.access).then_some(())?;
         let mut seen = self.clone();
-        seen.content.parts.retain(|p| reader.sees(&p.access));
-        seen.content.properties.retain(|p| reader.sees(p.access.as_ref().unwrap_or(infobox)));
-        (seen.content.name.is_some() || !seen.content.parts.is_empty() || !seen.content.properties.is_empty()).then_some(seen)
+        seen.content.layers.retain(|l| reader.sees(&l.access));
+        (!seen.content.layers.is_empty()).then_some(seen)
     }
 }
 
@@ -312,10 +304,6 @@ fn json<T: Serialize>(value: &T) -> Result<String> {
 
 fn from_json<T: for<'de> Deserialize<'de> + Default>(text: &str) -> T {
     serde_json::from_str(text).unwrap_or_default()
-}
-
-fn access(view: Option<String>, edit: Option<String>, level: Option<String>) -> Option<Access> {
-    Some(Access { view: view?, edit: edit?, level: level.unwrap_or_else(|| "open".into()) })
 }
 
 impl WorldDb {
@@ -471,39 +459,40 @@ impl WorldDb {
         let conn = self.conn();
         let head = conn
             .query_row(
-                "SELECT id, type, slug, name, view, edit, level, infobox_view, infobox_edit, infobox_level, own_order,
-                        created, created_by, changed, changed_by, proposed FROM documents WHERE id = ?1",
+                "SELECT id, type, slug, created, created_by, changed, changed_by, proposed FROM documents WHERE id = ?1",
                 [id],
                 |r| {
                     Ok(Document {
                         id: r.get(0)?,
                         doc_type: r.get(1)?,
                         slug: r.get(2)?,
-                        name: r.get(3)?,
-                        access: Access { view: r.get(4)?, edit: r.get(5)?, level: r.get(6)? },
-                        infobox: access(r.get(7)?, r.get(8)?, r.get(9)?),
-                        own_order: from_json(&r.get::<_, String>(10)?),
-                        parts: Vec::new(),
-                        properties: Vec::new(),
-                        created: r.get(11)?,
-                        created_by: r.get(12)?,
-                        changed: r.get(13)?,
-                        changed_by: r.get(14)?,
-                        proposed: r.get(15)?,
+                        layers: Vec::new(),
+                        created: r.get(3)?,
+                        created_by: r.get(4)?,
+                        changed: r.get(5)?,
+                        changed_by: r.get(6)?,
+                        proposed: r.get(7)?,
                     })
                 },
             )
             .optional()?;
         let Some(mut doc) = head else { return Ok(None) };
-        let mut q = conn.prepare("SELECT key, section, title, view, edit, level, text FROM parts WHERE document = ?1 ORDER BY position")?;
-        doc.parts = q
+        let mut q = conn.prepare(
+            "SELECT id, base, section, title, view, edit, level, text, fields, images FROM layers WHERE document = ?1 ORDER BY base DESC, position",
+        )?;
+        doc.layers = q
             .query_map([id], |r| {
-                Ok(Part { key: r.get(0)?, section: r.get(1)?, title: r.get(2)?, access: Access { view: r.get(3)?, edit: r.get(4)?, level: r.get(5)? }, text: r.get(6)? })
+                Ok(Layer {
+                    id: r.get(0)?,
+                    base: r.get(1)?,
+                    section: r.get(2)?,
+                    title: r.get(3)?,
+                    access: Access { view: r.get(4)?, edit: r.get(5)?, level: r.get(6)? },
+                    text: r.get(7)?,
+                    fields: from_json(&r.get::<_, String>(8)?),
+                    images: from_json(&r.get::<_, String>(9)?),
+                })
             })?
-            .collect::<std::result::Result<_, _>>()?;
-        let mut q = conn.prepare("SELECT name, value, view, edit, level FROM properties WHERE document = ?1 ORDER BY position")?;
-        doc.properties = q
-            .query_map([id], |r| Ok(PropertyValue { name: r.get(0)?, value: r.get(1)?, access: access(r.get(2)?, r.get(3)?, r.get(4)?) }))?
             .collect::<std::result::Result<_, _>>()?;
         Ok(Some(doc))
     }
@@ -523,34 +512,22 @@ impl WorldDb {
     pub fn put_document(&self, doc: &Document) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let infobox = doc.infobox.as_ref();
         tx.execute(
-            "INSERT INTO documents(id, type, slug, name, view, edit, level, infobox_view, infobox_edit, infobox_level, own_order,
-                                   created, created_by, changed, changed_by, proposed)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-             ON CONFLICT(id) DO UPDATE SET type = excluded.type, slug = excluded.slug, name = excluded.name,
-                view = excluded.view, edit = excluded.edit, level = excluded.level,
-                infobox_view = excluded.infobox_view, infobox_edit = excluded.infobox_edit, infobox_level = excluded.infobox_level,
-                own_order = excluded.own_order, changed = excluded.changed, changed_by = excluded.changed_by, proposed = excluded.proposed",
-            params![
-                doc.id, doc.doc_type, doc.slug, doc.name, doc.access.view, doc.access.edit, doc.access.level,
-                infobox.map(|a| &a.view), infobox.map(|a| &a.edit), infobox.map(|a| &a.level), json(&doc.own_order)?,
-                doc.created, doc.created_by, doc.changed, doc.changed_by, doc.proposed
-            ],
+            "INSERT INTO documents(id, type, slug, created, created_by, changed, changed_by, proposed)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET type = excluded.type, slug = excluded.slug,
+                changed = excluded.changed, changed_by = excluded.changed_by, proposed = excluded.proposed",
+            params![doc.id, doc.doc_type, doc.slug, doc.created, doc.created_by, doc.changed, doc.changed_by, doc.proposed],
         )?;
-        tx.execute("DELETE FROM parts WHERE document = ?1", [&doc.id])?;
-        for (i, p) in doc.parts.iter().enumerate() {
+        tx.execute("DELETE FROM layers WHERE document = ?1", [&doc.id])?;
+        for (i, l) in doc.layers.iter().enumerate() {
             tx.execute(
-                "INSERT INTO parts(document, key, section, position, title, view, edit, level, text) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![doc.id, p.key, p.section, i as i64, p.title, p.access.view, p.access.edit, p.access.level, p.text],
-            )?;
-        }
-        tx.execute("DELETE FROM properties WHERE document = ?1", [&doc.id])?;
-        for (i, p) in doc.properties.iter().enumerate() {
-            let a = p.access.as_ref();
-            tx.execute(
-                "INSERT INTO properties(document, name, position, value, view, edit, level) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![doc.id, p.name, i as i64, p.value, a.map(|a| &a.view), a.map(|a| &a.edit), a.map(|a| &a.level)],
+                "INSERT INTO layers(document, id, position, base, section, title, view, edit, level, text, fields, images)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    doc.id, l.id, i as i64, l.base, l.section, l.title, l.access.view, l.access.edit, l.access.level,
+                    l.text, json(&l.fields)?, json(&l.images)?
+                ],
             )?;
         }
         tx.commit()?;
@@ -564,61 +541,62 @@ impl WorldDb {
         Ok(())
     }
 
-    /// What `reader` saved over a document, merged into it as it stands.
+    /// What `reader` wrote over a document's layers, merged into it as it stands.
     ///
-    /// `started` is the document as the reader's editor began — as they saw
-    /// it; `saved` is what they save. Of each part and property they may
-    /// change, what they changed since `started` goes in; what others wrote
-    /// meanwhile stays, letter by letter. What they may not see or change
-    /// stays untouched, whatever they send. Returns the document as it is now.
-    pub fn save(&self, id: &str, reader: &Reader, by: &str, started: &Document, saved: &Document) -> Result<Document> {
-        let mut now_doc = self.document(id)?.ok_or_else(|| format!("no document {id}"))?;
-        if !reader.sees(&now_doc.access) {
+    /// `started` holds the layers as the reader's editor began — as they saw
+    /// them; `saved` what they save now. Of each layer they may change, what
+    /// they changed since `started` goes in — title, text, each field — and
+    /// what others wrote meanwhile stays, letter by letter. Layers they may
+    /// not see or change stay untouched, whatever is sent; layers are neither
+    /// made nor removed here, nor is anyone's access changed. Returns the
+    /// document as it is now.
+    pub fn save(&self, id: &str, reader: &Reader, by: &str, started: &[Layer], saved: &[Layer]) -> Result<Document> {
+        let mut doc = self.document(id)?.ok_or_else(|| format!("no document {id}"))?;
+        if !doc.base().is_some_and(|b| reader.sees(&b.access)) {
             return Err("this document is not there for you".into());
         }
-        let doc_editable = reader.may_edit(&now_doc.access);
-        if doc_editable && saved.name != started.name {
-            now_doc.name = merge(&started.name, &saved.name, &now_doc.name);
-        }
-        for part in &saved.parts {
-            let Some(at) = now_doc.parts.iter().position(|p| p.key == part.key) else { continue };
-            if !reader.may_edit(&now_doc.parts[at].access) {
+        for layer in saved {
+            let Some(now) = doc.layers.iter_mut().find(|l| l.id == layer.id) else { continue };
+            if !reader.may_edit(&now.access) {
                 continue;
             }
-            let base = started.parts.iter().find(|p| p.key == part.key).map(|p| p.text.as_str()).unwrap_or_default();
-            if part.text != base {
-                now_doc.parts[at].text = merge(base, &part.text, &now_doc.parts[at].text);
+            let Some(base) = started.iter().find(|l| l.id == layer.id) else { continue };
+            if layer.title != base.title {
+                now.title = merge(&base.title, &layer.title, &now.title);
             }
-        }
-        let infobox = now_doc.infobox.clone().unwrap_or_else(|| now_doc.access.clone());
-        for prop in &saved.properties {
-            let base = started.properties.iter().find(|p| p.name == prop.name).map(|p| p.value.as_str());
-            match now_doc.properties.iter().position(|p| p.name == prop.name) {
-                Some(at) => {
-                    let rule = now_doc.properties[at].access.clone().unwrap_or_else(|| infobox.clone());
-                    if reader.may_edit(&rule) && Some(prop.value.as_str()) != base {
-                        now_doc.properties[at].value = merge(base.unwrap_or_default(), &prop.value, &now_doc.properties[at].value);
+            if layer.text != base.text {
+                now.text = merge(&base.text, &layer.text, &now.text);
+            }
+            let keys: BTreeSet<&String> = layer.fields.keys().chain(base.fields.keys()).collect();
+            for key in keys {
+                let (was, is) = (base.fields.get(key), layer.fields.get(key));
+                if was == is {
+                    continue;
+                }
+                match (was, is, now.fields.get(key)) {
+                    (Some(serde_json::Value::String(b)), Some(serde_json::Value::String(o)), Some(serde_json::Value::String(t))) => {
+                        let merged = merge(b, o, t);
+                        now.fields.insert(key.clone(), serde_json::Value::String(merged));
+                    }
+                    (_, Some(value), _) => {
+                        now.fields.insert(key.clone(), value.clone());
+                    }
+                    (_, None, _) => {
+                        now.fields.remove(key);
                     }
                 }
-                None if reader.may_edit(&infobox) && base.is_none() => {
-                    now_doc.properties.push(PropertyValue { name: prop.name.clone(), value: prop.value.clone(), access: None });
-                }
-                None => {}
             }
-        }
-        // A property one could see when one began and left out now: taken out.
-        for gone in started.properties.iter().filter(|b| !saved.properties.iter().any(|p| p.name == b.name)) {
-            if let Some(at) = now_doc.properties.iter().position(|p| p.name == gone.name) {
-                let rule = now_doc.properties[at].access.clone().unwrap_or_else(|| infobox.clone());
-                if reader.may_edit(&rule) && now_doc.properties[at].value == gone.value {
-                    now_doc.properties.remove(at);
+            for image in &layer.images {
+                if !now.images.contains(image) {
+                    now.images.push(image.clone());
                 }
             }
+            now.images.retain(|i| layer.images.contains(i) || !base.images.contains(i));
         }
-        now_doc.changed = now();
-        now_doc.changed_by = by.to_string();
-        self.put_document(&now_doc)?;
-        Ok(now_doc)
+        doc.changed = now();
+        doc.changed_by = by.to_string();
+        self.put_document(&doc)?;
+        Ok(doc)
     }
 
     // --- Versions -----------------------------------------------------------
@@ -709,27 +687,36 @@ mod tests {
         Member { id: "id:leo".into(), name: "Leo".into(), attributes: vec!["class:rogue".into()], ..Default::default() }
     }
 
-    fn part(key: &str, view: &str, edit: &str, text: &str) -> Part {
-        Part { key: key.into(), section: key.into(), title: String::new(), access: Access { view: view.into(), edit: edit.into(), level: "open".into() }, text: text.into() }
+    fn layer(id: &str, section: &str, view: &str, text: &str) -> Layer {
+        Layer {
+            id: id.into(),
+            base: false,
+            section: section.into(),
+            title: String::new(),
+            access: Access { view: view.into(), edit: view.into(), level: "open".into() },
+            text: text.into(),
+            fields: Default::default(),
+            images: Vec::new(),
+        }
+    }
+
+    fn fields(pairs: &[(&str, &str)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs.iter().map(|(k, v)| (k.to_string(), serde_json::Value::String(v.to_string()))).collect()
     }
 
     fn tavern() -> Document {
+        let base = Layer { base: true, title: "The Tavern".into(), ..layer("l0", "", "players", "") };
         Document {
             id: "doc:tavern".into(),
             doc_type: "place".into(),
             slug: "tavern".into(),
-            name: "The Tavern".into(),
-            access: Access { view: "players".into(), edit: "players".into(), level: "open".into() },
-            infobox: None,
-            own_order: Vec::new(),
-            parts: vec![
-                part("story", "players", "players", "Smoke and song."),
-                part("secret", "gm", "gm", "The cellar holds the smugglers."),
-                part("rogues", "class:rogue", "class:rogue", "A loose board behind the bar."),
-            ],
-            properties: vec![
-                PropertyValue { name: "Owner".into(), value: "Brom".into(), access: None },
-                PropertyValue { name: "True owner".into(), value: "The guild".into(), access: Some(Access { view: "gm".into(), edit: "gm".into(), level: "gm-only".into() }) },
+            layers: vec![
+                base,
+                layer("l1", "story", "players", "Smoke and song."),
+                layer("l2", "secret", "gm", "The cellar holds the smugglers."),
+                layer("l3", "rogues", "class:rogue", "A loose board behind the bar."),
+                Layer { fields: fields(&[("owner", "Brom")]), ..layer("l4", "properties", "players", "") },
+                Layer { fields: fields(&[("true-owner", "The guild")]), ..layer("l5", "properties:true-owner", "gm", "") },
             ],
             created: 1,
             created_by: "id:gm".into(),
@@ -748,6 +735,10 @@ mod tests {
         (dir, db)
     }
 
+    fn sections(doc: &Document) -> Vec<&str> {
+        doc.layers.iter().filter(|l| !l.base).map(|l| l.section.as_str()).collect()
+    }
+
     #[test]
     fn a_world_reads_back_as_written() {
         let (dir, db) = world();
@@ -757,6 +748,7 @@ mod tests {
         assert_eq!(db.members().unwrap().iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), ["Marla", "Leo", "Mia"]);
         assert_eq!(db.member("id:gm").unwrap().unwrap().role, Role::Gm);
         assert_eq!(db.document("doc:tavern").unwrap().unwrap(), tavern());
+        assert_eq!(db.document("doc:tavern").unwrap().unwrap().name(), "The Tavern");
     }
 
     #[test]
@@ -764,8 +756,10 @@ mod tests {
         let (dir, db) = world();
         drop(db);
         let conn = Connection::open(dir.path().join("w").join(FILE)).unwrap();
-        let secret: String = conn.query_row("SELECT text FROM parts WHERE key = 'secret'", [], |r| r.get(0)).unwrap();
+        let secret: String = conn.query_row("SELECT text FROM layers WHERE section = 'secret'", [], |r| r.get(0)).unwrap();
         assert_eq!(secret, "The cellar holds the smugglers.");
+        let owner: String = conn.query_row("SELECT fields FROM layers WHERE section = 'properties'", [], |r| r.get(0)).unwrap();
+        assert_eq!(owner, r#"{"owner":"Brom"}"#);
     }
 
     #[test]
@@ -777,11 +771,10 @@ mod tests {
         assert_eq!(full.seen_by(&gm).unwrap(), full);
 
         let leo = full.seen_by(&db.reader("id:leo").unwrap().unwrap()).unwrap();
-        assert_eq!(leo.parts.iter().map(|p| p.key.as_str()).collect::<Vec<_>>(), ["story", "rogues"]);
-        assert_eq!(leo.properties.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Owner"]);
+        assert_eq!(sections(&leo), ["story", "rogues", "properties"]);
 
         let mia = full.seen_by(&db.reader("id:mia").unwrap().unwrap()).unwrap();
-        assert_eq!(mia.parts.iter().map(|p| p.key.as_str()).collect::<Vec<_>>(), ["story"]);
+        assert_eq!(sections(&mia), ["story", "properties"]);
         let everything = serde_json::to_string(&mia).unwrap();
         for secret in ["smugglers", "loose board", "guild"] {
             assert!(!everything.contains(secret), "{secret} reached Mia");
@@ -789,18 +782,18 @@ mod tests {
 
         assert!(db.reader("id:stranger").unwrap().is_none(), "no member, no reader");
         let mut hidden = full.clone();
-        hidden.access.view = "gm".into();
-        assert!(hidden.seen_by(&db.reader("id:leo").unwrap().unwrap()).is_none(), "a GM's document is not there for players");
+        hidden.layers[0].access.view = "gm".into();
+        assert!(hidden.seen_by(&db.reader("id:leo").unwrap().unwrap()).is_none(), "a GM's document is not there for players, not even its parts");
     }
 
     #[test]
     fn a_player_by_name_is_a_role() {
         let (_dir, db) = world();
         let mut doc = tavern();
-        doc.parts.push(part("mia", "player:mia", "player:mia", "Mia's note."));
+        doc.layers.push(layer("l6", "mia", "player:mia", "Mia's note."));
         db.put_document(&doc).unwrap();
         let mia = db.document("doc:tavern").unwrap().unwrap().seen_by(&db.reader("id:mia").unwrap().unwrap()).unwrap();
-        assert!(mia.parts.iter().any(|p| p.key == "mia"));
+        assert!(mia.layers.iter().any(|l| l.section == "mia"));
     }
 
     #[test]
@@ -808,33 +801,38 @@ mod tests {
         let (_dir, db) = world();
         let leo = db.reader("id:leo").unwrap().unwrap();
         let mia = db.reader("id:mia").unwrap().unwrap();
-        let start_leo = db.document("doc:tavern").unwrap().unwrap().seen_by(&leo).unwrap();
-        let start_mia = db.document("doc:tavern").unwrap().unwrap().seen_by(&mia).unwrap();
+        let start_leo = db.document("doc:tavern").unwrap().unwrap().seen_by(&leo).unwrap().layers;
+        let start_mia = db.document("doc:tavern").unwrap().unwrap().seen_by(&mia).unwrap().layers;
 
         let mut by_mia = start_mia.clone();
-        by_mia.parts[0].text = "Smoke and loud song.".into();
+        by_mia[1].text = "Smoke and loud song.".into();
+        by_mia[2].fields = fields(&[("owner", "Brom the Elder")]);
         db.save("doc:tavern", &mia, "id:mia", &start_mia, &by_mia).unwrap();
 
         let mut by_leo = start_leo.clone();
-        by_leo.parts[0].text = "Smoke and song. Ale too.".into();
+        by_leo[1].text = "Smoke and song. Ale too.".into();
         let now = db.save("doc:tavern", &leo, "id:leo", &start_leo, &by_leo).unwrap();
-        assert_eq!(now.parts[0].text, "Smoke and loud song. Ale too.");
+        assert_eq!(now.layers[1].text, "Smoke and loud song. Ale too.");
+        assert_eq!(now.layers[4].fields, fields(&[("owner", "Brom the Elder")]), "Leo did not touch the owner: Mia's stays");
+        assert_eq!(now.changed_by, "id:leo");
     }
 
     #[test]
     fn what_one_may_not_change_stays_whatever_is_sent() {
         let (_dir, db) = world();
         let mia = db.reader("id:mia").unwrap().unwrap();
-        let start = db.document("doc:tavern").unwrap().unwrap();
-        // Mia sends the whole document, the GM's part changed.
+        let start = db.document("doc:tavern").unwrap().unwrap().layers;
+        // Mia sends the whole document, the GM's layers and the access changed.
         let mut forged = start.clone();
-        forged.parts[1].text = "Nothing down there.".into();
-        forged.properties[1].value = "Nobody".into();
-        forged.access.view = "all".into();
+        forged[2].text = "Nothing down there.".into();
+        forged[5].fields = fields(&[("true-owner", "Nobody")]);
+        forged[0].access.view = "all".into();
+        forged[1].access.edit = "gm".into();
         let now = db.save("doc:tavern", &mia, "id:mia", &start, &forged).unwrap();
-        assert_eq!(now.parts[1].text, "The cellar holds the smugglers.");
-        assert_eq!(now.properties[1].value, "The guild");
-        assert_eq!(now.access.view, "players");
+        assert_eq!(now.layers[2].text, "The cellar holds the smugglers.");
+        assert_eq!(now.layers[5].fields, fields(&[("true-owner", "The guild")]));
+        assert_eq!(now.layers[0].access.view, "players");
+        assert_eq!(now.layers[1].access.edit, "players");
     }
 
     #[test]
@@ -849,13 +847,13 @@ mod tests {
             ended: 2,
             arrived: 2,
             review: "counted".into(),
-            content: VersionContent { name: None, parts: vec![doc.parts[1].clone()], properties: Vec::new() },
+            content: VersionContent { layers: vec![doc.layers[2].clone()] },
             signature: String::new(),
         };
         db.put_version(&v).unwrap();
         let stored = &db.versions(&doc.id).unwrap()[0];
         assert_eq!(stored, &v);
-        assert!(stored.seen_by(&doc, &db.reader("id:mia").unwrap().unwrap()).is_none(), "a version of the GM's part is not there for Mia");
+        assert!(stored.seen_by(&doc, &db.reader("id:mia").unwrap().unwrap()).is_none(), "a version of the GM's layer is not there for Mia");
         assert!(stored.seen_by(&doc, &Reader::gm()).is_some());
     }
 
