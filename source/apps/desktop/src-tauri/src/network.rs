@@ -3265,7 +3265,7 @@ mod tests {
 
         // Bob asks — for his log wanting it the GM's alone, with a part the type has not.
         let layer = |section: &str, text: &str| crate::NewLayer { title: String::new(), text: text.into(), policy: "gm".into(), level: "gm-only".into(), section: section.into(), edit: "gm".into(), fields: serde_json::json!({}), parent: None };
-        let ask = |kind: &str, name: &str, layers: Vec<crate::NewLayer>| serde_json::to_vec(&crate::Asked { article: String::new(), article_type: kind.into(), slug: name.to_lowercase(), name: name.into(), layers }).unwrap();
+        let ask = |kind: &str, name: &str, layers: Vec<crate::NewLayer>| serde_json::to_vec(&crate::Asked { article: String::new(), article_type: kind.into(), slug: name.to_lowercase(), name: name.into(), layers, shown: Vec::new() }).unwrap();
         player_store.propose(&world, &bob, &ask("log", "Session 4", vec![layer("notes", "We met a goblin."), layer("nowhere", "Smuggled in.")])).unwrap();
         player_store.propose(&world, &bob, &ask("plot", "Plot", vec![])).unwrap();
         swap_here(&gm_store, &player_store, &bob, &world);
@@ -3284,6 +3284,43 @@ mod tests {
         assert_eq!(crate::answer_proposals(&gm_store, &world).unwrap(), 0);
         assert!(gm_store.proposals(&world, &gm).unwrap().is_empty());
         assert!(player_store.proposals(&world, &bob).unwrap().is_empty());
+    }
+
+    #[test]
+    fn who_may_edit_a_part_says_who_sees_it_and_the_gms_device_sets_it() {
+        let (dir, gm_store, gm, bob_store, bob) = stores();
+        let world = new_world(&gm_store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        admit(&gm_store, &world, bob.public(), vec!["doc:BOBSCHARACTER".into()]).unwrap();
+        let carla_store = Store::new(dir.path().join("carla"));
+        let carla = Identity::create("Carla").unwrap();
+        carla_store.save_identity(&carla).unwrap();
+        admit(&gm_store, &world, carla.public(), Vec::new()).unwrap();
+        let rule = "gm OR doc:BOBSCHARACTER";
+        let secret = crate::NewLayer { title: String::new(), text: "Bob's secret.".into(), policy: rule.into(), level: "open".into(), section: "text".into(), edit: rule.into(), fields: serde_json::json!({}), parent: None };
+        let page = crate::create_document(&gm_store, &world, String::new(), "diary".into(), "Diary".into(), "all".into(), vec![secret]).unwrap();
+        swap_here(&gm_store, &bob_store, &bob, &world);
+        swap_here(&gm_store, &carla_store, &carla, &world);
+        assert!(!text(&carla_store, &carla, &world, &page).contains("Bob's secret."));
+
+        // Bob shows it to everyone — asked of the GM's device.
+        let code = text(&bob_store, &bob, &world, &page);
+        let shown = code.replacen(&format!("view=\"{rule}\""), "view=all", 1);
+        assert_ne!(shown, code, "{code}");
+        let base = document::code_of(&bob_store, &bob, &world, &page).unwrap().base;
+        document::save(&bob_store, &bob, &world, &page, &shown, &base, "s-bob").unwrap();
+        // Who edits it, he does not say.
+        let taken = code.replacen(&format!("edit=\"{rule}\""), "edit=all", 1);
+        let base = document::code_of(&bob_store, &bob, &world, &page).unwrap().base;
+        assert!(document::save(&bob_store, &bob, &world, &page, &taken, &base, "s-bob").is_err());
+        swap_here(&gm_store, &bob_store, &bob, &world);
+        assert_eq!(crate::answer_proposals(&gm_store, &world).unwrap(), 1);
+        swap_here(&gm_store, &carla_store, &carla, &world);
+        assert!(text(&carla_store, &carla, &world, &page).contains("Bob's secret."), "Carla reads it now");
+
+        // Carla may not edit it — what she asks is not set.
+        let theirs = text(&carla_store, &carla, &world, &page);
+        let base = document::code_of(&carla_store, &carla, &world, &page).unwrap().base;
+        assert!(document::save(&carla_store, &carla, &world, &page, &theirs.replacen("view=all", "view=gm", 1), &base, "s-carla").is_err(), "not hers to edit");
     }
 
     #[test]

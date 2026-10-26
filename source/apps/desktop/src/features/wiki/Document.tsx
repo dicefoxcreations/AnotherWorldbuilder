@@ -962,7 +962,11 @@ function DocumentEditor({
                 world={world}
                 view={doc.access.view}
                 edit={doc.access.edit}
-                onView={world.isGm ? (view) => changeDoc(withAccess(doc, { view })) : undefined}
+                onView={
+                  world.isGm || mayEditPart(article, "properties")
+                    ? (view) => changeDoc(withAccess(doc, { view }, (p) => world.isGm || mayEditPart(article, p.key ?? "")))
+                    : undefined
+                }
                 onEdit={world.isGm ? (edit) => changeDoc(withAccess(doc, { edit })) : undefined}
               />
               {deleteButton}
@@ -2286,7 +2290,7 @@ export function VisualEditor({
             world={world}
             view={samePolicy(block.parts[0].view, doc.access.view) ? undefined : block.parts[0].view}
             edit={samePolicy(block.parts[0].edit, doc.access.edit) ? undefined : block.parts[0].edit}
-            onView={world.isGm ? (view) => setPart(b, 0, { view }) : undefined}
+            onView={world.isGm || mayEditPart(article, block.parts[0].key) ? (view) => setPart(b, 0, { view }) : undefined}
             onEdit={world.isGm ? (edit) => setPart(b, 0, { edit }) : undefined}
           />
         )
@@ -2319,6 +2323,7 @@ export function VisualEditor({
                   p > 0 && !(samePolicy(part.view, doc.access.view) && samePolicy(part.edit, doc.access.edit))
                 }
                 removable={world.isGm && block.parts.length > 1}
+                editor={!world.isGm && mayEditPart(article, part.key)}
                 links={links}
                 carets={carets(part.key)}
                 marks={{ kind: marks.kind, ranges: marks.of(part.key) }}
@@ -2367,7 +2372,7 @@ export function VisualEditor({
           onAdded={setPicked}
           access={(() => {
             const b = doc.blocks.findIndex((x) => x.key === pickedBlock.key);
-            return b < 0 ? null : <SectionAccess world={world} block={doc.blocks[b]} onPart={(p, patch) => setPart(b, p, patch)} />;
+            return b < 0 ? null : <SectionAccess world={world} block={doc.blocks[b]} mayEdit={(key) => mayEditPart(article, key)} onPart={(p, patch) => setPart(b, p, patch)} />;
           })()}
         />
       )}
@@ -3145,9 +3150,12 @@ function PartEditor({
   region,
   docAccess,
   sections,
+  editor = false,
 }: {
   world: WorldInfo;
   part: BlockPart;
+  /** Not the GM, but may edit it: sets who sees it. */
+  editor?: boolean;
   /** The section's title — to name the part by. */
   title: string;
   inherited: boolean;
@@ -3226,17 +3234,17 @@ function PartEditor({
     const holder = sideBarOwner();
     // Only a section of several parts has a part's own access to set; one
     // of a single part sets it on the section.
-    if (world.isGm && removable && !inspecting && !dismissed && !chosenSection && !holder?.startsWith("versions:")) setInspecting(true);
+    if (((world.isGm && removable) || editor) && !inspecting && !dismissed && !chosenSection && !holder?.startsWith("versions:")) setInspecting(true);
   };
   return (
-    <PartAccessContext.Provider value={{ world, part, title, alone, onPart, onRemove: removable ? onRemove : undefined }}>
+    <PartAccessContext.Provider value={{ world, part, title, alone, onPart, onRemove: removable ? onRemove : undefined, editor }}>
     <div
       className={`block-part${guarded ? " guarded" : ""}${inspecting ? " inspected" : ""}${
         part.level !== "open" ? ` level-${part.level}` : ""
       }`}
     >
       {region && (
-        <RegionAccess world={world} view={part.view} edit={part.edit} docView={docAccess.view} docEdit={docAccess.edit} onClick={world.isGm ? () => (setDismissed(false), setInspecting(true)) : undefined} />
+        <RegionAccess world={world} view={part.view} edit={part.edit} docView={docAccess.view} docEdit={docAccess.edit} onClick={world.isGm || editor ? () => (setDismissed(false), setInspecting(true)) : undefined} />
       )}
       {inspecting && (
         <Inspector title={title ? `Part · ${title}` : "Part"} onClose={() => (setInspecting(false), setDismissed(true))}>
@@ -3395,3 +3403,8 @@ function PartFlow({
   );
 }
 
+
+/** Whether this reader may edit a part of the document — then, not being the GM, they say who sees it. */
+function mayEditPart(article: ArticleView, key: string): boolean {
+  return article.layers.some((l) => l.section === key && l.mayEdit);
+}

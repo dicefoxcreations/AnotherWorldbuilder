@@ -25,6 +25,8 @@ export type PartAccess = {
   onPart: (p: Partial<BlockPart>) => void;
   /** Takes the whole part out — where there are others in its section. */
   onRemove?: () => void;
+  /** Not the GM, but may edit the part: says who sees it, not who edits it. */
+  editor?: boolean;
 };
 
 export const PartAccessContext = createContext<PartAccess | null>(null);
@@ -67,21 +69,24 @@ export function AccessRows({
   value,
   onChange,
   readOnly,
+  viewOnly,
 }: {
   world: WorldInfo;
   value: { view: string; edit: string; level: string };
   onChange: (p: Partial<{ view: string; edit: string; level: string }>) => void;
   /** Only shown — set elsewhere. */
   readOnly?: boolean;
+  /** Who sees it may be set, not who changes it — an editor who is not the GM. */
+  viewOnly?: boolean;
 }) {
   return (
     <div className="inspector-access">
       <span className="small muted">View</span>
       <VisibilityPicker world={world} value={value.view} onChange={(view) => onChange({ view })} small readOnly={readOnly} />
       <span className="small muted">Change</span>
-      <VisibilityPicker world={world} value={value.edit} onChange={(edit) => onChange({ edit })} small readOnly={readOnly} />
+      <VisibilityPicker world={world} value={value.edit} onChange={(edit) => onChange({ edit })} small readOnly={readOnly || viewOnly} />
       <span className="small muted">Travels</span>
-      <select className="level-picker" disabled={readOnly} value={value.level || "open"} onChange={(e) => onChange({ level: e.target.value })}>
+      <select className="level-picker" disabled={readOnly || viewOnly} value={value.level || "open"} onChange={(e) => onChange({ level: e.target.value })}>
         <option value="open">open</option>
         <option value="sealed">sealed</option>
         <option value="gm-only">GM only</option>
@@ -99,18 +104,22 @@ export function SectionAccess({
   world,
   block,
   onPart,
+  mayEdit,
 }: {
   world: WorldInfo;
   block: TemplateBlock;
   onPart: (p: number, patch: Partial<{ view: string; edit: string; level: string }>) => void;
+  /** Which parts this reader may edit — who is not the GM sets who sees those. */
+  mayEdit?: (key: string) => boolean;
 }) {
-  if (!world.isGm || block.parts.length === 0) return null;
+  const shown = block.parts.map((part, p) => ({ part, p })).filter(({ part }) => world.isGm || mayEdit?.(part.key));
+  if (shown.length === 0) return null;
   return (
     <InspectorSection title="Access">
-      {block.parts.map((part, p) => (
+      {shown.map(({ part, p }) => (
         <div key={part.key} className="section-access">
           {block.parts.length > 1 && <span className="small muted">Part {p + 1}</span>}
-          <AccessRows world={world} value={part} onChange={(patch) => onPart(p, patch)} />
+          <AccessRows world={world} value={part} viewOnly={!world.isGm} onChange={(patch) => onPart(p, patch)} />
         </div>
       ))}
     </InspectorSection>
@@ -127,8 +136,16 @@ export function SectionAccess({
  */
 export function AccessSection({ attrs, onAttrs }: { attrs?: ImageAttrs; onAttrs?: (next: ImageAttrs) => void }) {
   const at = useContext(PartAccessContext);
-  if (!at || !at.world.isGm) return null;
+  if (!at || (!at.world.isGm && !at.editor)) return null;
   const { world, part, onPart } = at;
+  // An editor who is not the GM: who sees the part — the GM's device sets it.
+  if (!world.isGm) {
+    return (
+      <InspectorSection title="Access — this part">
+        <AccessRows world={world} value={part} viewOnly onChange={onPart} />
+      </InspectorSection>
+    );
+  }
   const own = !!attrs && ACCESS.some((n) => attr(attrs, n) !== "");
   if (own && attrs && onAttrs) {
     const value = { view: attr(attrs, "view") || part.view, edit: attr(attrs, "edit") || part.edit, level: attr(attrs, "level") || "open" };

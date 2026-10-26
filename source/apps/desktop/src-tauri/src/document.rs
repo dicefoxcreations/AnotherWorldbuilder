@@ -1091,6 +1091,9 @@ pub(crate) fn save(
         })
     };
 
+    // Who sees parts, as an editor who is not the GM asks it.
+    let mut shown: Vec<crate::Shown> = Vec::new();
+
     // --- The skeleton: name and access -----------------------------------
     let name = read.document.name.trim();
     let access = &read.document.access;
@@ -1276,10 +1279,16 @@ pub(crate) fn save(
                         stored.layers[*i].level,
                     ));
                     let access_changed = part.view != was.own || part.edit != was.edit || wanted_level != level;
-                    if access_changed {
-                        if !gm {
-                            return Err(AppError("Only the GM can change who sees or edits a part.".into()));
+                    if access_changed && !gm {
+                        // Who may edit a part says who sees it — asked of the
+                        // GM's device, which holds the keys. Who edits it stays
+                        // the GM's to say.
+                        if part.edit != was.edit || wanted_level != level || !may_edit(&was.edit, &held) {
+                            return Err(AppError("Only the GM can change who edits a part.".into()));
                         }
+                        part.view.parse::<Policy>().map_err(AppError::from)?;
+                        shown.push(crate::Shown { layer: layer_id(*i).to_string(), view: part.view.clone() });
+                    } else if access_changed {
                         store.ensure_attributes(world, &part.view.parse().map_err(AppError::from)?)?;
                         store.rekey(
                             world,
@@ -1359,6 +1368,9 @@ pub(crate) fn save(
 
     if let Some(owner) = owner {
         name_owner(store, world, &owner, name)?;
+    }
+    if !shown.is_empty() {
+        crate::propose_shown(store, identity, world, &stored.id.to_string(), shown)?;
     }
     Ok(())
 }
@@ -3222,8 +3234,12 @@ mod tests {
         let err = save_now(&bobs, &bob, &w.id, &tavern, &story_edit).unwrap_err();
         assert!(err.0.contains("may not change"), "{}", err.0);
 
-        // Neither is who sees it.
-        let access_edit = journal_edit.replace("<block title=Journal", "<block title=Journal view=all");
+        // Who sees his journal he asks of the GM's device; who edits it is not his to say.
+        assert!(journal_edit.contains("<block title=Journal view=players edit=players>"), "{journal_edit}");
+        let access_edit = journal_edit.replace("<block title=Journal view=players edit=players>", "<block title=Journal view=all edit=players>");
+        save_now(&bobs, &bob, &w.id, &tavern, &access_edit).unwrap();
+        assert_eq!(bobs.proposals(&w.id, &bob).unwrap().len(), 1, "asked, not set");
+        let access_edit = journal_edit.replace("<block title=Journal view=players edit=players>", "<block title=Journal view=players edit=gm>");
         let err = save_now(&bobs, &bob, &w.id, &tavern, &access_edit).unwrap_err();
         assert!(err.0.contains("Only the GM"), "{}", err.0);
 

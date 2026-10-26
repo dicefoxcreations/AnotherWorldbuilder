@@ -34,17 +34,17 @@ export function effective(policy: string): string[] {
 export const samePolicy = (a: string, b: string) =>
   effective(a).map((t) => t.toLowerCase()).sort().join(OR) === effective(b).map((t) => t.toLowerCase()).sort().join(OR);
 
-type Ruled = { view: string; edit: string };
+type Ruled = { view: string; edit: string; key?: string };
 type Doc<P extends Ruled> = { access: Ruled; infobox?: Ruled; blocks: { parts: P[] }[] };
 
 /**
  * A document's access changed: what had the same rule as the document —
  * each block that did not choose its own — takes the new one along.
  */
-export function withAccess<P extends Ruled, D extends Doc<P>>(doc: D, change: Partial<Ruled>): D {
+export function withAccess<P extends Ruled, D extends Doc<P>>(doc: D, change: Partial<Ruled>, mayChange: (part: P) => boolean = () => true): D {
   const was = doc.access;
   const access = { ...was, ...change };
-  const follow = <R extends Ruled>(r: R): R => ({
+  const follow = (r: P): P => (!mayChange(r) ? r : {
     ...r,
     view: change.view !== undefined && samePolicy(r.view, was.view) ? access.view : r.view,
     edit: change.edit !== undefined && samePolicy(r.edit, was.edit) ? access.edit : r.edit,

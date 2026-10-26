@@ -1617,10 +1617,53 @@ struct Asked {
     /// is theirs to open and link to before the GM's device made it.
     #[serde(default)]
     article: String,
+    #[serde(default)]
     article_type: String,
+    #[serde(default)]
     slug: String,
+    #[serde(default)]
     name: String,
+    #[serde(default)]
     layers: Vec<NewLayer>,
+    /// Or who sees parts of `article`, as one who may edit them asks it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shown: Vec<Shown>,
+}
+
+/// Who sees a part, as an editor asks it — see `propose_shown`.
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct Shown {
+    pub(crate) layer: String,
+    pub(crate) view: String,
+}
+
+/// Who sees parts of a document, asked by one who may edit them and is not
+/// the GM: the GM's device holds the keys and sets it when it has it
+/// (`answer_proposals`), if they still may edit them.
+pub(crate) fn propose_shown(store: &Store, me: &Identity, world: &str, article: &str, shown: Vec<Shown>) -> Answer<()> {
+    let asked = Asked { article: article.to_string(), article_type: String::new(), slug: String::new(), name: String::new(), layers: Vec::new(), shown };
+    store.propose(world, me, &serde_json::to_vec(&asked)?)?;
+    Ok(())
+}
+
+/// A view asked for by an editor, set — where they still may edit the part
+/// and who edits it stays as it is. Whether it was set.
+fn set_shown(store: &Store, world: &str, member: &store::Member, article: &str, shown: &Shown) -> Answer<bool> {
+    let held = store.view_keys(world, &store.load_identity()?)?;
+    let all = store.load_articles(world)?;
+    let Some(target) = all.iter().find(|a| a.id.to_string() == article) else { return Ok(false) };
+    let Some(entry) = target.layers.iter().find(|l| l.id.to_string() == shown.layer) else { return Ok(false) };
+    let content = layer_content(entry, &held)?;
+    let mut theirs: std::collections::BTreeSet<Attribute> = member.granted_attributes().iter().filter_map(|a| a.parse().ok()).collect();
+    theirs.extend(["players", "all"].iter().filter_map(|a| a.parse().ok()));
+    if !content.edit.parse::<Policy>().is_ok_and(|p| p.satisfied_by(&theirs)) {
+        return Ok(false);
+    }
+    let view = own_view(&shown.view, article, &target.article_type);
+    let wanted: Policy = view.parse().map_err(AppError::from)?;
+    store.ensure_attributes(world, &wanted)?;
+    store.rekey(world, entry.id, &wanted, Access { section: content.section, own: view, edit: content.edit }, entry.level, "")?;
+    Ok(true)
 }
 
 #[cfg(feature = "gui")]
@@ -1674,7 +1717,7 @@ pub(crate) fn propose_document(
             }
         }
     }
-    let asked = Asked { article: article.to_string(), article_type, slug, name: name.trim().chars().take(200).collect(), layers };
+    let asked = Asked { article: article.to_string(), article_type, slug, name: name.trim().chars().take(200).collect(), layers, shown: Vec::new() };
     store.propose(world, me, &serde_json::to_vec(&asked)?)?;
     Ok(article.to_string())
 }
@@ -1759,17 +1802,25 @@ pub(crate) fn answer_proposals(store: &Store, world: &str) -> Answer<usize> {
     let templates = store.load_templates(world)?;
     let stored: std::collections::HashSet<String> = store.load_articles(world)?.iter().map(|a| a.id.to_string()).collect();
     let mut answered = Vec::new();
+    let mut made = 0;
     // Of a document asked for again, changed, the newest counts.
     let mut newest: std::collections::BTreeMap<String, (u64, IdentityPublic, Asked)> = Default::default();
     for (id, author, at, content) in asked {
         answered.push(id);
         let Some(asked) = content.and_then(|c| serde_json::from_slice::<Asked>(&c).ok()) else { continue };
+        if !asked.shown.is_empty() {
+            if let Some(member) = meta.member(author.id.as_str()) {
+                for shown in &asked.shown {
+                    made += usize::from(set_shown(store, world, member, &asked.article, shown)?);
+                }
+            }
+            continue;
+        }
         let key = if asked.article.is_empty() { format!("new:{}", answered.len()) } else { asked.article.clone() };
         if newest.get(&key).is_none_or(|(t, ..)| at >= *t) {
             newest.insert(key, (at, author, asked));
         }
     }
-    let mut made = 0;
     for (_, author, asked) in newest.into_values() {
         // Made already — asked again meanwhile: what came first stands.
         if stored.contains(&asked.article) {
@@ -1778,7 +1829,7 @@ pub(crate) fn answer_proposals(store: &Store, world: &str) -> Answer<usize> {
         let Some(member) = meta.member(author.id.as_str()) else { continue };
         let Some(own) = templates.iter().find(|t| t.id == asked.article_type && !t.group) else { continue };
         // Every player holds `players` and `all`, besides what they are assigned.
-        let mut held: std::collections::BTreeSet<Attribute> = member.attributes.iter().filter_map(|a| a.parse().ok()).collect();
+        let mut held: std::collections::BTreeSet<Attribute> = member.granted_attributes().iter().filter_map(|a| a.parse().ok()).collect();
         held.extend(["players", "all"].iter().filter_map(|a| a.parse().ok()));
         let allowed = member.role == Role::Gm || own.create.parse::<Policy>().is_ok_and(|p| !own.create.trim().is_empty() && p.satisfied_by(&held));
         if !allowed {
