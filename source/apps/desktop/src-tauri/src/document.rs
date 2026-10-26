@@ -21,7 +21,7 @@ use aw_model::link;
 use aw_model::names::{self, Catalog};
 use aw_model::relation::{self, Entry};
 use aw_model::template::{Access as TypeAccess, BlockPart, FieldKind, TemplateBlock};
-use aw_store::journal::diff::{self, Range};
+use aw_store::diff::{self, Range};
 use std::collections::BTreeMap;
 
 type Access = TypeAccess;
@@ -305,27 +305,6 @@ fn open(store: &Store, world: &str, article: &str, reader: &Reader) -> Result<Op
     let templates = store.load_templates(world)?;
     let calendar = store.load_world_meta(world)?.calendar;
     open_doc(store, world, doc, reader, templates, calendar)
-}
-
-/// What opening many documents takes from the world — loaded once, not once
-/// for each of them.
-pub(crate) struct Shared {
-    reader: Reader,
-    templates: Vec<Template>,
-    calendar: aw_model::WorldCalendar,
-}
-
-impl Shared {
-    pub(crate) fn load(store: &Store, world: &str) -> Answer<Self> {
-        Ok(Shared { reader: store.reader(world)?, templates: store.load_templates(world)?, calendar: store.load_world_meta(world)?.calendar })
-    }
-}
-
-/// `code_of` for one of many documents.
-pub(crate) fn code_in(store: &Store, world: &str, article: &str, shared: &Shared) -> Answer<DocumentCode> {
-    let doc = store.db(world)?.document(article)?.ok_or_else(|| AppError("There is no such article.".into()))?;
-    let opened = open_doc(store, world, doc, &shared.reader, shared.templates.clone(), shared.calendar.clone())?;
-    Ok(code_from(opened))
 }
 
 fn open_doc(store: &Store, world: &str, doc: store::Document, reader: &Reader, templates: Vec<Template>, calendar: aw_model::WorldCalendar) -> Result<Opened, AppError> {
@@ -2454,7 +2433,6 @@ mod tests {
     struct World {
         dir: PathBuf,
         store: Store,
-        gm: Identity,
         id: String,
         home: String,
     }
@@ -2472,7 +2450,7 @@ mod tests {
         let gm = Identity::create("Marla").unwrap();
         store.save_identity(&gm).unwrap();
         let meta = new_world(&store, &gm, "Eldermere".into()).unwrap();
-        World { id: meta.id.clone(), home: meta.home.clone(), dir, store, gm }
+        World { id: meta.id.clone(), home: meta.home.clone(), dir, store }
     }
 
     fn field(key: &str, label: &str, kind: FieldKind) -> TemplateField {

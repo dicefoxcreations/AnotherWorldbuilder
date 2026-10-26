@@ -238,7 +238,7 @@ impl Journal {
         let changes = opened.doc.edit(&base, wanted, author.id().as_str(), session, time)?;
         if tracing {
             let now = opened.doc.plain()?.text;
-            let at = super::diff::splices(&seen.text, &wanted.text);
+            let at = crate::diff::splices(&seen.text, &wanted.text);
             let kept = at.iter().all(|s| now.contains(s.insert.as_str()));
             eprintln!("TRACE edit {layer}: {} changes, splices {:?}, all in it now: {kept}", changes.len(), at.iter().map(|s| (s.at, s.delete, s.insert.clone())).collect::<Vec<_>>());
         }

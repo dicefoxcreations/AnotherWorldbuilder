@@ -167,8 +167,6 @@ export type BackupView = { plan: BackupPlan; folder: string; backups: { at: numb
 export type WorldDestination = { kind: "local"; path: string } | { kind: "server"; server: string };
 
 /** A world held here, and whether it is offered or kept somewhere. */
-/** How far switching a world's encryption is. */
-export type SwitchProgress = { step: number; steps: number; what: string; done: number; total: number };
 export type SharedWorld = { id: string; name: string; icon: string; shared: boolean; server: string };
 
 /** A world found on the network. */
@@ -1113,7 +1111,6 @@ export const api = {
   networkEnable: (enabled: boolean) => invoke<NetworkView>("network_enable", { enabled }),
   networkInternet: (enabled: boolean, stun: string[]) => invoke<NetworkView>("network_internet", { enabled, stun }),
   networkPort: (port: number | null) => invoke<NetworkView>("network_port", { port }),
-  worldSwitchProgress: (world: string) => invoke<SwitchProgress | null>("world_switch_progress", { world }),
   networkServers: (servers: string[]) => invoke<NetworkView>("network_servers", { servers }),
   /** What a server holds and who uses it — for its admin; with an order, carried out first. */
   serverManage: (server: string, order: ServerOrder | null = null) => invoke<ServerState>("server_manage", { server, order }),

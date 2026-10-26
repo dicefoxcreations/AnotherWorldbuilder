@@ -197,38 +197,6 @@ pub fn new_world_id() -> Result<String> {
 // --- Moving worlds ----------------------------------------------------------
 
 /// How far moving a world is — for the interface to show.
-#[derive(Clone, Default, Serialize)]
-pub struct SwitchProgress {
-    pub step: u32,
-    pub steps: u32,
-    pub what: String,
-    /// Of `total` in this step; no total: no count to give.
-    pub done: usize,
-    pub total: usize,
-}
-
-fn switch_progress_all() -> &'static Mutex<HashMap<String, SwitchProgress>> {
-    static ALL: OnceLock<Mutex<HashMap<String, SwitchProgress>>> = OnceLock::new();
-    ALL.get_or_init(Default::default)
-}
-
-pub(crate) fn progress(world: &str, step: u32, steps: u32, what: &str, done: usize, total: usize) {
-    if let Ok(mut all) = switch_progress_all().lock() {
-        all.insert(world.to_string(), SwitchProgress { step, steps, what: what.into(), done, total });
-    }
-}
-
-pub(crate) fn progress_done(world: &str) {
-    if let Ok(mut all) = switch_progress_all().lock() {
-        all.remove(world);
-    }
-}
-
-/// Where moving a world stands — `None` while it is not being moved.
-pub fn switch_progress(world: &str) -> Option<SwitchProgress> {
-    switch_progress_all().lock().ok()?.get(world).cloned()
-}
-
 fn moving_worlds() -> &'static Mutex<std::collections::HashSet<String>> {
     static MOVING: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
     MOVING.get_or_init(Default::default)

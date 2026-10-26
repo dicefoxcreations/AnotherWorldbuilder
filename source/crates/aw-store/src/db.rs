@@ -976,7 +976,7 @@ pub fn merge(base: &str, ours: &str, theirs: &str) -> String {
         for (doc, target) in [(&mut mine, ours), (&mut other, theirs)] {
             // Letter by letter, the fewest: what one did not touch stays where
             // the other wrote beside it.
-            for s in crate::journal::diff::edits(base, target) {
+            for s in crate::diff::edits(base, target) {
                 doc.splice_text(&text, s.at, s.delete as isize, &s.insert)?;
             }
         }

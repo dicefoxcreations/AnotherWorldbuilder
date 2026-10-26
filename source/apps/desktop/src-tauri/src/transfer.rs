@@ -541,6 +541,40 @@ pub async fn package_read(app: tauri::AppHandle, world: String, path: String) ->
     .map_err(AppError::from)?
 }
 
+/// One package taken in at a time.
+static TAKING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Takes in a package sent as content — from the browser, or from a member
+/// working on a server: its `package.json`, and its files base64 under the
+/// paths the package names.
+pub(crate) fn take_in(store: &Store, world: &str, package: &serde_json::Value, files: &BTreeMap<String, String>, progress: &dyn Fn(usize, usize)) -> Answer<Summary> {
+    use base64::Engine;
+    if !store.is_gm(world) {
+        return Err(AppError("Only the GM imports.".into()));
+    }
+    let _one = TAKING.lock().map_err(AppError::from)?;
+    let folder = store.profile_dir().join("tmp").join(format!("package-{}", hex::encode(aw_crypto::random_bytes::<6>().map_err(|e| AppError(e.to_string()))?)));
+    let taken = (|| {
+        std::fs::create_dir_all(&folder)?;
+        std::fs::write(folder.join(FILE), serde_json::to_vec(package)?)?;
+        for (name, data) in files {
+            let path = Path::new(name);
+            // Inside the package's folder, nowhere else.
+            if path.is_absolute() || path.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+                return Err(AppError(format!("Not a file of the package: {name}")));
+            }
+            let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| AppError(e.to_string()))?;
+            let target = folder.join(path);
+            std::fs::create_dir_all(target.parent().unwrap_or(&folder))?;
+            std::fs::write(target, bytes)?;
+        }
+        let (dir, package) = read(&folder)?;
+        import(store, world, &dir, &package, progress)
+    })();
+    let _ = std::fs::remove_dir_all(&folder);
+    taken
+}
+
 #[cfg(feature = "gui")]
 /// Takes a package in; tells the page how far it is (`package-progress`).
 #[cfg_attr(feature = "gui", tauri::command(async))]

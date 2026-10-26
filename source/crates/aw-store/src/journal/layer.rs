@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::str::FromStr;
 
-use super::diff::{self, Range};
+use crate::diff::{self, Range};
 use super::Result;
 use crate::media::ImageRef;
 

@@ -235,7 +235,6 @@ version = "0.1.64"
 dependencies = [
  "aw-crypto",
  "aw-model",
- "aw-policy",
  "aw-store",
  "aw-sync",
  "base64 0.23.1",

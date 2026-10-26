@@ -22,6 +22,8 @@ mod transfer;
 mod network;
 mod keys;
 mod remote;
+#[cfg(feature = "gui")]
+mod browser;
 mod keeper;
 pub mod server;
 
@@ -1004,14 +1006,6 @@ pub(crate) fn world_listed_set_in(store: &Store, world: String, listed: bool) ->
     // Named on the local network now, or no more.
     network::republish();
     world_now(&store, &world)
-}
-
-#[cfg(feature = "gui")]
-/// How far moving the world is — asked while it runs.
-#[cfg_attr(feature = "gui", tauri::command(async))]
-fn world_switch_progress(app: tauri::AppHandle, world: String) -> Answer<Option<store::SwitchProgress>> {
-    let _ = store(&app)?;
-    Ok(store::switch_progress(&world))
 }
 
 #[cfg(feature = "gui")]
@@ -2033,6 +2027,7 @@ pub fn run() {
         // stands, then it is clamped into the usable area.
         .setup(|app| {
             let _ = APP.set(app.handle().clone());
+            browser::start(app.handle());
             if let Err(e) = network::start(app.handle()) {
                 applog::line("network", &e.0);
             }
@@ -2070,6 +2065,10 @@ pub fn run() {
             network::world_connect,
             network::world_disconnect,
             network::world_call,
+            browser::browser_settings,
+            browser::browser_enable,
+            browser::browser_pair,
+            browser::browser_forget,
             network::network_enable,
             network::network_internet,
             network::network_port,
@@ -2163,7 +2162,6 @@ pub fn run() {
             world_listed_set,
             app_restart,
             world_dice_set,
-            world_switch_progress,
             keys::keys_backup,
             keys::keys_restore,
             navigation_load,

@@ -56,8 +56,6 @@ struct Door {
 }
 
 static DOOR: Mutex<Door> = Mutex::new(Door { listening: None, code: None, problem: None });
-/// One package at a time.
-static TAKING: Mutex<()> = Mutex::new(());
 
 fn load(store: &Store) -> Settings {
     std::fs::read(store.profile_dir().join(FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
@@ -291,51 +289,50 @@ fn pair(store: &Store, tell: Tell, mut settings: Settings, body: &[u8]) -> Route
     Ok(serde_json::json!({ "token": token }))
 }
 
+/// The worlds this device leads: here, and on their servers — asked there.
 fn worlds(store: &Store) -> Routed {
     let mut led: Vec<serde_json::Value> = store
         .list_worlds()
         .map_err(fail)?
         .into_iter()
-        .filter(|m| store.is_gm(m.public.world_id.as_str()))
-        .map(|m| serde_json::json!({ "id": m.public.world_id.to_string(), "name": m.public.name, "icon": m.icon, "members": m.members.len() }))
+        .filter(|m| store.is_gm(&m.id))
+        .map(|m| serde_json::json!({ "id": m.id, "name": m.name, "icon": m.icon, "members": m.members.len() }))
         .collect();
-    for cached in network::online_worlds(store) {
-        if store.is_gm(&cached.world) && !led.iter().any(|w| w["id"] == cached.world) {
-            led.push(serde_json::json!({ "id": cached.world, "name": cached.info["name"], "icon": cached.info["icon"],
-                "members": cached.info["members"].as_array().map_or(0, Vec::len) }));
+    let remote: Vec<String> = store.load_network().map_err(fail)?.remote.into_iter().filter(|(_, r)| !r.asked).map(|(w, _)| w).collect();
+    for world in remote {
+        if let Ok(info) = tauri::async_runtime::block_on(network::connect(store, &world)) {
+            if info.is_gm {
+                led.push(serde_json::json!({ "id": info.id, "name": info.name, "icon": info.icon, "members": info.members.len() }));
+            }
         }
     }
     Ok(serde_json::Value::Array(led))
 }
 
-/// Browser imports use the same acknowledged online command channel as
-/// the app. The HTTP listener runs on its own thread, outside Tokio.
-fn authorized<R>(store: &Store, world: &str, run: impl FnOnce(&Store) -> Answer<R>) -> Answer<R> {
-    if !online::requires_online(store, world) { return run(store) }
-    let server = online::server_for(store, world)?;
-    if store.holds(world) && !network::online_worlds(store).iter().any(|w| w.world == world) {
-        return Err(AppError("[online] This world is still being uploaded.".into()));
+/// Whether this device leads a world: here, or on its server.
+fn leads(store: &Store, world: &str) -> bool {
+    if store.holds(world) {
+        return store.is_gm(world);
     }
-    let net = network::running().ok_or_else(|| AppError(online::UNAVAILABLE.into()))?;
-    let me = store.load_identity()?;
-    let connection = online::Connection { net: &net, server: &server, me: &me };
-    tauri::async_runtime::block_on(online::execute(store, world, &server, &connection, online::Needs::Everything,
-        |cache| std::future::ready(run(&cache))))
+    network::remote_of(store, world).is_some() && tauri::async_runtime::block_on(network::connect(store, world)).is_ok_and(|i| i.is_gm)
 }
 
 /// A world's types — so that a package brings only those it lacks, and the
 /// world's own stay as its game master made them.
 fn types(store: &Store, world: &str) -> Routed {
-    if !store.is_gm(world) {
+    if !leads(store, world) {
         return Err((403, "Only the GM's worlds.".into()));
     }
-    serde_json::to_value(authorized(store, world, |cache| Ok(cache.load_templates(world)?)).map_err(|e| (500, e.0))?).map_err(fail)
+    if store.holds(world) {
+        return serde_json::to_value(store.load_templates(world).map_err(|e| (500, e.to_string()))?).map_err(fail);
+    }
+    tauri::async_runtime::block_on(network::call(store, world, "templates_types", serde_json::json!({}))).map_err(|e| (500, e.0))
 }
 
 /// A package from the browser: its `package.json` and its files, the files
-/// base64 under the paths the package names.
+/// base64 under the paths the package names. Into a world on a server, it
+/// goes there as it came.
 fn take(store: &Store, tell: Tell, from: &str, body: &[u8]) -> Routed {
-    use base64::Engine;
     #[derive(Deserialize)]
     struct Sent {
         world: String,
@@ -344,39 +341,24 @@ fn take(store: &Store, tell: Tell, from: &str, body: &[u8]) -> Routed {
         files: BTreeMap<String, String>,
     }
     let sent: Sent = serde_json::from_slice(body).map_err(|e| (400, e.to_string()))?;
-    if !store.is_gm(&sent.world) {
+    if !leads(store, &sent.world) {
         return Err((403, "Only the GM imports.".into()));
     }
-    let _one = TAKING.lock().unwrap();
-    let folder = store.profile_dir().join("tmp").join(format!("browser-{}", hex::encode(aw_crypto::random_bytes::<6>().map_err(fail)?)));
-    let result = (|| -> Routed {
-        std::fs::create_dir_all(&folder).map_err(fail)?;
-        std::fs::write(folder.join("package.json"), serde_json::to_vec(&sent.package).map_err(fail)?).map_err(fail)?;
-        for (name, data) in &sent.files {
-            let path = Path::new(name);
-            // Inside the package's folder, nowhere else.
-            if path.is_absolute() || path.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
-                return Err((400, format!("Not a file of the package: {name}")));
-            }
-            let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| (400, e.to_string()))?;
-            let target = folder.join(path);
-            std::fs::create_dir_all(target.parent().unwrap_or(&folder)).map_err(fail)?;
-            std::fs::write(target, bytes).map_err(fail)?;
-        }
-        let (dir, package) = transfer::read(&folder).map_err(|e| (400, e.0))?;
-        let me = store.load_identity().map_err(fail)?;
+    let summary = if store.holds(&sent.world) {
         let progress = |done: usize, total: usize| tell("package-progress", serde_json::json!([done, total]));
-        let summary = authorized(store, &sent.world, |cache| transfer::import(cache, &me, &sent.world, &dir, &package, &progress)).map_err(|e| {
+        let summary = transfer::take_in(store, &sent.world, &sent.package, &sent.files, &progress).map_err(|e| (400, e.0))?;
+        serde_json::to_value(&summary).map_err(fail)?
+    } else {
+        let args = serde_json::json!({ "world": sent.world, "package": sent.package, "files": sent.files });
+        tauri::async_runtime::block_on(network::call(store, &sent.world, "package_take", args)).map_err(|e| {
             if e.0.contains("[online]") {
                 tell("online-unavailable", serde_json::json!({ "world": sent.world, "error": e.0 }));
             }
             (400, e.0)
-        })?;
-        tell("browser-imported", serde_json::json!({ "world": sent.world, "from": from, "name": summary.name, "documents": summary.documents_new }));
-        serde_json::to_value(&summary).map_err(fail)
-    })();
-    let _ = std::fs::remove_dir_all(&folder);
-    result
+        })?
+    };
+    tell("browser-imported", serde_json::json!({ "world": sent.world, "from": from, "name": summary["name"], "documents": summary["documents_new"] }));
+    Ok(summary)
 }
 
 // --- Commands ---------------------------------------------------------------
@@ -488,7 +470,7 @@ mod tests {
         let store = Store::new(dir.path().join("gm"));
         let gm = Identity::create("Marla").unwrap();
         store.save_identity(&gm).unwrap();
-        let world = new_world(&store, &gm, "Eldermere".into()).unwrap().public.world_id.to_string();
+        let world = new_world(&store, &gm, "Eldermere".into()).unwrap().id;
         let told = RefCell::new(Vec::<String>::new());
         let tell = |event: &str, _: serde_json::Value| told.borrow_mut().push(event.to_string());
         let ask = |r: Request| route(&store, &tell, &r);
@@ -534,7 +516,7 @@ mod tests {
         let summary = ask(request("POST", "/v1/import", None, Some(&token), sent)).unwrap();
         assert_eq!((summary["documents_new"].as_u64(), summary["images_new"].as_u64()), (Some(1), Some(1)));
         assert!(told.borrow().contains(&"browser-imported".to_string()));
-        assert!(store.load_articles(&world).unwrap().iter().any(|a| a.id.to_string() == page));
+        assert!(store.db(&world).unwrap().document(page).unwrap().is_some());
         assert!(!store.profile_dir().join("tmp").read_dir().map(|mut d| d.next().is_some()).unwrap_or(false), "nothing left behind");
 
         // Files only inside the package.

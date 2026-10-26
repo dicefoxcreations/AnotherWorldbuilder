@@ -32,12 +32,12 @@
 //! the content so far as its start. Whoever lost a right keeps the past but
 //! can neither read nor write what follows.
 
-pub mod diff;
 mod history;
 pub mod layer;
 pub mod types;
 mod writing;
 
+use crate::diff;
 use automerge::{AutoCommit, Change, ChangeHash};
 use aw_crypto::{
     decrypt, encrypt, seal_key, unseal_key, verify_write, ContentKey, Identity, IdentityPublic, WorldPublic, WorldToken,

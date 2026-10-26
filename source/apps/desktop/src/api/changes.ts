@@ -32,7 +32,6 @@ const READS = new Set([
   "phone_view",
   "presence",
   "world_presence",
-  "world_switch_progress",
   "storage_locations",
   "storage_peek",
   "storage_status",

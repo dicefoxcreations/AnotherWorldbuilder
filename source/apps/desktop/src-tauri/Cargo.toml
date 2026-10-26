@@ -37,7 +37,6 @@ base64 = "0.23.1"
 blake3 = "1.8.7"
 aw-crypto.workspace = true
 aw-model.workspace = true
-aw-policy.workspace = true
 aw-store.workspace = true
 aw-sync.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "signal"] }
