@@ -120,7 +120,16 @@ pub(crate) fn world_presence_in(store: &Store, world: String, article: String) -
     if !writing_now(&world, &me) {
         note_presence(&world, Presence { member: me.clone(), name, article, layer: String::new(), start: 0, end: 0, editing: false });
     }
-    let mut out: Vec<Here> = present(&world, &me).into_iter().map(|p| Here { id: p.member, name: p.name, article: p.article, editing: p.editing }).collect();
+    // Where someone is, only on a page this reader may see.
+    let reader = store.reader(&world)?;
+    let seen: std::collections::HashSet<String> = if reader.is_gm() { Default::default() } else { store.db(&world)?.names_for(&reader)?.into_iter().map(|(id, ..)| id).collect() };
+    let mut out: Vec<Here> = present(&world, &me)
+        .into_iter()
+        .map(|p| {
+            let article = if reader.is_gm() || seen.contains(&p.article) { p.article } else { String::new() };
+            Here { id: p.member, name: p.name, editing: p.editing && !article.is_empty(), article }
+        })
+        .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
@@ -230,18 +239,19 @@ pub(crate) fn dice_log_add_in(store: &Store, world: String, roll: Roll) -> Answe
 }
 
 #[cfg(feature = "gui")]
-/// Clears the log — the GM's: here, and on every device in the world.
+/// Clears the log — the GM's: here, and on every device in the world, there
+/// where the world is held.
 #[cfg_attr(feature = "gui", tauri::command(async))]
-pub fn dice_log_clear(app: tauri::AppHandle, world: String) -> Answer<DiceLog> {
-    dice_log_clear_in(&store(&app)?, world)
-}
-
-/// `dice_log_clear` for whom the store is given.
-pub(crate) fn dice_log_clear_in(store: &Store, world: String) -> Answer<DiceLog> {
+pub async fn dice_log_clear(app: tauri::AppHandle, world: String) -> Answer<DiceLog> {
+    let store = store(&app)?;
     let mut log = load_dice(&store, &world);
     log.rolls.clear();
     save_dice(&store, &world, &log)?;
-    dice_clear_in(&store, &world)?;
+    if network::remote_of(&store, &world).is_some() {
+        network::call(&store, &world, "dice_clear", serde_json::json!({ "world": world })).await?;
+    } else if store.holds(&world) && !mailbox::is_mailbox(&store, &world) {
+        dice_clear_in(&store, &world)?;
+    }
     Ok(log)
 }
 

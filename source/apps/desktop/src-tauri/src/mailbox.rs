@@ -293,6 +293,18 @@ fn deliver(store: &Store, world: &str, folder: &Path, member: &Member) -> Answer
     let temp = store.private_world_dir(world).join("delivering").join(&member.slot);
     let _ = std::fs::remove_dir_all(&temp);
     db.view_copy(&temp, &reader, &[gm, member.id.clone()], &images)?;
+    // What the world says of itself, as they may see it: the types and the
+    // side bar without what is not for them, and no roles to give.
+    {
+        let copy = WorldDb::open(&temp)?;
+        copy.save_types(&store::types_for(db.types()?, &reader))?;
+        match store.navigation_for(world, &reader)? {
+            Some(navigation) => copy.set_json("navigation", &navigation)?,
+            None => {}
+        }
+        copy.set_json("roles", &Vec::<String>::new())?;
+        copy.into_file()?;
+    }
     let to = folder.join(&member.slot).join(IN);
     std::fs::create_dir_all(&to)?;
     let media = db.dir().join(aw_store::db::MEDIA);
@@ -607,6 +619,17 @@ mod tests {
         let seen = serde_json::to_string(&view_in(&player, world.clone(), None).unwrap()).unwrap();
         assert!(seen.contains("Its door is open."), "{seen}");
         assert_eq!(std::fs::read_dir(cloud.join("leo").join(OUT)).unwrap().count(), 0, "what was done is let go of");
+
+        // The world as it lies in his mailbox says nothing of what is the GM's.
+        let mut goal = aw_model::TemplateField::new("goal", "True goal", aw_model::FieldKind::Text { multiline: false });
+        goal.access = Some(aw_model::Access { view: "gm".into(), edit: "gm".into() });
+        let mut npc: aw_model::Template = serde_json::from_value(json!({ "id": "npc", "name": "NPC", "icon": "", "infobox": {}, "properties": [], "blocks": [] })).unwrap();
+        npc.properties.push(goal);
+        gm.save_templates(&world, &[npc]).unwrap();
+        gm.set_navigation(&world, &[serde_json::from_value(json!({ "id": "s", "kind": "group", "label": "Secret lair", "gm": true })).unwrap()]).unwrap();
+        round(&gm, &world).unwrap();
+        let raw = String::from_utf8_lossy(&std::fs::read(cloud.join("leo").join(IN).join(aw_store::db::FILE)).unwrap()).to_string();
+        assert!(!raw.contains("True goal") && !raw.contains("Secret lair") && !raw.contains("dragon"));
 
         // Someone else writing into Leo's mailbox gets nowhere.
         let (_, eve) = someone(&at, "Eve");

@@ -335,7 +335,7 @@ fn open(store: &Store, world: &str, article: &str, reader: &Reader) -> Result<Op
     let doc = store.db(world)?.document(article)?.ok_or_else(|| AppError("There is no such article.".into()))?;
     // What one wrote that waits for the game master stands there for oneself.
     let doc = if store.moderated(world)? && !reader.is_gm() { history::with_own_waiting(store, world, doc)? } else { doc };
-    let templates = store.load_templates(world)?;
+    let templates = store.templates_for(world, reader)?;
     let calendar = store.load_world_meta(world)?.calendar;
     open_doc(store, world, doc, reader, templates, calendar)
 }
@@ -2901,6 +2901,57 @@ mod tests {
         assert_ne!(region, code);
         save_now(&w.store, &w.id, &id, &region).unwrap();
         assert_eq!(infobox(), ("all".to_string(), "players".to_string()), "{}", code_of(&w.store, &w.id, &id).unwrap().code);
+    }
+
+    #[test]
+    fn a_player_gets_types_and_the_side_bar_without_what_is_the_gms() {
+        use aw_model::navigation::{NavEntry, NavKind};
+        let w = world("types-seen");
+        let mut secret = field("goal", "True goal", FieldKind::Text { multiline: false });
+        secret.access = Some(Access { view: "gm".into(), edit: "gm".into() });
+        let mut notes = part("notes", "gm", "gm");
+        notes.text = "Dragon lair beneath the inn.".into();
+        let npc = template(
+            "npc",
+            vec![field("title", "Title", FieldKind::Text { multiline: false }), secret],
+            vec![
+                TemplateBlock { parts: vec![part("story", "all", "gm")], ..TemplateBlock::fresh("story", "Story") },
+                TemplateBlock { parts: vec![notes], ..TemplateBlock::fresh("notes", "GM notes") },
+            ],
+        );
+        w.store.save_templates(&w.id, &[npc]).unwrap();
+        let entry = |id: &str, label: &str, gm: bool| NavEntry { id: id.into(), kind: NavKind::Group, target: String::new(), label: label.into(), gm, children: Vec::new() };
+        w.store.set_navigation(&w.id, &[entry("a", "Places", false), entry("b", "Secret lair", true)]).unwrap();
+        let bob = join(&w, "Bob");
+
+        let types = serde_json::to_string(&as_bob(&bob, || crate::templates_load_in(&w.store, w.id.clone())).unwrap()).unwrap();
+        assert!(types.contains("Title") && types.contains("Story"), "{types}");
+        assert!(!types.contains("True goal") && !types.contains("Dragon lair") && !types.contains("GM notes"), "{types}");
+        let nav = serde_json::to_string(&as_bob(&bob, || crate::navigation_load_in(&w.store, w.id.clone())).unwrap()).unwrap();
+        assert!(nav.contains("Places") && !nav.contains("Secret lair"), "{nav}");
+
+        // The GM gets everything.
+        let all = serde_json::to_string(&crate::templates_load_in(&w.store, w.id.clone()).unwrap()).unwrap();
+        assert!(all.contains("True goal") && all.contains("Dragon lair"));
+        assert!(serde_json::to_string(&crate::navigation_load_in(&w.store, w.id.clone()).unwrap()).unwrap().contains("Secret lair"));
+
+        // Nor does a document of the type show the player the GM's section.
+        let mira = doc(&w, "npc", "Mira", vec![]);
+        let code = as_bob(&bob, || code_of(&w.store, &w.id, &mira)).unwrap().code;
+        assert!(!code.contains("GM notes") && !code.contains("Dragon lair") && !code.contains("True goal"), "{code}");
+    }
+
+    #[test]
+    fn a_player_does_not_learn_on_which_hidden_page_the_gm_is() {
+        let w = world("presence");
+        let lair = create_document(&w.store, &w.id, String::new(), "lair".into(), "Lair".into(), "gm".into(), vec![]).unwrap();
+        let bob = join(&w, "Bob");
+        crate::live::world_presence_in(&w.store, w.id.clone(), lair.clone()).unwrap();
+        let seen = as_bob(&bob, || crate::live::world_presence_in(&w.store, w.id.clone(), w.home.clone())).unwrap();
+        let marla = seen.iter().find(|h| h.name == "Marla").expect("the GM is there");
+        assert_eq!(marla.article, "", "but not where");
+        let gm = crate::live::world_presence_in(&w.store, w.id.clone(), lair.clone()).unwrap();
+        assert_eq!(gm.iter().find(|h| h.name == "Bob").unwrap().article, w.home);
     }
 
     #[test]

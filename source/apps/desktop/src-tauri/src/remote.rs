@@ -96,7 +96,7 @@ pub(crate) fn call(store: &Store, world: &str, command: &str, args: &serde_json:
         "image_data" => json(media::image_data_in(store, w(), arg(args, "image")?, arg(args, "preview")?)?),
         // Packages: from the browser of a GM working here from afar.
         "package_take" => json(transfer::take_in(store, world, &arg::<serde_json::Value>(args, "package")?, &arg(args, "files")?, &|_, _| {})?),
-        "templates_types" => json(store.load_templates(world)?),
+        "templates_types" => json(store.templates_for(world, &store.reader(world)?)?),
         // Who is where, and the dice.
         "presence" => json(live::presence_in(store, w(), arg(args, "article")?, arg(args, "caret")?)?),
         "world_presence" => json(live::world_presence_in(store, w(), arg(args, "article")?)?),

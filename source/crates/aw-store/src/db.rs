@@ -677,7 +677,13 @@ impl WorldDb {
         for doc in &seen {
             copy.put_document(doc)?;
         }
-        copy.conn().execute_batch("VACUUM; PRAGMA journal_mode = DELETE;")?;
+        copy.into_file()
+    }
+
+    /// Lets go of a copy as one file of its own — compacted, without a
+    /// write-ahead log beside it.
+    pub fn into_file(self) -> Result<()> {
+        self.conn().execute_batch("VACUUM; PRAGMA journal_mode = DELETE;")?;
         Ok(())
     }
 

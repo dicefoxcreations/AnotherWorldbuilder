@@ -123,10 +123,10 @@ When the bar is closed, the last roll shows at the bottom right for a few second
 
 **Where what lies.**
 
-- Rolls from a part only the GM sees (`level=gm-only` or `view=gm`) always stay here (🔒). How a secret monster hits stays secret.
-- The rolls travel with the digest request that runs every 2 s anyway. A player sends theirs to the host, the host passes them on to the others. A host only accepts rolls in the asker's own name. On the way, a roll is forgotten after a minute. No rolls go through folders; they belong to the live session.
+- Rolls from a part only the GM sees (`view=gm`) always stay here (🔒). How a secret monster hits stays secret.
+- A roll goes to where the world is held — this device, or its server — and everyone's app asks for the latest rolls every few seconds. The holder only takes rolls in the asker's own name and forgets them after a minute. No rolls go through mailboxes; they belong to the live session.
 - Every device keeps the log for itself, in the private part of the profile (`dice.json` beside the world, at most 300 rolls, with the favourites). It is not synced.
-- The GM's *Clear log* travels along as a special roll (`mark=clear`). A device empties its log only if it comes from the world's GM as the journal names her. A player cannot send it in the GM's name, because the host only accepts rolls in one's own name.
+- The GM's *Clear log* travels along as a special roll (`mark=clear`). Only the world's GM can make it, where the world is held; a player cannot send it in the GM's name.
 
 ## Bonuses through references
 
@@ -177,7 +177,7 @@ The result stands everywhere: in the infobox, at `%%Strength%%`, in tables, in t
 If the pointer rests on a link, after a moment the **whole page** of the document appears, as it looks when read: head, infobox, all sections. It is laid out narrower (808 px) and shrunk to 90 %.
 
 - A link in a preview opens the next one above it, like a submenu. If the pointer goes back to a lower card, those above close; Escape closes the top one.
-- The same rights apply as on the page. What the reader cannot decrypt is missing; if nothing is readable, only the head remains. As GM you therefore also see secret sections. 👁 (preview as player) shows what a player would see.
+- The same rights apply as on the page. What the reader may not see is missing; if nothing is readable, only the head remains. As GM you therefore also see secret sections. 👁 (preview as player) shows what a player would see.
 - Only for looking: no rights choice, no deleting, no image choice, no backlinks.
 - A card stays open while the pointer is on the link, on it or on a card above it. One can scroll in it, and its links work. Escape, a click beside it or scrolling the page closes it.
 - Every element with `data-preview=<id>` has it: links in the text, in the infobox, in lists and in the editor. A single listener (`features/wiki/LinkPreview.tsx`) draws them with `ArticlePage glance`.

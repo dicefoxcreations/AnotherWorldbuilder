@@ -1,53 +1,62 @@
-# Storage locations and world library
+# Storage locations and the world library
 
-As of October 2026. Code: `profile.rs`, `store.rs`, `network.rs`; interface: `Storage.tsx`, `MainMenu.tsx`.
+As of October 2026. Code: `profile.rs`, `store.rs`, `network.rs`; interface:
+`Storage.tsx`, `MainMenu.tsx`.
 
 ## Profile and worlds
 
 | Place | Content |
 | --- | --- |
-| Profile | Identity and private keys in `identity.json`, avatar, network settings in `network.json` |
-| `profile/worlds/world-<id>/` | Private world data: `state.json`, `owner.key`, `keyring.json`, `requests.json`, `handover.json` |
-| `profile/worlds/world-<id>/drafts/`, `index.json` | Drafts of running sessions; what the device has already checked of the versions |
-| `logs/` beside the profile | The app's log, a file a day (`2026-10-25.log`), the last fourteen kept (`applog.rs`): its start, commands that failed, a server world's reads and saves, errors of the page. Names worlds and commands, never their text or keys. *Options → About → Open the log folder*. Before a profile is chosen, beside `locations.json` |
-| Local world folder `world-<id>/` | Public descriptor `world.json`, the entries in a state file and update files ([world format 4](world-format.md)), images under `media/`; contents and key grants are encrypted |
+| `profile/identity.json` | one's identity: name, id, signing key and its second key |
+| `profile/network.json` | network settings: local network, internet, port, servers, the worlds offered, the worlds worked in on servers and through mailboxes |
+| `profile/endpoint.key` | this device's network key — its code stays the same |
+| `profile/worlds/world-<id>/` | what this device alone keeps of a world: where its backups go, its dice log, a mailbox's state |
+| `profile/host/server.json` | the app's own server: who came, who is turned away, where a world went |
+| `logs/` beside the profile | the app's log, a file a day, the last fourteen kept (`applog.rs`): its start, commands that failed, refused mailbox changes. Names worlds and commands, never their text. *Options → About → Open the log folder* |
+| `<location>/world-<id>/` | a world: `world.sqlite` and `media/` ([world format 5](world-format.md)) |
 
-Private data is assigned by world ID, independent of the storage location. A copy of a world folder carries no GM keys. Opened journals and decrypted views are kept apart per profile.
+Worlds on a server and those of a mailbox's player lie nowhere here but
+in `network.json` (where they are) — a player's mailbox world has its own
+copy in the default location, made anew with each delivery.
 
-**No automatic migration.** Earlier development formats are not converted. Old world folders stay unchanged and are not loaded as current worlds. In this development phase new worlds are created.
+**No migration.** Worlds of earlier formats are not read; see
+[world format 5](world-format.md#no-migration).
 
 ## Several local storage locations
 
-On first start, the profile and the default world folder are chosen. Under **Settings → Storage → Add world locations** several more folders can be added at once. What is chosen is always the parent folder in which the `world-<id>` folders lie.
+On first start, the profile and the default world folder are chosen. Under
+**Settings → Storage → Add world locations** more folders can be added — an
+external drive, a network drive. What is chosen is the parent folder the
+`world-<id>` folders lie in.
 
-- Folders kept in step by a cloud or sync app are ordinary storage locations. That app syncs the files; Worldbuilder knows no provider.
-- The profile and local world roots must not lie inside each other. World roots must not overlap or name the same folder through different paths.
-- Additional drives that are not available stay visible in the settings and are not created anew. An unavailable default location leads to the storage choice at start.
-- **Remove location** removes the assignment; files and private keys are kept.
-- Duplicate world IDs in several active storage locations are reported as a conflict.
-- **Move** for the profile or the default location copies the data on request; the old folder is kept. Additional storage locations stay assigned.
+- The profile and local world roots must not lie inside each other, nor
+  overlap.
+- Locations not available stay listed and are not created anew. An
+  unavailable default location leads to the storage choice at start.
+- **Remove location** removes the assignment; the files stay.
+- The same world id in two locations is reported as a conflict.
+- **Move** for the profile or the default location copies the data on
+  request; the old folder stays.
 
-The choice is stored in `locations.json` in the system configuration folder (or under `AW_PROFILE_ROOT`). The profile lock lies in the profile; locks for world roots are in the local app data folder under `storage-locks/`. They coordinate instances of the same operating system user, not different devices. The same identity should not write on several devices at the same time.
+The choice is stored in `locations.json` in the system's configuration
+folder (or under `AW_PROFILE_ROOT`). Locks in the profile and in
+`storage-locks/` keep two copies of the app from using the same folders.
 
-## Shared folders and world overview
+## The world library
 
-The start page shows all worlds from all storage locations and, with the LAN switched on, offers from the local network. A world in one's own default location is called **Local**; a world in an additional storage location carries a cloud symbol and the name of that folder: it lies in a **shared folder** that the group has in common through its cloud app.
+The start page shows the worlds on this device, those on other devices (a
+GM's app, a mailbox) and each server with its worlds. **New world:** on this
+device, in another location, or on a server one may bring worlds to.
+**Open world:** add a folder, restore a backup, or open a mailbox.
 
-- **New world:** choose the storage location – "This device" or "Shared". **Add a folder …** takes in more folders.
-- **Open world:** open worlds, add folders or import an `.awworld` file.
-- Whoever has the shared folder has the world: it appears by itself as soon as the cloud app has brought its files. Only those the GM gave keys can read it.
-- In the shared folder the devices also arrange the direct connection (`peers/`, [directly over the internet](../testing/internet-direct.md)). Then changes go directly from device to device in seconds; the files in the folder catch up whenever the cloud app gets there.
+## Backing up
 
-The former direct tie-in to one cloud provider (OAuth, provider API, offline levels, loading on demand) was removed on 2026-10-20: it required the provider to review the app and tied the app to one provider.
+The profile — above all `identity.json` — and the world folders belong in
+the personal backup. Without the identity, one is someone else to the worlds
+one plays in. *Profile → Back up keys …* writes the identity into a file
+`.awkeys`, locked with a passphrase (Argon2id, then XChaCha20-Poly1305; at
+least 10 characters); *Restore your keys from a backup* takes it back on a
+new device. A world itself is backed up as a [backup](backups.md).
 
-## Backing up and deleting
-
-The **whole profile and all local world folders** belong in the personal backup. Without the identity, world token and attribute keys, protected contents cannot be recovered. Private files are not additionally encrypted and are written with mode `0600` on Unix.
-
-**Backing up keys:** Profile → *Back up keys …* writes a file `.awkeys` with the identity and what only this profile has per world (`owner.key`, `keyring.json`, `state.json`, `requests.json`, `handover.json`) – encrypted with a passphrase (Argon2id, 64 MiB, 3 passes; then XChaCha20-Poly1305, `aw_crypto::passphrase`), at least 10 characters. The world folders are not in it; they come from their folder. On a new device or after reinstalling: *Restore your keys from a backup* on the first screen. Restoring does not take over a foreign profile (another identity) and overwrites no existing file.
-
-**Readable copy:** every document as text, every image as a file – readable, searchable and editable without the app. Unencrypted in the world folder (`text/`), otherwise beside the profile on request; see [journal](journal.md#encrypted-or-not).
-
-**Projection:** `projection.json` in the private world folder holds what was built from the journal at the last start (per document a fingerprint of heads, generations and held keys). At the next start only what no longer matches its fingerprint is rebuilt – for 11,000 documents 0.6 s instead of more than 20 s. The contents lie in it as ciphertext as in the world folder, but the type and short name of the documents this device can open are in plain text – like everything in the profile (keyring, identity), only on this device. It may be deleted at any time.
-
-Deleting a world removes its world folder and this device's private world data. If the world lies in a shared folder, the cloud app deletes it there for everyone.
+Deleting a world removes its folder and this device's private data of it. A
+world on a server: its GM deletes it there; a player leaves it.

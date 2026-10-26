@@ -75,7 +75,7 @@ Checking is done with every new screen through the command `phone_view` (no butt
 
 ## The outline on the left and the path at the top
 
-**On the left**, every world has the outline (`features/navigation/NavBar.tsx`), as the counterpart to the side bar on the right. The GM sets its entries for everyone, in her order:
+**On the left**, every world has the outline (`features/navigation/NavBar.tsx`), as the counterpart to the side bar on the right. The GM sets its entries for everyone, in their order:
 
 - a **type** – unfolded, its documents including subtypes, by name; if the type has a tree (`parent`), as a tree;
 - a single **document**;

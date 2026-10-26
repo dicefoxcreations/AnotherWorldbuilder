@@ -29,7 +29,7 @@ A map is a picture of the world that you pan and zoom like a map on the web. Mar
 
 A marker or a region can say who sees it. So the GM prepares a whole map and uncovers bit by bit what the players discover: first for one character only, then for all players, finally without a setting of its own, like the map itself.
 
-This is not hiding in the interface. On saving, such markers leave the map: all with the same access go together into a part of their own at the end of the block, as `<pins for=img:…>` with the map's picture, by which the read view finds them again. This part is an encrypted layer of its own. Whoever cannot open it does not have the markers, not even encrypted in the map's part. The GM's code and editor show the map as one again, each marker with its access on the tag (`document::joined`).
+This is not hiding in the interface. On saving, such markers leave the map: all with the same access go together into a part of their own at the end of the block, as `<pins for=img:…>` with the map's picture, by which the read view finds them again. This part is a layer of its own. Whoever may not see it does not get the markers, not even hidden in the map's part. The GM's code and editor show the map as one again, each marker with its access on the tag (`document::joined`).
 
 - The GM sees such markers paler, with a dashed ring, regions with a dashed edge. The list in the side bar marks them with ◌.
 - At the top of the side bar stands **Access**: *GM only* makes a marker secret. After that, *Sees*, *Changes* and *Travels* set who has it. *As the map* uncovers it fully.

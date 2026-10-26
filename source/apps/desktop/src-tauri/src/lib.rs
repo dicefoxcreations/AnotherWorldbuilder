@@ -1045,8 +1045,8 @@ fn navigation_load(app: tauri::AppHandle, world: String) -> Answer<Option<Vec<aw
 
 /// `navigation_load` for whom the store is given.
 pub(crate) fn navigation_load_in(store: &Store, world: String) -> Answer<Option<Vec<aw_model::navigation::NavEntry>>> {
-    store.reader(&world)?;
-    Ok(store.navigation(&world)?)
+    let reader = store.reader(&world)?;
+    Ok(store.navigation_for(&world, &reader)?)
 }
 
 #[cfg(feature = "gui")]
@@ -1313,8 +1313,8 @@ fn templates_load(app: tauri::AppHandle, world: String) -> Answer<Vec<Template>>
 
 /// `templates_load` for whom the store is given.
 pub(crate) fn templates_load_in(store: &Store, world: String) -> Answer<Vec<Template>> {
-    store.reader(&world)?;
-    Ok(store.load_templates(&world)?)
+    let reader = store.reader(&world)?;
+    Ok(store.templates_for(&world, &reader)?)
 }
 
 #[cfg(feature = "gui")]

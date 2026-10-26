@@ -306,6 +306,36 @@ pub fn acting() -> Option<String> {
     ACTING.with(|a| a.borrow().clone())
 }
 
+/// Types as `reader` may see them — see `Store::templates_for`.
+pub fn types_for(templates: Vec<Template>, reader: &Reader) -> Vec<Template> {
+    if reader.is_gm() {
+        return templates;
+    }
+    let sees = |view: &str| reader.allows(view);
+    templates
+        .into_iter()
+        .map(|mut t| {
+            let hidden: Vec<(String, String)> = t
+                .properties
+                .iter()
+                .filter(|f| f.access.as_ref().is_some_and(|a| !sees(&a.view)))
+                .map(|f| (f.key.clone(), f.label.clone()))
+                .collect();
+            t.properties.retain(|f| !hidden.iter().any(|(k, _)| *k == f.key));
+            t.infobox.show.retain(|s| !hidden.iter().any(|(k, l)| s.property == *k || s.property == *l));
+            t.blocks = std::mem::take(&mut t.blocks)
+                .into_iter()
+                .filter_map(|mut b| {
+                    let had = b.parts.len();
+                    b.parts.retain(|p| sees(&p.view));
+                    (had == 0 || !b.parts.is_empty()).then_some(b)
+                })
+                .collect();
+            t
+        })
+        .collect()
+}
+
 // --- The store --------------------------------------------------------------
 
 /// The open databases of this process, by the world's folder.
@@ -572,6 +602,18 @@ impl Store {
 
     pub fn load_templates(&self, world_id: &str) -> Result<Vec<Template>> {
         Ok(self.db(world_id)?.types()?)
+    }
+
+    /// The types as `reader` may see them: a property or a part with a rule
+    /// they do not meet is not there for them — not its label, not its
+    /// starting text — and a block of such parts alone is not either.
+    pub fn templates_for(&self, world_id: &str, reader: &Reader) -> Result<Vec<Template>> {
+        Ok(types_for(self.load_templates(world_id)?, reader))
+    }
+
+    /// The navigation as `reader` may see it: without the GM's entries.
+    pub fn navigation_for(&self, world_id: &str, reader: &Reader) -> Result<Option<Vec<NavEntry>>> {
+        Ok(self.navigation(world_id)?.map(|n| if reader.is_gm() { n } else { aw_model::navigation::for_players(&n) }))
     }
 
     pub fn save_templates(&self, world_id: &str, templates: &[Template]) -> Result<()> {
