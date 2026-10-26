@@ -38,8 +38,11 @@ const INLINE = new RegExp(
  * drawn as read — its name — unless the caret stands inside it: then it is
  * the text one writes.
  */
-export function runs(text: string, open = -1): Run[] {
+export function runs(text: string, open = -1, around: { after?: boolean; before?: boolean } = {}): Run[] {
   const out: Run[] = [];
+  // What the last line was: an empty line after a heading, a list, a quote,
+  // a rule or a surface is the room the page leaves there, no line of its own.
+  let prev = around.after ? "surface" : "start";
   const plain = (into: Run[], t: string) => {
     if (!t) return;
     const last = into[into.length - 1];
@@ -90,11 +93,28 @@ export function runs(text: string, open = -1): Run[] {
   while (rest) {
     const nl = rest.indexOf("\n");
     const line = nl < 0 ? rest : rest.slice(0, nl + 1);
+    if (line === "\n") {
+      const last = rest.length === 1;
+      const next = rest.slice(1, rest.indexOf("\n", 1) + 1 || undefined);
+      const toSurface = last && !!around.before;
+      const toRule = prev === "text" && RULE.test(next) && !HEADING.test(next);
+      if (["heading", "item", "quote", "rule", "surface"].includes(prev) || (toSurface && prev !== "blank") || toRule) {
+        out.push({ text: line, look: ["gap", `after-${prev}`, toSurface ? "before-surface" : toRule ? "before-rule" : ""].join(" ").trim() });
+        prev = "gap";
+      } else {
+        plain(out, line);
+        prev = "blank";
+      }
+      base += 1;
+      rest = rest.slice(1);
+      continue;
+    }
     const h = HEADING.exec(line);
     if (!h && RULE.test(line)) {
       // As the page draws it — the dashes while the caret is on the line.
       const shown = open >= base && open <= base + line.replace(/\n$/, "").length;
       out.push({ text: line, look: shown ? "rule-open" : "rule" });
+      prev = "rule";
       base += line.length;
       rest = rest.slice(line.length);
       continue;
@@ -108,13 +128,16 @@ export function runs(text: string, open = -1): Run[] {
       const inner: Run[] = [mark(line.slice(0, hashes), shown)];
       inline(inner, line.slice(hashes), base + hashes);
       out.push({ text: line, look: `heading h${Math.min(7, h[1].length + 1)}`, inner });
+      prev = "heading";
     } else if (item || quote) {
       const marker = (item ?? quote)![0];
       const inner: Run[] = [{ text: marker, look: item ? (/\d/.test(item[2]) ? "number" : "bullet") : "quote-mark" }];
       inline(inner, line.slice(marker.length), base + marker.length);
       out.push({ text: line, look: item ? "item" : "quote", inner });
+      prev = item ? "item" : "quote";
     } else {
       inline(out, line, base);
+      prev = "text";
     }
     base += line.length;
     rest = rest.slice(line.length);

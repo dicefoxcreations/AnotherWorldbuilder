@@ -258,6 +258,7 @@ button.icon.more-button, .phone-only { display: none; }
 .popover section { padding: 12px 0; border-top: 1px solid var(--border); }
 .popover section:first-of-type { border-top: 0; }
 .pop-head { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.pop-head > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .close { width: 100%; margin-top: 10px; }
 .full { width: 100%; margin-bottom: 8px; }
 .segmented.full button { flex: 1; }
@@ -266,6 +267,9 @@ button.icon.more-button, .phone-only { display: none; }
 .keys { margin: 0; font-size: 12px; }
 .keys dt { color: var(--muted); margin-top: 8px; }
 .keys dd { margin: 2px 0 0; }
+.keys dd.with-action { display: flex; gap: 6px; align-items: center; }
+.keys dd.with-action code { min-width: 0; }
+.keys dd.with-action button.icon.compact { width: 22px; height: 22px; }
 .keys code, .wrap { word-break: break-all; font-size: 11px; color: var(--accent); }
 
 .members { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -598,6 +602,9 @@ main { overflow-x: auto; }
 .article-head .type-icon { flex: 0 0 auto; display: inline-flex; align-items: center; }
 /* Many subtypes wrap to further rows, each pill whole. */
 .article-meta { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 26px; }
+/* While writing: the properties open from here — no taller than the access beside it. */
+.article-meta .props-toggle { height: 22px; padding: 0 8px; font-size: 12px; }
+.article-meta .props-toggle.on { color: var(--accent); }
 .meta-line { flex: 1; height: 1px; background: var(--border); }
 
 /* Inline: a pick may stand in the middle of a sentence — `%%Species%%, %%Class%%`. */
@@ -752,6 +759,9 @@ button.infobox-image.choosable { padding: 0; cursor: pointer; font: inherit; }
 .block.picked > .block-mark .block-title { color: var(--accent); }
 /* A block without a title shows its mark only under the pointer. */
 .block-mark.untitled { opacity: 0; min-height: 0; height: 14px; transition: opacity .15s; }
+/* Only while writing, so it lies in the gap above: the text stays where it reads. */
+.block:has(> .block-mark.untitled) { position: relative; }
+.block > .block-mark.untitled { position: absolute; top: -16px; left: 0; right: 0; margin: 0; }
 .block-mark.untitled .block-title { font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .block:hover > .block-mark.untitled, .block.picked > .block-mark.untitled, .block-mark.untitled:focus-within { opacity: 1; }
 /* A block dragged by its title: where it would land. */
@@ -889,6 +899,16 @@ button.infobox-image.choosable { padding: 0; cursor: pointer; font: inherit; }
 .markdown blockquote { margin: 0 0 12px; padding-left: 14px; border-left: 3px solid var(--border); color: var(--muted); }
 .markdown hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
 /* A rule in the editor as the page draws it — its dashes while the caret is on the line. */
+/* An empty line after a heading, a list, a quote, a rule or a surface: the
+   room the page leaves there (`.markdown` margins), not a line of text. */
+.flow-gap { display: block; height: 0; overflow: hidden; }
+.flow-gap.flow-after-item { height: 8px; }
+.flow-gap.flow-after-quote { height: 12px; }
+.flow-gap.flow-after-text.flow-before-surface { height: calc(1.65em - 8px); }
+.flow-gap.flow-after-text.flow-before-rule { height: calc(1.65em - 18px); }
+.flow-gap.flow-after-item.flow-before-surface { height: 0; }
+.flow-gap.flow-after-quote.flow-before-surface { height: 4px; }
+.flow-gap:is(.flow-after-heading, .flow-after-surface).flow-before-surface { margin-bottom: -8px; }
 .flow-rule { display: block; color: transparent; height: 1px; overflow: hidden; background: var(--border); margin: 18px 0; font-size: 1px; }
 .flow-rule-open { display: block; color: var(--muted); }
 
@@ -1313,8 +1333,6 @@ svg.graph.fit { max-width: 100%; height: auto; }
 .property-group { display: flex; flex-direction: column; gap: 8px; }
 .property-group > .fold { align-self: flex-start; margin-left: calc((var(--depth) - 1) * 14px - 6px); color: var(--muted); }
 .property-group > .property-row > dt { padding-left: calc(var(--depth) * 14px); }
-.properties.folded { padding: 4px 8px; }
-.properties.folded > .fold { margin: 0; }
 .code-fold { align-self: flex-start; margin-bottom: 4px; }
 
 /* ---------- Properties in the text and in the editor ---------- */
@@ -1819,6 +1837,10 @@ input.invalid { border-color: var(--danger-line); }
 
 /* A map: a picture to drag and zoom, its pins on it — see `features/wiki/MapView.tsx`. */
 .map-view { position: relative; margin: 8px 0 14px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--sunken); }
+/* The full area: the working area between the bars, which stay. */
+.map-view.maximized { position: fixed; z-index: 13; top: var(--header-height, 53px); left: 0; right: 0; bottom: 0; height: auto !important; margin: 0; border-width: 0; border-radius: 0; }
+body:has(.frame.with-nav) .map-view.maximized { left: var(--nav-width); }
+body:has(.side-panel, .versions) .map-view.maximized { right: var(--versions-width); }
 .map-box { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
 .map-box:active { cursor: grabbing; }
 .map-view.adding .map-box { cursor: crosshair; }

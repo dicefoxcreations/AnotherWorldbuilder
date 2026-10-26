@@ -426,6 +426,10 @@ export function StatsStage() {
           </div>
           <h4>The goblin, edited visually</h4>
           <div id="visual" className="document">
+            {/* In the app this stands in the document's head. */}
+            <button className="ghost compact props-toggle" onClick={() => setPropsOpen(!propsOpen)}>
+              Properties
+            </button>
             <VisualEditor
               world={WORLD}
               article={page("goblin")}

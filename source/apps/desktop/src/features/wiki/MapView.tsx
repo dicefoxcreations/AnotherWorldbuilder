@@ -1,7 +1,9 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ArticleView, MapAccess, MapArea, MapNode, MapPin, Place, WorldInfo } from "../../api/client";
 import { COLOURS, firstMap, joinPins, MARKERS } from "../../shared/GraphText";
 import { findType } from "../../shared/types";
+import { MaximizeIcon, MinimizeIcon } from "../../shared/ui/Icons";
 import { ImagePicker } from "../../shared/ui/ImagePicker";
 import { MarkerIcon } from "../../shared/ui/MapIcons";
 import { PopupMenu, type MenuItem } from "../../shared/ui/PopupMenu";
@@ -120,6 +122,26 @@ export function MapView({
   // What is being dragged, where it is meanwhile.
   const [moving, setMoving] = useState<{ kind: "pin" | "corner"; i: number; corner?: number; x: number; y: number } | null>(null);
   const drag = useRef<Drag | null>(null);
+  // Over the whole working area — the bars around it stay.
+  const [full, setFull] = useState(false);
+
+  // The box grows or shrinks — the full area, a side bar opening, the
+  // window: what stood in its middle stays there.
+  const boxSize = useRef<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const watch = new ResizeObserver(() => {
+      const now = { w: el.clientWidth, h: el.clientHeight };
+      const was = boxSize.current ?? now;
+      const dx = (now.w - was.w) / 2;
+      const dy = (now.h - was.h) / 2;
+      boxSize.current = now;
+      if (dx || dy) setView((v) => v && { ...v, x: v.x + dx, y: v.y + dy });
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [full]);
 
   useEffect(() => {
     let gone = false;
@@ -171,15 +193,17 @@ export function MapView({
     return () => el.removeEventListener("wheel", wheel);
   });
 
-  // Escape gives up a region being drawn.
+  // Escape gives up a region being drawn — and then leaves the full area.
   useEffect(() => {
-    if (!draft.length && mode !== "area") return;
+    if (!draft.length && mode !== "area" && !full) return;
     const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") (setDraft([]), setMode(""));
+      if (e.key !== "Escape") return;
+      if (draft.length || mode === "area") (setDraft([]), setMode(""));
+      else setFull(false);
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [draft.length, mode]);
+  }, [draft.length, mode, full]);
 
   /** A point of the box as a place on the picture, in tenths of a percent. */
   const onPicture = (clientX: number, clientY: number) => {
@@ -306,8 +330,8 @@ export function MapView({
   );
   const chosenArea = writing && chosen?.kind === "area" ? areas[chosen.i] : undefined;
   const counter = view ? `scale(${1 / view.s})` : undefined;
-  return (
-    <div className={`map-view${writing ? " writing" : ""}${mode ? ` adding-${mode}` : ""}`} style={{ height: level.map.height }}>
+  const shown = (
+    <div className={`map-view${writing ? " writing" : ""}${mode ? ` adding-${mode}` : ""}${full ? " maximized" : ""}`} style={{ height: level.map.height }}>
       <div
         ref={box}
         className="map-box"
@@ -514,8 +538,21 @@ export function MapView({
         <button className="compact" title="All of it" onClick={() => setView(fit())}>
           ⤢
         </button>
+        <button data-through className={`compact${full ? " on" : ""}`} title={full ? "Back into the page (Esc)" : "Full area"} onClick={() => setFull(!full)}>
+          {full ? <MinimizeIcon /> : <MaximizeIcon />}
+        </button>
       </div>
     </div>
+  );
+  // A page's parts are measured containers, and a container holds even what
+  // is fixed: the full area lies outside the page, its place kept meanwhile.
+  return full ? (
+    <>
+      <div className="map-view" style={{ height: level.map.height }} />
+      {createPortal(shown, document.body)}
+    </>
+  ) : (
+    shown
   );
 }
 

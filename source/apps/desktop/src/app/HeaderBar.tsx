@@ -4,6 +4,7 @@ import { api, type ArticleView, type IdentityInfo, type Template, type WorldInfo
 import { label } from "../shared/ui/Visibility";
 import { DiceButton } from "../features/dice/DiceTray";
 import { KeysDialog } from "../shared/ui/KeysDialog";
+import { CheckIcon, CopyIcon, DownloadIcon, KeyIcon } from "../shared/ui/Icons";
 import { lookAtStart, useUpdates } from "../shared/Updates";
 
 /** What every player holds — a preview always has it, nobody need tick it. */
@@ -267,7 +268,7 @@ function ProfilePopover({ me, onClose, onChanged, onError }: { me: IdentityInfo;
       });
       if (!path) return;
       const where = await api.identityExport(path);
-      alert(`Player id saved:\n${where}\n\nSend it to your GM.`);
+      alert(`Saved: ${where}`);
     } catch (e) {
       onError(e);
     }
@@ -310,14 +311,26 @@ function ProfilePopover({ me, onClose, onChanged, onError }: { me: IdentityInfo;
         {me.avatar && <button onClick={() => api.avatarRemove().then(onChanged).catch(onError)}>remove</button>}
         {!renaming && <button onClick={() => setRenaming(true)}>rename</button>}
       </div>
-      <p className="small">The name is only a label. Your access hangs on the key and is untouched by renaming.</p>
 
       <section>
-        <h4>Your keys</h4>
+        <div className="line between">
+          <h4>Your keys</h4>
+          <span className="line">
+            <button type="button" className="icon compact" title="Export player id" aria-label="Export player id" onClick={saveCard}>
+              <DownloadIcon />
+            </button>
+            <button type="button" className="icon compact" title="Back up keys" aria-label="Back up keys" onClick={() => setKeys("backup")}>
+              <KeyIcon />
+            </button>
+          </span>
+        </div>
         <dl className="keys">
           <dt>Id</dt>
-          <dd>
+          <dd className="with-action">
             <code className="wrap">{me.id}</code>
+            <button type="button" className="icon compact" title={copied ? "Copied" : "Copy id"} aria-label="Copy id" onClick={copyId}>
+              {copied ? <CheckIcon /> : <CopyIcon />}
+            </button>
           </dd>
           <dt>Public key</dt>
           <dd>
@@ -328,13 +341,6 @@ function ProfilePopover({ me, onClose, onChanged, onError }: { me: IdentityInfo;
             <code className="wrap">{me.file}</code>
           </dd>
         </dl>
-        <p className="small">The private part stays on this device — unless you back it up. Lose it and access is gone; no server can help.</p>
-        <div className="line">
-          <button onClick={copyId}>{copied ? "Copied ✓" : "Copy id"}</button>
-          <button onClick={saveCard}>Export player id</button>
-          <button onClick={() => setKeys("backup")}>Back up keys …</button>
-        </div>
-        <p className="small">To join a world on the network, ask there — or give your GM this id first, then they let you in without a request.</p>
       </section>
 
       <button className="close" onClick={onClose}>

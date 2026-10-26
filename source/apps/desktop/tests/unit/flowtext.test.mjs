@@ -76,3 +76,17 @@ test("a link in italic or bold text stays a link", () => {
 test("an anchor in a table's last cell is drawn on its own too", () => {
   assert.equal(flat(runs("| Very rare | 5,000 pp ^rewards |")), "| Very rare | 5,000 pp|anchor: ^rewards| |");
 });
+
+test("an empty line after a heading, a list or a surface is room, not a line", () => {
+  const text = "## Title\n\nText.\n\n- one\n- two\n\nMore.\n\n";
+  assert.equal(
+    flat(runs(text)),
+    "heading h3(mark-hidden:## |Title\n)|gap after-heading:\n|Text.\n\n|item(bullet:- |one\n)|item(bullet:- |two\n)|gap after-item:\n|More.\n\n",
+  );
+  // Before a surface, after one: the room the page leaves around it.
+  assert.equal(flat(runs("Text.\n\n", -1, { before: true })), "Text.\n|gap after-text before-surface:\n");
+  assert.equal(flat(runs("\nText.", -1, { after: true })), "gap after-surface:\n|Text.");
+  // Between two paragraphs the empty line stays a line: the page leaves one there.
+  assert.equal(flat(runs("One.\n\nTwo.")), "One.\n\nTwo.");
+  assert.equal(length(runs(text)), text.length);
+});

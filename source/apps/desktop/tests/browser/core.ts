@@ -69,3 +69,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   if (data.error) throw new Error(data.error);
   return data.value as T;
 }
+
+/** What the updater plugin takes from Tauri's core — never used here. */
+export class Resource {}
+export class Channel {}

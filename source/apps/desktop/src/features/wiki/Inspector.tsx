@@ -240,6 +240,8 @@ export function Surface({
       data-label={label}
       onClickCapture={(e) => {
         if (chosen) return;
+        // What says so acts at once, and chooses as well.
+        if ((e.target as Element).closest("[data-through]")) return setChosen(true);
         e.preventDefault();
         e.stopPropagation();
         setChosen(true);

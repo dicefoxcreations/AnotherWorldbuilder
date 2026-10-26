@@ -150,6 +150,15 @@ function newSession(): string {
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+/** How tall the document's page is — what it holds, not the room it fills. */
+function contentHeight(): number {
+  const parts = [...document.querySelectorAll(".document-main > *")];
+  return parts.reduce((most, p) => Math.max(most, p.getBoundingClientRect().bottom + window.scrollY), 0);
+}
+
+/** A document as opened for writing. */
+type Opened = Awaited<ReturnType<typeof api.documentOpen>>;
+
 export function DocumentPage({
   world,
   article,
@@ -201,10 +210,65 @@ export function DocumentPage({
     />
   );
 
+  // Opened before the switch: the editor stands there whole at once, in the
+  // place of the page — nothing between them that could move the page.
+  const [opened, setOpened] = useState<{ id: string; doc: Opened } | null>(null);
+  const opening = useRef(false);
+  // Both sides draw in steps — the editor its surfaces after its text, the
+  // page its text after its head. Meanwhile the page keeps its height, or
+  // the browser would scroll a shorter page up; as soon as the other side
+  // is as tall, it lets go.
+  const held = useRef(0);
+  // Which holding is the latest: letting go of an earlier one leaves it be.
+  const holding = useRef(0);
+  const hold = () => {
+    holding.current++;
+    held.current = contentHeight();
+    // On the body: WebKit lets a page scroll by it, not by the root's own height.
+    document.body.style.minHeight = `${document.documentElement.scrollHeight}px`;
+  };
+  useLayoutEffect(() => {
+    const need = held.current;
+    if (!need) return;
+    held.current = 0;
+    // Looked at each frame, at most two seconds: its parts come and go
+    // meanwhile — let go once it stood whole two frames in a row.
+    const until = Date.now() + 2000;
+    let whole = 0;
+    let frame = 0;
+    const mine = holding.current;
+    const release = () => {
+      cancelAnimationFrame(frame);
+      if (holding.current === mine) document.body.style.minHeight = "";
+    };
+    const look = () => {
+      whole = contentHeight() >= need - 1 ? whole + 1 : 0;
+      if (whole >= 2 || Date.now() > until) release();
+      else frame = requestAnimationFrame(look);
+    };
+    frame = requestAnimationFrame(look);
+    return release;
+  }, [mode]);
   const switchMode = () => {
-    if (mode !== "edit") setSession(newSession());
-    setJustMade(false);
-    setPrefs({ mode: mode === "edit" ? "view" : "edit" });
+    if (mode === "edit") {
+      setOpened(null);
+      hold();
+      setPrefs({ mode: "view" });
+      return;
+    }
+    if (opening.current) return;
+    opening.current = true;
+    api
+      .documentOpen(world.id, article.id)
+      .then((doc) => {
+        setOpened({ id: article.id, doc });
+        setSession(newSession());
+        setJustMade(false);
+        hold();
+        setPrefs({ mode: "edit" });
+      })
+      .catch(onError)
+      .finally(() => (opening.current = false));
   };
   // Ctrl+E: editing and reading, as the ✎ button.
   const latestSwitch = useRef(switchMode);
@@ -329,6 +393,7 @@ export function DocumentPage({
             key={`${article.id} ${session}`}
             world={world}
             article={article}
+            opened={opened?.id === article.id ? opened.doc : null}
             templates={templates}
             all={all}
             layout={prefs.layout}
@@ -582,6 +647,7 @@ function DocumentEditor({
   deleteButton,
   onSaved,
   onError,
+  opened,
 }: {
   world: WorldInfo;
   article: ArticleView;
@@ -589,6 +655,8 @@ function DocumentEditor({
   all: ArticleView[];
   /** Deleting the document — here, while editing, not beside what one reads. */
   deleteButton?: React.ReactNode;
+  /** Opened already: shown at once, without asking again. */
+  opened?: Opened | null;
   layout: Layout;
   side: Side;
   /** A version to show beside the document — the editor then shows both. */
@@ -601,8 +669,8 @@ function DocumentEditor({
   onSaved: () => void;
   onError: (e: unknown) => void;
 }) {
-  const [text, setText] = useState<string | null>(null);
-  const [doc, setDoc] = useState<DocumentText | null>(null);
+  const [text, setText] = useState<string | null>(opened?.code ?? null);
+  const [doc, setDoc] = useState<DocumentText | null>(opened?.document ?? null);
   // The properties are data, not text: folded away until asked for — in
   // the code and on the visual side alike.
   const [propsOpen, setPropsOpen] = useState(false);
@@ -616,9 +684,9 @@ function DocumentEditor({
   textRef.current = text;
   // What is kept: the code as it stands, and the state of each layer it
   // stands on. Saving writes the difference against these.
-  const kept = useRef<{ code: string; base: Bases } | null>(null);
+  const kept = useRef<{ code: string; base: Bases } | null>(opened ? { code: opened.code, base: opened.base } : null);
   // The document as kept — what one's own changes on the visual side are measured against.
-  const keptDoc = useRef<DocumentText | null>(null);
+  const keptDoc = useRef<DocumentText | null>(opened?.document ?? null);
   const busy = useRef(false);
   // Typed on while a save was on its way.
   const again = useRef(false);
@@ -636,7 +704,7 @@ function DocumentEditor({
   const pending = useRef<Promise<unknown>>(Promise.resolve());
   // A change made on the visual side is already in `doc`; reading its code
   // back would only race the next keystroke.
-  const fromVisual = useRef(false);
+  const fromVisual = useRef(!!opened);
   // Where one's own caret stands, and who else is here.
   const caret = useRef<Caret | null>(null);
   const [others, setOthers] = useState<Seen[]>([]);
@@ -670,6 +738,7 @@ function DocumentEditor({
   };
 
   useEffect(() => {
+    if (opened) return;
     api
       .documentOpen(world.id, article.id)
       .then((r) => {
@@ -1027,7 +1096,15 @@ function DocumentEditor({
         <ArticleHead
           icon={typeOf(templates, article.articleType)?.icon || (article.articleType ? "📄" : world.icon)}
           title={doc.name || article.name}
-          type={typeOf(templates, article.articleType) ? <span className="chip">{typeOf(templates, article.articleType)!.name}</span> : null}
+          type={
+            <>
+              {typeOf(templates, article.articleType) && <span className="chip">{typeOf(templates, article.articleType)!.name}</span>}
+              {/* In the head, not above the text: editing moves nothing that reads. */}
+              <button className={`ghost compact props-toggle${propsOpen ? " on" : ""}`} onClick={() => setPropsOpen(!propsOpen)} aria-expanded={propsOpen}>
+                Properties <small className="small">{doc.properties.length}</small>
+              </button>
+            </>
+          }
           marks={
             <>
               <AccessLine
@@ -2459,12 +2536,12 @@ export function VisualEditor({
           onClose={() => setPicked(null)}
         />
       )}
-      <section className={propsOpen ? "properties" : "properties folded"}>
-        <button className="fold ghost compact" onClick={() => onPropsOpen(!propsOpen)} aria-expanded={propsOpen}>
-          {propsOpen ? "▾" : "▸"} Properties <small className="small">{doc.properties.length}</small>
-        </button>
-        {propsOpen && (
-          <>
+      {/* Opened from the head; folded, it takes no room. */}
+      {propsOpen && (
+        <section className="properties">
+          <button className="fold ghost compact" onClick={() => onPropsOpen(false)} aria-expanded>
+            ▾ Properties <small className="small">{doc.properties.length}</small>
+          </button>
           {doc.properties.length === 0 && <p className="small muted">None yet.</p>}
           <dl>
             {drawRuns(sections(doc.properties, (p) => fieldFor(p.name)?.inGroup ?? []), 0)}
@@ -2480,9 +2557,8 @@ export function VisualEditor({
           >
             ＋ Property
           </button>
-          </>
-        )}
-      </section>
+        </section>
+      )}
 
       {arranged("top")}
 

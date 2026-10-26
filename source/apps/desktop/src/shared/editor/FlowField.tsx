@@ -57,13 +57,19 @@ const runTokens = (all: Run[]): string[] =>
 function builtRuns(all: Piece[], caret: number): string {
   let at = 0;
   return joined(
-    all.flatMap((p) => {
+    all.flatMap((p, i) => {
       const from = at;
       at += p.text.length;
-      return p.kind !== "text" ? ["s"] : runTokens(runs(p.text, caret - from));
+      return p.kind !== "text" ? ["s"] : runTokens(runs(p.text, caret - from, besideSurfaces(all, i)));
     }),
   );
 }
+
+/** Whether a surface stands before and after a piece of text. */
+const besideSurfaces = (all: Piece[], i: number) => ({
+  after: i > 0 && all[i - 1].kind !== "text",
+  before: i + 1 < all.length && all[i + 1].kind !== "text",
+});
 
 /**
  * Where the page around an element stands — and a way back there. WebKit
@@ -383,7 +389,8 @@ export function FlowField({
       const span = document.createElement("span");
       span.dataset.look = r.look;
       span.className = `flow-${r.look.split(" ").join(" flow-")}`;
-      span.textContent = r.text;
+      // An empty line kept as room: a place for the caret all the same.
+      span.textContent = r.look.startsWith("gap") ? ROOM + r.text : r.text;
       into.appendChild(span);
     }
   };
@@ -400,7 +407,7 @@ export function FlowField({
       const from = at;
       at += p.text.length;
       if (p.kind === "text") {
-        draw(el, runs(p.text, caret - from));
+        draw(el, runs(p.text, caret - from, besideSurfaces(all, i)));
         return;
       }
       // Two surfaces in a row, or one at the end: a place for the caret
@@ -421,7 +428,7 @@ export function FlowField({
     for (const n of el.childNodes) {
       const prev = n.previousSibling as HTMLElement | null;
       if (n.nodeType === Node.TEXT_NODE && prev?.nodeType === Node.ELEMENT_NODE && (n as Text).data.startsWith("\n")) {
-        const block = prev.dataset.line === "item" || prev.dataset.line === "quote" || !!prev.dataset.line?.startsWith("heading");
+        const block = prev.dataset.line === "item" || prev.dataset.line === "quote" || !!prev.dataset.line?.startsWith("heading") || !!prev.dataset.look?.startsWith("gap");
         if (prev.dataset.surface !== undefined || block) (n as Text).data = ROOM + (n as Text).data;
       }
     }

@@ -582,7 +582,7 @@ const SCENARIOS = {
     );
 
     // The editor's properties: the group's folded under its name.
-    await page.js(`return document.querySelector("#visual .properties > .fold").click();`);
+    await page.js(`return document.querySelector("#visual .props-toggle").click();`);
     await page.settle(150);
     const rows = () => page.js(`return document.querySelectorAll("#visual .properties .property-row").length;`);
     check("a group stands folded under its name", await page.js(`return document.querySelector("#visual .property-group > .fold")?.innerText.replace(/\\s+/g, " ").trim();`), "▸ Abilities 6");

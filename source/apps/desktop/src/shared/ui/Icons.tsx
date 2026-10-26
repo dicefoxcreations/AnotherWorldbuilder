@@ -77,3 +77,27 @@ export const EyeIcon = () => (
 export const PenIcon = () => (
   <Icon d={["M21.17 6.81a1 1 0 0 0-3.98-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.63l4.36-1.33a2 2 0 0 0 .83-.5z", "m15 5 4 4"]} />
 );
+
+/** Copy to the clipboard. */
+export const CopyIcon = () => (
+  <Icon d={["M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z", "M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"]} />
+);
+
+/** Done. */
+export const CheckIcon = () => <Icon d={["M20 6 9 17l-5-5"]} />;
+
+/** Save as a file. */
+export const DownloadIcon = () => <Icon d={["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "m7 10 5 5 5-5", "M12 15V3"]} />;
+
+/** Keys: back them up. */
+export const KeyIcon = () => <Icon d={["M2 15.5a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0", "m21 2-9.6 9.6", "m15.5 7.5 3 3L22 7l-3-3"]} />;
+
+/** Over the whole working area. */
+export const MaximizeIcon = () => (
+  <Icon d={["M8 3H5a2 2 0 0 0-2 2v3", "M21 8V5a2 2 0 0 0-2-2h-3", "M3 16v3a2 2 0 0 0 2 2h3", "M16 21h3a2 2 0 0 0 2-2v-3"]} />
+);
+
+/** Back into the page. */
+export const MinimizeIcon = () => (
+  <Icon d={["M8 3v3a2 2 0 0 1-2 2H3", "M21 8h-3a2 2 0 0 1-2-2V3", "M3 16h3a2 2 0 0 1 2 2v3", "M16 21v-3a2 2 0 0 1 2-2h3"]} />
+);
