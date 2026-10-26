@@ -35,6 +35,10 @@ pub const MEDIA: &str = "media";
 /// Versions kept per document when the game master has not said otherwise.
 pub const VERSION_LIMIT: u32 = 50;
 
+fn copy_members(conn: &Connection) -> Result<Vec<String>> {
+    Ok(conn.prepare("SELECT id FROM members")?.query_map([], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?)
+}
+
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS world(key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS members(
@@ -414,6 +418,13 @@ impl WorldDb {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The id of the world a database file holds — read without opening
+    /// it for writing.
+    pub fn id_in(file: &Path) -> Result<Option<String>> {
+        let conn = Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        Ok(conn.query_row("SELECT value FROM world WHERE key = 'id'", [], |r| r.get(0)).optional()?)
+    }
+
     pub fn dir(&self) -> &Path {
         &self.dir
     }
@@ -640,6 +651,34 @@ impl WorldDb {
             std::fs::remove_file(file)?;
         }
         self.conn().execute("VACUUM INTO ?1", [file.to_string_lossy()])?;
+        Ok(())
+    }
+
+    /// A copy of the world as `reader` sees it, into `dir` (its database
+    /// alone): the documents and parts they see, the members named in
+    /// `members`, the pictures named in `images`; no versions, no requests,
+    /// nothing let in ahead of time, no gallery folders, nobody's takeovers.
+    pub fn view_copy(&self, dir: &Path, reader: &Reader, members: &[String], images: &BTreeSet<String>) -> Result<()> {
+        std::fs::create_dir_all(dir)?;
+        let file = dir.join(FILE);
+        self.copy_to(&file)?;
+        let seen = self.documents_for(reader)?;
+        let copy = WorldDb::open(dir)?;
+        {
+            let conn = copy.conn();
+            conn.execute_batch("DELETE FROM documents; DELETE FROM layers; DELETE FROM versions; DELETE FROM requests; DELETE FROM invited; DELETE FROM folders; DELETE FROM world WHERE key = 'takeovers';")?;
+            for id in copy_members(&conn)?.into_iter().filter(|id| !members.contains(id)) {
+                conn.execute("DELETE FROM members WHERE id = ?1", [&id])?;
+            }
+            let all: Vec<String> = conn.prepare("SELECT id FROM images")?.query_map([], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+            for id in all.into_iter().filter(|id| !images.contains(id)) {
+                conn.execute("DELETE FROM images WHERE id = ?1", [&id])?;
+            }
+        }
+        for doc in &seen {
+            copy.put_document(doc)?;
+        }
+        copy.conn().execute_batch("VACUUM; PRAGMA journal_mode = DELETE;")?;
         Ok(())
     }
 

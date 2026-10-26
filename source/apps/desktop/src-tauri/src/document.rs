@@ -73,7 +73,7 @@ fn layer_content(layer: &store::Layer, reader: &Reader) -> Result<LayerContent, 
 }
 
 /// What a layer holds that its writer changes: title, text, fields, images.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Plain {
     pub title: String,
     pub text: String,
@@ -265,22 +265,25 @@ fn handed_out() -> &'static std::sync::Mutex<(std::collections::HashMap<String, 
 /// How many states stay kept — enough for many editors on many documents.
 const KEPT_STATES: usize = 20_000;
 
-/// The hash a layer's state is known by — and kept under, for the save to come.
-fn hand_out(layer: &store::Layer) -> Base {
-    let plain = Plain::of(layer);
+/// The hash a layer's state is known by.
+fn state_hash(layer: &str, plain: &Plain) -> String {
     let mut h = blake3::Hasher::new();
-    h.update(layer.id.as_bytes());
+    h.update(layer.as_bytes());
     for piece in [&plain.title, &plain.text] {
         h.update(&(piece.len() as u64).to_le_bytes());
         h.update(piece.as_bytes());
     }
     h.update(serde_json::to_string(&plain.fields).unwrap_or_default().as_bytes());
     h.update(plain.images.join(",").as_bytes());
-    let hash = h.finalize().to_hex().to_string();
+    h.finalize().to_hex().to_string()
+}
+
+/// Keeps a state under its hash, for the save to come.
+fn keep_state(hash: &str, plain: Plain) {
     if let Ok(mut kept) = handed_out().lock() {
         let (states, order) = &mut *kept;
-        if states.insert(hash.clone(), plain).is_none() {
-            order.push_back(hash.clone());
+        if states.insert(hash.to_string(), plain).is_none() {
+            order.push_back(hash.to_string());
             while order.len() > KEPT_STATES {
                 if let Some(old) = order.pop_front() {
                     states.remove(&old);
@@ -288,7 +291,39 @@ fn hand_out(layer: &store::Layer) -> Base {
             }
         }
     }
+}
+
+/// The hash a layer's state is known by — and kept under, for the save to come.
+fn hand_out(layer: &store::Layer) -> Base {
+    let plain = Plain::of(layer);
+    let hash = state_hash(&layer.id, &plain);
+    keep_state(&hash, plain);
     Base { generation: 0, heads: vec![hash] }
+}
+
+/// Forgets every state handed out — as another device, or a restart, would.
+#[cfg(test)]
+pub(crate) fn forget_states() {
+    if let Ok(mut kept) = handed_out().lock() {
+        *kept = Default::default();
+    }
+}
+
+/// The states a save is measured against, by layer — to go along with a
+/// save written elsewhere (a mailbox), where they are not kept.
+pub(crate) fn states_of(base: &Bases) -> BTreeMap<String, Plain> {
+    base.keys().filter_map(|layer| Some((layer.clone(), seen_state(base, layer)?))).collect()
+}
+
+/// Takes in states that came along with a save — each only under the hash
+/// it really has.
+pub(crate) fn take_states(base: &Bases, states: BTreeMap<String, Plain>) {
+    for (layer, plain) in states {
+        let hash = state_hash(&layer, &plain);
+        if base.get(&layer).and_then(|b| b.heads.first()) == Some(&hash) {
+            keep_state(&hash, plain);
+        }
+    }
 }
 
 /// A layer's state as an editor saw it — `None` where it was not handed out

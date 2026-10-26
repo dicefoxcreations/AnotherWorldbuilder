@@ -241,6 +241,7 @@ fn sketch(world: &str, remote: &RemoteWorld) -> WorldInfo {
         supporters: Vec::new(),
         supporter: false,
         roles: Vec::new(),
+        mailboxes: String::new(),
     }
 }
 
@@ -279,7 +280,6 @@ fn note_remote(store: &Store, world: &str, remote: Option<RemoteWorld>) -> Answe
 /// content.
 pub(crate) async fn call(store: &Store, world: &str, command: &str, args: serde_json::Value) -> Answer<serde_json::Value> {
     use base64::Engine;
-    let remote = remote_of(store, world).ok_or_else(|| AppError("This world is not on a server.".into()))?;
     let (command, args) = match command {
         "image_upload" => {
             let path: String = serde_json::from_value(args.get("path").cloned().unwrap_or_default())?;
@@ -296,6 +296,10 @@ pub(crate) async fn call(store: &Store, world: &str, command: &str, args: serde_
         }
         _ => (command, args),
     };
+    if mailbox::is_mailbox(store, world) {
+        return mailbox::call(store, world, command, args);
+    }
+    let remote = remote_of(store, world).ok_or_else(|| AppError("This world is not on a server.".into()))?;
     let what = Ask::Call { command: command.to_string(), args: args.to_string() };
     let mut reply = ask(store, &remote.server, world, what.clone()).await;
     // Gone to another server: followed there.
@@ -364,6 +368,7 @@ pub async fn world_connect(app: tauri::AppHandle, world: String) -> Answer<World
 pub(crate) async fn connect(store: &Store, world: &str) -> Answer<WorldInfo> {
     let (store, world) = (store, world.to_string());
     if store.holds(&world) {
+        open_now().remove(&world);
         return world_now(store, &world);
     }
     let value = call(store, &world, "world_sync", serde_json::json!({ "since": 0 })).await?;
@@ -399,6 +404,9 @@ pub struct SyncOutcome {
     pub joined: Vec<WorldInfo>,
     /// Worlds others changed — on their server, or here from afar.
     pub updated: Vec<String>,
+    /// Worlds that went elsewhere — from a mailbox onto a server, say:
+    /// opened anew.
+    pub moved: Vec<String>,
 }
 
 /// How far each world here was when its GM last looked — for what members
@@ -413,8 +421,25 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
     let store = store(&app)?;
     let mut out = SyncOutcome::default();
     let me = store.load_identity()?.id().to_string();
+    // Worlds without a server: what their players sent, and what they get.
+    let settings = store.load_network()?;
+    for world in settings.posts.keys().filter(|w| store.holds(w)) {
+        match mailbox::round(&store, world) {
+            Ok(true) => out.updated.push(world.clone()),
+            Ok(false) => {}
+            Err(e) => crate::applog::line("mailbox", &format!("{world}: {}", e.0)),
+        }
+    }
+    for world in settings.mailboxes.keys() {
+        match mailbox::refresh(&store, world) {
+            Ok(true) if !mailbox::is_mailbox(&store, world) => out.moved.push(world.clone()),
+            Ok(true) => out.updated.push(world.clone()),
+            Ok(false) => {}
+            Err(e) => crate::applog::line("mailbox", &format!("{world}: {}", e.0)),
+        }
+    }
     // Worlds here that members change from afar.
-    let shared = store.load_network()?.shared;
+    let shared = settings.shared;
     for world in shared.iter().filter(|w| store.holds(w)) {
         let Ok(db) = store.db(world) else { continue };
         let since = SEEN_HERE.get_or_init(Default::default).lock().map_err(AppError::from)?.get(world).copied().unwrap_or(db.writes());
@@ -428,6 +453,8 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
         return Ok(out);
     }
     // Worlds on servers, open now.
+    // Only those still on a server: one moved here or into a mailbox is let go.
+    open_now().retain(|w, _| remote_of(&store, w).is_some());
     let open: Vec<(String, u64)> = open_now().iter().map(|(w, s)| (w.clone(), *s)).collect();
     for (world, since) in open {
         let Ok(value) = call(&store, &world, "world_sync", serde_json::json!({ "since": since })).await else {
@@ -991,9 +1018,17 @@ pub(crate) async fn move_world(store: &Store, world: &str, to_server: Option<Str
                     std::fs::copy(entry.path(), out.join(aw_store::db::MEDIA).join(entry.file_name()))?;
                 }
             }
+            // Without a server until now: what its players sent last, first.
+            let posted = store.load_network()?.posts.contains_key(world);
+            if posted {
+                mailbox::round(store, world)?;
+            }
             let brought = bring(store, &code, world, &name, &out, tell).await;
             let _ = std::fs::remove_dir_all(&out);
             brought?;
+            if posted {
+                mailbox::moved(store, world, &code)?;
+            }
             note_remote(store, world, Some(RemoteWorld { name, icon, server: code.clone(), asked: false }))?;
             keeper::here(store)?.moved(world, Some(&code))?;
             let mut settings = store.load_network()?;

@@ -72,6 +72,16 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
     } catch (e) { onError(e); }
     finally { setBusy(null); }
   };
+  const openMailbox = async () => {
+    try {
+      const folder = await open({ directory: true, multiple: false });
+      if (typeof folder !== "string") return;
+      setBusy("mailbox");
+      const world = await api.mailboxOpen(folder);
+      onChanged(); opened(world.id);
+    } catch (e) { onError(e); }
+    finally { setBusy(null); }
+  };
   const create = async () => {
     setBusy("create");
     try {
@@ -136,7 +146,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   const serverOf = (code: string) => servers.find(s => s.code === code);
   const worldButton = (w: WorldInfo) => {
     const place = placed(w);
-    const note = w.online ? "online" : "";
+    const note = w.online && w.server ? "online" : "";
     return <button className="world-card" onClick={() => opened(w.id)}>
     <span className="world-icon">{w.icon}</span><strong>{w.name}</strong>
     <span className="world-location" title={place.title}>
@@ -224,6 +234,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
         {dialog === "open" && <>
           <div className="world-grid">{worlds.map(w => <div key={w.id}>{worldButton(w)}</div>)}</div>
           <button disabled={!!busy} onClick={restoreBackup}>Restore a backup …</button>
+          <button disabled={!!busy} onClick={openMailbox}>Open a mailbox …</button>
         </>}
         {dialog === "new" && <button className="primary" disabled={!!busy || !fresh.trim() || (!toServer && (!localPath || !storage?.locations.some(l => l.path === localPath && l.available)))} onClick={create}>{busy === "create" ? "Creating …" : "Create world"}</button>}
       </section>

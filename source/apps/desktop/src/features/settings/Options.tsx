@@ -667,7 +667,8 @@ function PlayersArea({
     }
   };
 
-  const invite = () => run(api.memberInvite(world.id, id.trim()).then(() => setId("")));
+  const invite = () =>
+    run((world.mailboxes ? api.mailboxAdd(world.id, [id.trim()]) : api.memberInvite(world.id, id.trim())).then(() => setId("")));
 
   const admit = async () => {
     try {
@@ -844,7 +845,8 @@ function PlayersArea({
                 <strong>{m.name}</strong>{" "}
                 <span className={`role-badge ${m.role}`}>{m.role === "gm" ? "GM" : "Player"}</span>
                 {supports(m.id) && <> <span className="role-badge">Supporter</span></>}
-                <small className="small">{m.fingerprint}</small>
+                {m.id.startsWith("slot:") && <> <span className="role-badge">Not linked</span></>}
+                <small className="small">{[m.slot && `mailbox ${m.slot}`, !m.id.startsWith("slot:") && m.fingerprint].filter(Boolean).join(" · ")}</small>
                 {world.isGm && (m.role !== "gm" || m.id === me.id) && (
                   <Assigned
                     world={world}
@@ -872,7 +874,7 @@ function PlayersArea({
                       Trusted
                     </button>
                   )}
-                  {m.role !== "gm" && (
+                  {m.role !== "gm" && !world.mailboxes && (
                     <button
                       className={supports(m.id) ? "compact on" : "compact"}
                       title="Lets players in; may become GM if you are gone"
@@ -881,8 +883,13 @@ function PlayersArea({
                       Supporter
                     </button>
                   )}
-                  <button className="compact" onClick={() => setHandover(m)}>Make GM</button>
-                  {m.role !== "gm" && (
+                  {m.slot && !m.id.startsWith("slot:") && (
+                    <button className="compact" title="Whoever writes into the mailbox next takes it" onClick={() => run(api.mailboxReset(world.id, m.id))}>
+                      Unlink
+                    </button>
+                  )}
+                  {!world.mailboxes && <button className="compact" onClick={() => setHandover(m)}>Make GM</button>}
+                  {m.role !== "gm" && !world.mailboxes && (
                     <button className="compact" title="For a device set up anew without its keys" onClick={() => setNewId(m)}>
                       New ID
                     </button>
@@ -908,7 +915,7 @@ function PlayersArea({
       <div className="line">
         <input
           className="grow"
-          placeholder="id:…"
+          placeholder={world.mailboxes ? "Name" : "id:…"}
           value={id}
           onChange={(e) => setId(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && id.trim() && invite()}
@@ -916,8 +923,9 @@ function PlayersArea({
         <button onClick={invite} disabled={!id.trim()}>
           Add
         </button>
-        <button onClick={admit}>From file</button>
+        {!world.mailboxes && <button onClick={admit}>From file</button>}
       </div>
+      {world.mailboxes && <small className="small muted">Share each player's folder with them alone, and “alle” with everyone.</small>}
 
       {removeDialog}
 

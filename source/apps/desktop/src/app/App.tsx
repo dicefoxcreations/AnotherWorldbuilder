@@ -246,7 +246,10 @@ export default function App() {
     const round = async () => {
       try {
         const r = await api.networkSync();
-        if (openWorld && r.updated.includes(openWorld)) setFresh((n) => n + 1);
+        if (openWorld && r.moved.includes(openWorld)) {
+          await loadWorlds();
+          void enter(openWorld);
+        } else if (openWorld && r.updated.includes(openWorld)) setFresh((n) => n + 1);
         for (const w of r.updated) announce(w);
       } catch {
         // The next round tries again.
@@ -260,7 +263,7 @@ export default function App() {
       gone = true;
       clearTimeout(timer);
     };
-  }, [network?.enabled, keeping, openWorld, loadWorlds]);
+  }, [network?.enabled, keeping, openWorld, loadWorlds, enter]);
 
   const loadTemplates = useCallback(async () => {
     if (!openWorld) return;

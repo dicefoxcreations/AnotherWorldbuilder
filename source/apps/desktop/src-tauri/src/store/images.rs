@@ -187,6 +187,26 @@ impl Store {
         }))
     }
 
+    /// The images the one this runs for may see — as `sees_image`, for all
+    /// of them at once.
+    pub(crate) fn images_seen(&self, world_id: &str) -> Result<BTreeSet<String>> {
+        let reader = self.reader(world_id)?;
+        let me = self.actor()?;
+        let images = self.db(world_id)?.images()?;
+        if reader.is_gm() {
+            return Ok(images.into_iter().map(|i| i.id).collect());
+        }
+        let (uses, _) = self.image_uses(world_id, &reader)?;
+        let mut seen: BTreeSet<String> = images.iter().filter(|i| i.uploaded_by == me || uses.contains_key(&i.id)).map(|i| i.id.clone()).collect();
+        // A stand-in shows where the image it stands in for is used.
+        for image in images.iter().filter(|i| uses.contains_key(&i.id)) {
+            if let Some(hidden) = image.defaults.get("hidden").and_then(|h| h.as_str()).filter(|h| !h.is_empty()) {
+                seen.insert(hidden.to_string());
+            }
+        }
+        Ok(seen)
+    }
+
     /// Where the images are used, as `reader` sees the documents — and the
     /// documents' names.
     fn image_uses(&self, world_id: &str, reader: &Reader) -> Result<(BTreeMap<String, BTreeSet<String>>, BTreeMap<String, String>)> {

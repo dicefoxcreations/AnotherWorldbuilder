@@ -31,7 +31,7 @@ export function Reach({ on }: { on: boolean }) {
  * a cloud folder). Elsewhere: on a server, or with its GM's device; a copy
  * here does not change that.
  */
-export type WorldPlace = { kind: "device" | "folder" | "server" | "host"; name: string; title: string };
+export type WorldPlace = { kind: "device" | "folder" | "server" | "host" | "mailboxes"; name: string; title: string };
 
 export function placeOf(world: WorldInfo, storage: StorageView | null, servers: ServerEntry[]): WorldPlace {
   if (world.server) {
@@ -40,6 +40,9 @@ export function placeOf(world: WorldInfo, storage: StorageView | null, servers: 
     if (!server) return { kind: "host", name: "Hosted by its GM", title: serverAddress(world.server) };
     return { kind: "server", name: serverName(server), title: serverAddress(world.server) };
   }
+  // A player's: through their mailbox.
+  if (world.online) return { kind: "mailboxes", name: "Mailbox", title: "" };
+  if (world.mailboxes) return { kind: "mailboxes", name: `Mailboxes · ${nameOf(world.mailboxes)}`, title: world.mailboxes };
   const root = parentOf(world.folder);
   const folder = storage?.locations.find((l) => !l.primary && same(l.path, root));
   if (folder) return { kind: "folder", name: nameOf(folder.path), title: folder.path };
@@ -47,7 +50,7 @@ export function placeOf(world: WorldInfo, storage: StorageView | null, servers: 
 }
 
 export function PlaceIcon({ place }: { place: WorldPlace }) {
-  return place.kind === "server" ? <ServerIcon /> : place.kind === "folder" ? <CloudIcon /> : place.kind === "host" ? <NetworkIcon /> : <FolderIcon />;
+  return place.kind === "server" ? <ServerIcon /> : place.kind === "folder" || place.kind === "mailboxes" ? <CloudIcon /> : place.kind === "host" ? <NetworkIcon /> : <FolderIcon />;
 }
 
 /**
@@ -104,7 +107,7 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
           </button>
         )}
       </div>
-      {world.isGm && !world.online && (
+      {world.isGm && !world.online && !world.mailboxes && (
         <label className="switch-row">
           <input type="checkbox" checked={world.offered} disabled={busy} onChange={(e) => void offer(e.target.checked)} />
           <span>
@@ -196,6 +199,7 @@ function MoveDialog({
   const [copy, setCopy] = useState(false);
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
+  const [mailboxes, setMailboxes] = useState("");
   const [progress, setProgress] = useState<[string, number, number] | null>(null);
   useEffect(() => {
     const stop = listen<[string, number, number]>("copy-progress", (e) => setProgress(e.payload));
@@ -212,10 +216,25 @@ function MoveDialog({
   const hosts = servers
     .filter((s) => s.may_bring || s.code === world.server)
     .map((s) => ({ value: `server:${s.code}`, label: `Server · ${serverName(s)}${s.code === world.server ? " · now" : ""}`, title: serverAddress(s.code), off: !s.reached || copy || s.code === world.server }));
-  const choices = [...folders, ...hosts];
+  // Without a server: its players' mailboxes in a folder the cloud app keeps in step.
+  const posts = copy || world.mailboxes
+    ? []
+    : [{ value: mailboxes ? `mailboxes:${mailboxes}` : "mailboxes:", label: mailboxes ? `Mailboxes · ${nameOf(mailboxes)}` : "Mailboxes, no server …", title: mailboxes, off: false }];
+  const choices = [...folders, ...hosts, ...posts];
   const chosen = choices.find((c) => c.value === to && !c.off) ?? choices.find((c) => !c.off);
   const toServer = chosen?.value.startsWith("server:") ? chosen.value.slice("server:".length) : "";
   const toFolder = chosen?.value.startsWith("folder:") ? chosen.value.slice("folder:".length) : "";
+  const toMailboxes = chosen?.value.startsWith("mailboxes:") ? chosen.value.slice("mailboxes:".length) : "";
+  const pickMailboxes = async () => {
+    try {
+      const path = await open({ directory: true, multiple: false });
+      if (typeof path !== "string") return;
+      setMailboxes(path);
+      setTo(`mailboxes:${path}`);
+    } catch (e) {
+      onError(e);
+    }
+  };
   const pick = async () => {
     try {
       const path = await open({ directory: true, multiple: false });
@@ -231,7 +250,9 @@ function MoveDialog({
   const leavesShared = place.kind === "folder" && !copy && !!toFolder && !same(toFolder, root);
   const what = copy
     ? "A new world of its own, with types, documents and images — without players and versions."
-    : toServer
+    : chosen?.value.startsWith("mailboxes:")
+      ? "No server: you deliver, players get a mailbox each in this cloud folder."
+      : toServer
       ? "It lives on the server alone; players find it there."
       : world.online
         ? "It comes here; the server lets it go."
@@ -239,14 +260,18 @@ function MoveDialog({
           ? "It moves there with everything — and leaves the shared folder for everyone in it."
           : "It moves there with everything.";
   const go = async () => {
-    if (!chosen) return;
+    if (!chosen || (chosen.value.startsWith("mailboxes:") && !toMailboxes)) return;
     setBusy(true);
     setProgress(null);
     try {
       const destination = toServer
         ? ({ kind: "server", server: toServer } as const)
         : ({ kind: "local", path: !copy && same(toFolder, root) ? "" : toFolder } as const);
-      if (copy) await api.worldCopy(world.id, destination);
+      if (toMailboxes) {
+        // From its server, here first.
+        if (world.online) await api.worldMove(world.id, { kind: "local", path: "" });
+        await api.mailboxSetup(world.id, toMailboxes);
+      } else if (copy) await api.worldCopy(world.id, destination);
       else await api.worldMove(world.id, destination);
       onDone();
       onClose();
@@ -272,7 +297,11 @@ function MoveDialog({
         </div>
         <label className="world-name-field">
           To
-          <select value={chosen?.value ?? ""} disabled={busy} onChange={(e) => (e.target.value === "pick" ? void pick() : setTo(e.target.value))}>
+          <select
+            value={chosen?.value ?? ""}
+            disabled={busy}
+            onChange={(e) => (e.target.value === "pick" ? void pick() : e.target.value === "mailboxes:" ? void pickMailboxes() : setTo(e.target.value))}
+          >
             {choices.map((c) => (
               <option key={c.value} value={c.value} title={c.title} disabled={c.off}>
                 {c.label}

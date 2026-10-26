@@ -110,6 +110,20 @@ pub struct NetworkSettings {
     /// device holds nothing of them but where they are.
     #[serde(default)]
     pub remote: BTreeMap<String, RemoteWorld>,
+    /// The GM's worlds without a server, by id: the folder their mailboxes
+    /// lie in, which the cloud app keeps in step.
+    #[serde(default)]
+    pub posts: BTreeMap<String, String>,
+    /// The worlds this device takes part in through a mailbox, by id.
+    #[serde(default)]
+    pub mailboxes: BTreeMap<String, Mailbox>,
+}
+
+/// A player's mailbox in a world without a server.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct Mailbox {
+    /// The folder shared with this player: `ein/` and `aus/` in it.
+    pub folder: String,
 }
 
 /// A world on a server, as this device knows of it.
@@ -135,6 +149,8 @@ impl Default for NetworkSettings {
             stun: stun_servers(),
             servers: Vec::new(),
             remote: BTreeMap::new(),
+            posts: BTreeMap::new(),
+            mailboxes: BTreeMap::new(),
         }
     }
 }

@@ -22,6 +22,7 @@ mod transfer;
 mod network;
 mod keys;
 mod remote;
+mod mailbox;
 #[cfg(feature = "gui")]
 mod browser;
 mod keeper;
@@ -77,6 +78,9 @@ pub struct MemberInfo {
     pub attributes: Vec<String>,
     /// Their writing counts without waiting for the game master.
     pub trusted: bool,
+    /// Their mailbox, in a world without a server.
+    #[serde(default)]
+    pub slot: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -126,6 +130,9 @@ pub struct WorldInfo {
     /// The one this app acts as supports the world: lets players in, gives
     /// and takes their roles, may take the GM's place.
     pub supporter: bool,
+    /// Without a server: the folder of its mailboxes — the GM's.
+    #[serde(default)]
+    pub mailboxes: String,
     /// The roles there are to give — the GM's and a supporter's.
     pub roles: Vec<String>,
 }
@@ -338,6 +345,7 @@ fn world_info(store: &Store, meta: &WorldMeta) -> Result<WorldInfo, AppError> {
                 role: role_text(m.role).to_string(),
                 attributes: m.attributes.clone(),
                 trusted: m.trusted,
+                slot: m.slot.clone(),
             })
             .collect(),
         article_count: db.document_ids()?.len(),
@@ -349,7 +357,8 @@ fn world_info(store: &Store, meta: &WorldMeta) -> Result<WorldInfo, AppError> {
         moderated: store.moderated(&id)?,
         waiting,
         version_limit: store.version_limit(&id)?,
-        online: false,
+        // Taken part in through a mailbox: each change goes there too.
+        online: network.mailboxes.contains_key(&id),
         server: String::new(),
         server_id: String::new(),
         offered: network.shared.contains(&id),
@@ -359,6 +368,7 @@ fn world_info(store: &Store, meta: &WorldMeta) -> Result<WorldInfo, AppError> {
         supporters: meta.members.iter().filter(|m| m.role == Role::Supporter).map(|m| m.id.clone()).collect(),
         supporter,
         roles: if manages { roles_of(store, &id)? } else { Vec::new() },
+        mailboxes: if is_gm { network.posts.get(&id).cloned().unwrap_or_default() } else { String::new() },
         id,
     })
 }
@@ -1167,6 +1177,9 @@ async fn world_delete(app: tauri::AppHandle, world: String, confirmation: String
             return Err(AppError(format!("To delete, the name has to match exactly: {:?}", info.name)));
         }
         return network::leave(&store, &world, info.is_gm).await;
+    }
+    if mailbox::is_mailbox(&store, &world) {
+        return mailbox::leave(&store, &world);
     }
     world_delete_in(&store, world, confirmation)
 }
@@ -2065,6 +2078,10 @@ pub fn run() {
             network::world_connect,
             network::world_disconnect,
             network::world_call,
+            mailbox::mailbox_setup,
+            mailbox::mailbox_add,
+            mailbox::mailbox_reset,
+            mailbox::mailbox_open,
             browser::browser_settings,
             browser::browser_enable,
             browser::browser_pair,

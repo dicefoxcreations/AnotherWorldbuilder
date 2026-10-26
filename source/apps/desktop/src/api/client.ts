@@ -28,6 +28,8 @@ export type MemberInfo = {
   attributes: string[];
   /** Their writing counts without waiting for the GM. */
   trusted: boolean;
+  /** Their mailbox, in a world without a server. */
+  slot: string;
 };
 
 export type WorldInfo = {
@@ -76,6 +78,8 @@ export type WorldInfo = {
   supporter: boolean;
   /** The roles there are to give — the GM's and a supporter's. */
   roles: string[];
+  /** Without a server: the folder of its mailboxes — the GM's. */
+  mailboxes: string;
 };
 
 /** What this device does on the local network. */
@@ -191,8 +195,10 @@ export type JoinOutcome = {
 export type SyncOutcome = {
   /** Worlds that arrived because the GM said yes. */
   joined: WorldInfo[];
-  /** Worlds held here that changed — by a swap, or because someone swapped with us. */
+  /** Worlds others changed. */
   updated: string[];
+  /** Worlds that went elsewhere — opened anew. */
+  moved: string[];
 };
 
 /** Someone who asked to join. */
@@ -482,6 +488,7 @@ const toMember = (r: Raw): MemberInfo => ({
   role: r.role,
   attributes: r.attributes ?? [],
   trusted: !!r.trusted,
+  slot: (r.slot as string | undefined) ?? "",
 });
 
 const toWorld = (r: Raw): WorldInfo => ({
@@ -512,6 +519,7 @@ const toWorld = (r: Raw): WorldInfo => ({
   supporters: (r.supporters as string[] | undefined) ?? [],
   supporter: !!r.supporter,
   roles: (r.roles as string[] | undefined) ?? [],
+  mailboxes: (r.mailboxes as string | undefined) ?? "",
 });
 
 const toIdentity = (r: Raw): IdentityInfo => ({
@@ -1102,6 +1110,14 @@ export const api = {
   gmHandover: async (world: string, member: string | null) =>
     toWorld(await invoke<Raw>("gm_handover", { world, member })),
 
+  /** Makes a world one without a server: its players' mailboxes in `folder`. */
+  mailboxSetup: async (world: string, folder: string) => toWorld(await invoke<Raw>("mailbox_setup", { world, folder })),
+  /** Places for players, by name — a mailbox each, to share with them. */
+  mailboxAdd: async (world: string, names: string[]) => toWorld(await invoke<Raw>("mailbox_add", { world, names })),
+  /** Frees a player's place: whoever writes into the mailbox next takes it. */
+  mailboxReset: async (world: string, member: string) => toWorld(await invoke<Raw>("mailbox_reset", { world, member })),
+  /** Takes part in a world through one's mailbox folder. */
+  mailboxOpen: async (folder: string) => toWorld(await invoke<Raw>("mailbox_open", { folder })),
   networkSettings: () => invoke<NetworkView>("network_settings"),
   browserSettings: () => invoke<BrowserView>("browser_settings"),
   browserEnable: (enabled: boolean) => invoke<BrowserView>("browser_enable", { enabled }),
@@ -1126,7 +1142,7 @@ export const api = {
   /** Keeps held and asked-for worlds current — over the network and through shared folders. */
   networkSync: async (): Promise<SyncOutcome> => {
     const r = await invoke<Raw>("network_sync");
-    return { joined: r.joined.map(toWorld), updated: r.updated };
+    return { joined: r.joined.map(toWorld), updated: r.updated, moved: r.moved ?? [] };
   },
   joinRequests: (world: string) => invoke<JoinRequest[]>("join_requests", { world }),
   joinAnswer: async (world: string, id: string, accept: boolean) =>
