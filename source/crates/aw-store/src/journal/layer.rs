@@ -478,6 +478,28 @@ mod tests {
     }
 
     #[test]
+    fn two_typing_at_the_same_spot_letter_by_letter_both_stay() {
+        let start = "Absatz 13: am Markt.\n\nAbsatz 14: weiter.";
+        let mut doc = LayerDoc::genesis(&plain(start), "lay", 1).unwrap();
+        let base = doc.doc.get_heads();
+        // Each writes on what they last saw of their own — not the other's.
+        let (mut a_heads, mut b_heads) = (base.clone(), base);
+        let (mut a_text, mut b_text) = (start.to_string(), start.to_string());
+        let (a_typed, b_typed) = (" GM dreizehn.", " Leo dreizehn gleicher Absatz.");
+        for n in 0..a_typed.len().max(b_typed.len()) {
+            for (who, typed, text, heads) in [("id:a", a_typed, &mut a_text, &mut a_heads), ("id:b", b_typed, &mut b_text, &mut b_heads)] {
+                let Some(c) = typed.chars().nth(n) else { continue };
+                let at = text.find("\n\n").unwrap();
+                text.insert(at, c);
+                let changes = doc.edit(heads, &plain(text), who, "s", 1).unwrap();
+                *heads = changes.iter().map(|c| c.hash()).collect();
+            }
+        }
+        let now = doc.plain().unwrap().text;
+        assert!(now.contains("GM dreizehn.") && now.contains("Leo dreizehn gleicher Absatz."), "{now}");
+    }
+
+    #[test]
     fn a_revert_takes_back_only_its_own_changes() {
         let mut doc = LayerDoc::genesis(&plain("The inn is old."), "lay", 1).unwrap();
         let base = doc.doc.get_heads();
