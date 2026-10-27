@@ -180,10 +180,10 @@ fn delivered() -> std::sync::MutexGuard<'static, HashMap<(String, String), u64>>
 
 /// The world went onto a server: each mailbox says so, its players follow,
 /// and the mailboxes are served no more.
-pub(crate) fn moved(store: &Store, world: &str, server: &str) -> Answer<()> {
+pub(crate) fn moved(store: &Store, world: &str, slots: &[String], server: &str) -> Answer<()> {
     let folder = root(store, world)?;
-    for member in store.db(world)?.members()?.into_iter().filter(|m| !m.slot.is_empty()) {
-        write_json(&folder.join(&member.slot).join(IN).join(MOVED), &serde_json::json!({ "server": server }))?;
+    for slot in slots {
+        write_json(&folder.join(slot).join(IN).join(MOVED), &serde_json::json!({ "server": server }))?;
     }
     let mut settings = store.load_network()?;
     settings.posts.remove(world);
@@ -411,7 +411,7 @@ const READS: &[&str] = &[
 
 /// A command in a world taken part in through a mailbox: done on this
 /// device's copy at once, and — what changes it — sent to the GM.
-pub(crate) fn call(store: &Store, world: &str, command: &str, args: serde_json::Value) -> Answer<serde_json::Value> {
+pub(crate) fn call(store: &Store, world: &str, command: &str, args: serde_json::Value) -> Answer<String> {
     let states = match command {
         "document_save" => serde_json::from_value::<document::Bases>(args.get("base").cloned().unwrap_or_default()).map(|b| document::states_of(&b)).unwrap_or_default(),
         _ => BTreeMap::new(),

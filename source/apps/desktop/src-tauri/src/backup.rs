@@ -79,8 +79,24 @@ fn folder(store: &Store, world: &str, plan: &Plan) -> Answer<PathBuf> {
     } else {
         PathBuf::from(plan.folder.trim())
     };
-    let name: String = store.load_world_meta(world)?.name.chars().map(|c| if c.is_alphanumeric() || " -_.".contains(c) { c } else { '_' }).collect();
+    let name: String = world_name(store, world)?.chars().map(|c| if c.is_alphanumeric() || " -_.".contains(c) { c } else { '_' }).collect();
     Ok(root.join(format!("{} – {}", name.trim(), store::dir_name(world))))
+}
+
+/// A world's name — here, or as known of its server.
+fn world_name(store: &Store, world: &str) -> Answer<String> {
+    if store.holds(world) {
+        return Ok(store.load_world_meta(world)?.name);
+    }
+    network::remote_of(store, world).map(|r| r.name).ok_or_else(|| AppError("There is no such world.".into()))
+}
+
+/// Whether this device leads a world — here, or on its server.
+fn leads(store: &Store, world: &str) -> bool {
+    if store.holds(world) {
+        return store.is_gm(world);
+    }
+    network::remote_worlds(store).is_ok_and(|all| all.iter().any(|w| w.id == world && w.is_gm))
 }
 
 pub(crate) fn view(store: &Store, world: &str) -> Answer<View> {
@@ -106,7 +122,7 @@ pub(crate) fn list(folder: &Path) -> Vec<(About, PathBuf)> {
 }
 
 pub(crate) fn set_plan(store: &Store, world: &str, plan: Plan) -> Answer<View> {
-    if !store.is_gm(world) {
+    if !leads(store, world) {
         return Err(AppError("Only the GM backs up a world.".into()));
     }
     aw_store::durable::write(&store.private_world_dir(world).join(PLAN), &serde_json::to_vec_pretty(&plan)?)?;
@@ -125,6 +141,30 @@ pub(crate) fn backup(store: &Store, world: &str) -> Answer<View> {
     let into = folder(store, world, &plan)?;
     let name = store.load_world_meta(world)?.name;
     copy_world(&*store.db(world)?, &into, world, &name, &store.actor()?, None)?;
+    view(store, world)
+}
+
+/// Backs a world on a server up here, by hand: fetched from there whole —
+/// a picture the last backup holds already is linked, not fetched again.
+pub(crate) async fn backup_remote(store: &Store, world: &str, tell: &(dyn Fn(u64, u64) + Sync)) -> Answer<View> {
+    let remote = network::remote_of(store, world).ok_or_else(|| AppError("This world is not on a server.".into()))?;
+    if !leads(store, world) {
+        return Err(AppError("Only the GM backs up a world.".into()));
+    }
+    let into = folder(store, world, &plan(store, world)?)?;
+    std::fs::create_dir_all(&into)?;
+    let at = store::now();
+    let last = list(&into).into_iter().next().map(|(_, p)| p.join("world"));
+    let partial = into.join(format!(".partial-{at}"));
+    let _ = std::fs::remove_dir_all(&partial);
+    let fetched = network::fetch(store, &remote.server, world, &partial.join("world"), false, last.as_deref(), tell).await;
+    if let Err(e) = fetched {
+        let _ = std::fs::remove_dir_all(&partial);
+        return Err(e);
+    }
+    let about = About { format: FORMAT.into(), version: VERSION, world: world.into(), name: remote.name, at, gm: store.load_identity()?.id().to_string() };
+    aw_store::durable::write(&partial.join(FILE), &serde_json::to_vec_pretty(&about)?)?;
+    std::fs::rename(&partial, into.join(stamp(at)))?;
     view(store, world)
 }
 
@@ -225,8 +265,16 @@ pub fn backup_plan_set(app: tauri::AppHandle, world: String, plan: Plan) -> Answ
 
 #[cfg(feature = "gui")]
 #[cfg_attr(feature = "gui", tauri::command(async))]
-pub fn backup_now(app: tauri::AppHandle, world: String) -> Answer<View> {
-    backup(&store(&app)?, &world)
+pub async fn backup_now(app: tauri::AppHandle, world: String) -> Answer<View> {
+    use tauri::Emitter;
+    let store = store(&app)?;
+    if network::remote_of(&store, &world).is_some() {
+        let tell = |done: u64, total: u64| {
+            let _ = app.emit("copy-progress", ("transfer", done, total));
+        };
+        return backup_remote(&store, &world, &tell).await;
+    }
+    backup(&store, &world)
 }
 
 #[cfg(feature = "gui")]

@@ -103,8 +103,12 @@ pub enum Ask {
     Put { file: String, at: u64, data: String },
     /// The world brought here is whole: take it in, as `name`.
     Bring { name: String },
-    /// The files a world consists of, with their sizes — to take it away.
-    Files,
+    /// The files a world consists of, with their sizes — to back it up, or,
+    /// `taking`, to take it away: then closed to everyone else meanwhile.
+    Files {
+        #[serde(default)]
+        taking: bool,
+    },
     /// A piece of one of them, from `at` on.
     Get { file: String, at: u64 },
 }
@@ -1017,10 +1021,12 @@ const IDLE: Duration = Duration::from_secs(300);
 const STREAMS: usize = 8;
 /// Connections at once from one address.
 const PER_ADDRESS: usize = 8;
-/// Asks per second one connection may make in the long run, and in a burst:
-/// working together asks a few times a second; more is slowed down.
-const RATE: f64 = 20.0;
-const BURST: f64 = 60.0;
+/// Asks per second one connection may make in the long run, and in a burst.
+/// Working together asks a few times a second; a world brought or taken
+/// asks once for each of its thousands of pictures, four at a time — that
+/// may go as fast as the disk. Flooding is slowed down beyond it.
+const RATE: f64 = 200.0;
+const BURST: f64 = 400.0;
 
 /// A connection's place among those of its address — given back when it ends.
 struct Seat {
@@ -1185,6 +1191,20 @@ async fn exchange<T: Serialize, U: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server of 0.2.0 knew `Files` without anything in it: it still reads
+    /// the ask, and this one reads the ask of an app of 0.2.0.
+    #[test]
+    fn files_reads_with_and_without_taking() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        #[serde(tag = "kind", rename_all = "kebab-case")]
+        enum Before {
+            Files,
+        }
+        let now = serde_json::to_string(&Ask::Files { taking: true }).unwrap();
+        assert_eq!(serde_json::from_str::<Before>(&now).unwrap(), Before::Files);
+        assert_eq!(serde_json::from_str::<Ask>(r#"{"kind":"files"}"#).unwrap(), Ask::Files { taking: false });
+    }
 
     #[test]
     fn an_address_without_a_port_gets_the_usual_one() {

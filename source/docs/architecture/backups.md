@@ -17,6 +17,10 @@ GM's id. Like the world, a backup is readable without the app.
 already is a hard link to it there. A backup takes the room of what is new
 since the last one — on the same drive; elsewhere it is copied.
 
+**A world on a server** its GM backs up here the same way, by hand: fetched
+from the server whole (`Files { taking: false }` — it stays open), a picture
+the last backup holds already linked, not fetched again.
+
 **By itself — on a server.** A server backs up the worlds it holds, daily
 unless their GM says otherwise (*Off / Daily / Weekly*, *Keep*, 7 at first;
 the oldest go) — the world's GM or the server's admin sets it

@@ -39,7 +39,7 @@ aw-crypto.workspace = true
 aw-model.workspace = true
 aw-store.workspace = true
 aw-sync.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "signal", "macros"] }
 hex = "0.4.3"
 serde.workspace = true
 serde_json.workspace = true

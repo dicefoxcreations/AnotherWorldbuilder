@@ -13,13 +13,39 @@ fn arg<T: DeserializeOwned>(args: &serde_json::Value, key: &str) -> Answer<T> {
     Ok(serde_json::from_value(args.get(key).cloned().unwrap_or(serde_json::Value::Null))?)
 }
 
-fn json<T: Serialize>(value: T) -> Answer<serde_json::Value> {
-    Ok(serde_json::to_value(value)?)
+/// An answer as JSON text — written once, as it goes over the wire.
+fn json<T: Serialize>(value: T) -> Answer<String> {
+    Ok(serde_json::to_string(&value)?)
+}
+
+/// The whole world as a reader sees it, as JSON — kept while nothing was
+/// written: with thousands of documents it is what every member asks for
+/// first, and the same for everyone with the same roles.
+fn whole_view(store: &Store, world: &str) -> Answer<String> {
+    type Kept = std::collections::VecDeque<((std::path::PathBuf, String), u64, std::sync::Arc<String>)>;
+    static KEPT: std::sync::OnceLock<std::sync::Mutex<Kept>> = std::sync::OnceLock::new();
+    let reader = store.reader(world)?;
+    let key = (store.world_dir(world), reader.key());
+    let writes = store.db(world)?.writes();
+    let kept = KEPT.get_or_init(Default::default);
+    if let Some((_, _, text)) = kept.lock().map_err(AppError::from)?.iter().find(|(k, w, _)| *k == key && *w == writes) {
+        return Ok(text.as_str().to_string());
+    }
+    let text = std::sync::Arc::new(json(view_in(store, world.to_string(), None)?)?);
+    let mut all = kept.lock().map_err(AppError::from)?;
+    all.retain(|(k, _, _)| *k != key);
+    all.push_back((key, writes, text.clone()));
+    // A few readers' views, not every one there ever was.
+    while all.len() > 6 {
+        all.pop_front();
+    }
+    Ok(text.as_str().to_string())
 }
 
 /// Does `command` in `world` for the one this runs for, with `args` as the
-/// frontend sends them. A command not named here is not done from afar.
-pub(crate) fn call(store: &Store, world: &str, command: &str, args: &serde_json::Value) -> Answer<serde_json::Value> {
+/// frontend sends them; the answer as JSON text. A command not named here is
+/// not done from afar.
+pub(crate) fn call(store: &Store, world: &str, command: &str, args: &serde_json::Value) -> Answer<String> {
     let w = || world.to_string();
     match command {
         // The world as a whole.
@@ -62,7 +88,10 @@ pub(crate) fn call(store: &Store, world: &str, command: &str, args: &serde_json:
         "template_read" => json(template_read_in(store, w(), arg(args, "text")?, arg(args, "base")?)?),
         "template_write" => json(template_write_in(store, w(), arg(args, "template")?)?),
         // Documents.
-        "view" => json(view_in(store, w(), arg(args, "previewAs")?)?),
+        "view" => match arg::<Option<Vec<String>>>(args, "previewAs")? {
+            None => whole_view(store, world),
+            preview => json(view_in(store, w(), preview)?),
+        },
         "article_create" => json(article_create_in(store, w(), arg(args, "articleType")?, arg(args, "slug")?, arg(args, "name")?, arg(args, "visibility")?, arg(args, "layers")?)?),
         "article_propose" => json(propose_document(store, world, arg(args, "articleType")?, arg(args, "slug")?, arg(args, "name")?, arg(args, "layers")?)?),
         "article_delete" => json(article_delete_in(store, w(), arg(args, "article")?, arg(args, "confirmation")?)?),

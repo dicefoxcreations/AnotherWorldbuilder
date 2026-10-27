@@ -17,6 +17,7 @@ import { FindBar } from "../shared/ui/FindBar";
 import { WhoIsHere } from "./WhoIsHere";
 import { QuickOpen } from "../shared/ui/QuickOpen";
 import { KeysDialog } from "../shared/ui/KeysDialog";
+import { FoxLoader } from "../shared/ui/FoxLoader";
 import { WorldOverview, type Place } from "../features/worlds/WorldOverview";
 import { Options } from "../features/settings/Options";
 import { StorageSetup } from "../features/settings/Storage";
@@ -123,12 +124,36 @@ export default function App() {
   const [editing, setEditing] = useState<ArticleView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  /** How far opening a world is, 0 to 1. */
+  const [loading, setLoading] = useState(0);
+  /** A world this app is moving right now, and how far it is. */
+  const [movingWorld, setMovingWorld] = useState<{ world: string; name: string; share: number | null } | null>(null);
+  /** What `enter` read already — the next loading of it is spared. */
+  const preloaded = useRef<{ world: string; templates: boolean; view: boolean } | null>(null);
   const [blocked, setBlocked] = useState<{ world: string; error: string } | null>(null);
   // Loading from or sending to a server, as far as it is — told by the native side.
   const [transfer, setTransfer] = useState<Transfer | null>(null);
   useEffect(() => {
     const stop = listen<Transfer>("online-progress", (e) => setTransfer(e.payload.total > 0 ? e.payload : null));
     return () => void stop.then((un) => un());
+  }, []);
+  // A world this app moves: closed meanwhile, the fox shows how far.
+  useEffect(() => {
+    const moved = (event: Event) => {
+      const { world, name, on } = (event as CustomEvent<{ world: string; name: string; on: boolean }>).detail;
+      setMovingWorld(on ? { world, name, share: null } : null);
+      // Moved: opened anew where it lies now.
+      if (!on && currentWorld.current === world) void enterRef.current(world);
+    };
+    window.addEventListener("world-moving", moved);
+    const stop = listen<[string, number, number]>("copy-progress", (e) => {
+      const [, done, total] = e.payload;
+      setMovingWorld((m) => (m && total > 0 ? { ...m, share: done / total } : m));
+    });
+    return () => {
+      window.removeEventListener("world-moving", moved);
+      void stop.then((un) => un());
+    };
   }, []);
   const openingRequest = useRef(0);
   const currentWorld = useRef(openWorld);
@@ -138,26 +163,35 @@ export default function App() {
   const nav = useNavShown();
 
   const report = useCallback((e: unknown) => setError(String(e)), []);
+  const enterRef = useRef<(id: string) => Promise<void>>(async () => {});
   const enter = useCallback(async (id: string) => {
     const request = ++openingRequest.current;
     openingWorld.current = id;
     setOpening(id);
+    setLoading(0.06);
     try {
       const connected = await api.worldConnect(id);
       if (request !== openingRequest.current) {
         void api.worldDisconnect(id).catch(() => {});
         return;
       }
+      setLoading(0.3);
+      // Everything the first page needs, while the fox still holds his die:
+      // the world is there at once once it opens, not loaded again.
+      const [types, view] = await Promise.all([
+        api.templatesLoad(id).then((t) => (setLoading((n) => Math.max(n, 0.45)), t)),
+        api.view(id),
+      ]);
+      if (request !== openingRequest.current) return;
+      setLoading(1);
+      setTemplates(types);
+      setArticles(view);
+      setViewed(id);
+      preloaded.current = { world: id, templates: true, view: true };
       setWorlds((old) => [...old.filter((w) => w.id !== id), connected]);
       setBlocked(null);
       setError(null);
-      if (currentWorld.current !== id) {
-        setArticles([]);
-        setViewed(null);
-        setTemplates([]);
-      }
       setOpenWorld(id);
-      setFresh((n) => n + 1);
     } catch (error) {
       if (request === openingRequest.current) report(error);
     } finally {
@@ -167,6 +201,7 @@ export default function App() {
       }
     }
   }, [report]);
+  enterRef.current = enter;
 
   useEffect(() => {
     const unavailable = (detail: { world: string; error: string }) => {
@@ -267,6 +302,10 @@ export default function App() {
 
   const loadTemplates = useCallback(async () => {
     if (!openWorld) return;
+    if (preloaded.current?.world === openWorld && preloaded.current.templates) {
+      preloaded.current.templates = false;
+      return;
+    }
     try {
       setTemplates(await api.templatesLoad(openWorld));
     } catch (e) {
@@ -338,14 +377,16 @@ export default function App() {
   const asked = useRef(0);
   const previewNow = useRef(preview);
   previewNow.current = preview;
-  // The document shown: where a server holds the world, it is read whole
-  // first; the others follow in the background.
-  const focus = where.kind === "article" ? where.id : where.kind === "list" ? findType(templates, where.articleType)?.page : world?.home;
+  // Read once for the world, not again for every page one goes to.
   const loadView = useCallback(async () => {
     if (!openWorld) return;
+    if (preloaded.current?.world === openWorld && preloaded.current.view && !previewNow.current) {
+      preloaded.current.view = false;
+      return;
+    }
     const mine = ++asked.current;
     try {
-      const view = await api.view(openWorld, previewNow.current ?? undefined, focus);
+      const view = await api.view(openWorld, previewNow.current ?? undefined);
       if (mine === asked.current) {
         setArticles(view);
         setViewed(openWorld);
@@ -353,7 +394,7 @@ export default function App() {
     } catch (e) {
       if (mine === asked.current) report(e);
     }
-  }, [openWorld, preview, report, focus]);
+  }, [openWorld, preview, report]);
 
   useEffect(() => {
     void loadView();
@@ -507,7 +548,7 @@ export default function App() {
     <HeaderSlot.Provider value={tools}>
     {/* The dice belong to the open world — its 🎲 stands in the header bar. */}
     <WorldDice world={world}>
-    <div inert={!!blocked || !!opening} className={world && nav.shown ? (nav.beside ? "frame with-nav" : "frame nav-over") : "frame"}>
+    <div inert={!!blocked || !!opening || !!movingWorld} className={world && nav.shown ? (nav.beside ? "frame with-nav" : "frame nav-over") : "frame"}>
       {/* The header bar stands on every page — the avatar on the far right
           is reachable from everywhere, the back button only where there is
           a way back. */}
@@ -660,17 +701,29 @@ export default function App() {
       )}
     </div>
     {transfer && !opening && transfer.world === openWorld && <div className="transfer-note" role="status">{transferText(transfer)}</div>}
-    {(opening || blocked) && <div className="dialog-backdrop online-status" role="alertdialog" aria-modal="true" aria-labelledby="online-status-title">
+    {movingWorld && <div className="dialog-backdrop online-status" role="alertdialog" aria-modal="true" aria-label="Moving the world">
+      <FoxLoader progress={movingWorld.share} label={`Moving ${movingWorld.name} …`} detail={movingWorld.share === null ? "Closed meanwhile; nobody works in it." : undefined} />
+    </div>}
+    {!movingWorld && opening && <div className="dialog-backdrop online-status" role="alertdialog" aria-modal="true" aria-label="Opening the world">
+      <FoxLoader progress={loading} label={`Opening ${worlds.find((w) => w.id === opening)?.name ?? "the world"} …`} />
+      <button className="ghost compact fox-leave" onClick={leave}>Back to worlds</button>
+    </div>}
+    {!movingWorld && !opening && blocked && (blocked.error.includes("[moving]") ? (
+      <div className="dialog-backdrop online-status" role="alertdialog" aria-modal="true" aria-label="The world is moving">
+        <FoxLoader progress={null} label="The world is moving" detail="Closed until it has arrived." />
+        <button className="ghost compact fox-leave" onClick={leave}>Back to worlds</button>
+      </div>
+    ) : <div className="dialog-backdrop online-status" role="alertdialog" aria-modal="true" aria-labelledby="online-status-title">
       <section className="card narrow">
-        <h2 id="online-status-title">{opening ? "Opening world …" : "Server world unavailable"}</h2>
-        <p>{opening ? (transfer?.world === opening ? transferText(transfer) : "Confirming access and loading the current world.") : blocked?.error.replace(/^\[online\]\s*/, "")}</p>
-        {!opening && <p>Editing is paused. Changes without a server acknowledgement are not confirmed saved. Reconnect to continue using this server world.</p>}
+        <h2 id="online-status-title">Server world unavailable</h2>
+        <p>{blocked.error.replace(/^\[online\]\s*/, "")}</p>
+        <p>Editing is paused. Changes without a server acknowledgement are not confirmed saved. Reconnect to continue using this server world.</p>
         <div className="line">
-          {!opening && blocked && <button className="primary" onClick={() => void enter(blocked.world)}>Reconnect</button>}
+          <button className="primary" onClick={() => void enter(blocked.world)}>Reconnect</button>
           <button onClick={leave}>Back to worlds</button>
         </div>
       </section>
-    </div>}
+    </div>)}
     </WorldDice>
     </HeaderSlot.Provider>
   );

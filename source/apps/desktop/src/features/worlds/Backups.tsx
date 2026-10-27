@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { api, type BackupView, type ServerBackupPlan, type ServerBackups, type WorldInfo } from "../../api/client";
 
 /**
@@ -11,12 +12,19 @@ import { api, type BackupView, type ServerBackupPlan, type ServerBackups, type W
 export function BackupArea({ world, onError }: { world: WorldInfo; onError: (e: unknown) => void }) {
   const [view, setView] = useState<BackupView | null>(null);
   const [busy, setBusy] = useState(false);
+  // From a server, how far it has come.
+  const [share, setShare] = useState<number | null>(null);
   useEffect(() => {
     api.backupView(world.id).then(setView).catch(onError);
   }, [world.id]);
+  useEffect(() => {
+    const stop = listen<[string, number, number]>("copy-progress", (e) => e.payload[2] > 0 && setShare(e.payload[1] / e.payload[2]));
+    return () => void stop.then((un) => un());
+  }, []);
   if (!world.isGm || !view) return null;
   const run = async (step: Promise<BackupView>) => {
     setBusy(true);
+    setShare(null);
     try {
       setView(await step);
     } catch (e) {
@@ -41,7 +49,7 @@ export function BackupArea({ world, onError }: { world: WorldInfo; onError: (e: 
           {view.backups.length === 0 ? "none yet" : `${view.backups.length} · last ${new Date(last.at).toLocaleString()}`}
         </small>
         <button disabled={busy} onClick={() => void run(api.backupNow(world.id))}>
-          {busy ? "Backing up …" : "Back up now"}
+          {busy ? (share !== null && world.server ? `Backing up … ${Math.floor(share * 100)} %` : "Backing up …") : "Back up now"}
         </button>
       </div>
       <div className="line world-place">

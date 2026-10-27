@@ -21,6 +21,8 @@ pub(crate) fn running() -> Option<Arc<WorldNet>> {
 
 /// Said of a world whose server is not reached — the interface pauses it.
 pub(crate) const UNREACHED: &str = "[online] Its server is not reached.";
+/// Said of a world being moved — paused too, and back once it is there.
+pub(crate) const MOVING: &str = "[online] [moving] The world is moving to a new place. It opens again once it is there.";
 
 fn off() -> AppError {
     AppError(format!("{UNREACHED} The network is switched off."))
@@ -173,7 +175,7 @@ async fn ask(store: &Store, code: &str, world: &str, what: Ask) -> Answer<Reply>
     let reply = net.ask_server(&server, world, &me, what).await.map_err(|e| AppError(format!("{UNREACHED} {e}")))?;
     match reply {
         Reply::Failed { error } => Err(AppError(error)),
-        Reply::Busy => Err(AppError("The world is being moved right now. Try again in a moment.".into())),
+        Reply::Busy => Err(AppError(MOVING.into())),
         reply => Ok(reply),
     }
 }
@@ -279,6 +281,12 @@ fn note_remote(store: &Store, world: &str, remote: Option<RemoteWorld>) -> Answe
 /// there in this member's name. What names a file here travels as its
 /// content.
 pub(crate) async fn call(store: &Store, world: &str, command: &str, args: serde_json::Value) -> Answer<serde_json::Value> {
+    Ok(serde_json::from_str(&call_raw(store, world, command, args).await?)?)
+}
+
+/// The same, the answer as JSON text, as it came — for the interface,
+/// without reading it here.
+pub(crate) async fn call_raw(store: &Store, world: &str, command: &str, args: serde_json::Value) -> Answer<String> {
     use base64::Engine;
     let (command, args) = match command {
         "image_upload" => {
@@ -317,17 +325,20 @@ pub(crate) async fn call(store: &Store, world: &str, command: &str, args: serde_
         reply => reply?,
     };
     unreached(world, false);
-    let value: serde_json::Value = match reply {
-        Reply::Called { value: Some(value), .. } => serde_json::from_str(&value)?,
+    let value: String = match reply {
+        Reply::Called { value: Some(value), .. } => value,
         Reply::Called { error, .. } => return Err(AppError(error.unwrap_or_else(|| "The server did not say why.".into()))),
         Reply::NotMember => return Err(AppError("[online] You are not a member of this world (any more).".into())),
         _ => return Err(AppError("[online] The server does not offer this world.".into())),
     };
-    // A world as the interface gets it: on its server.
-    if let Ok(info) = serde_json::from_value::<WorldInfo>(value.clone()) {
-        if info.id == world {
-            told().insert(world.to_string(), clone_info(&info));
-            return Ok(serde_json::to_value(as_here(info, &remote.server))?);
+    // A world as the interface gets it: on its server. Only something
+    // small can be one.
+    if value.len() < 256 * 1024 && value.contains("\"is_gm\"") {
+        if let Ok(info) = serde_json::from_str::<WorldInfo>(&value) {
+            if info.id == world {
+                told().insert(world.to_string(), clone_info(&info));
+                return Ok(serde_json::to_string(&as_here(info, &remote.server))?);
+            }
         }
     }
     Ok(value)
@@ -346,14 +357,15 @@ fn unreached(world: &str, now: bool) {
 #[cfg(feature = "gui")]
 /// A command for a world on a server — see `call`.
 #[cfg_attr(feature = "gui", tauri::command(async))]
-pub async fn world_call(app: tauri::AppHandle, world: String, command: String, args: serde_json::Value) -> Answer<serde_json::Value> {
+pub async fn world_call(app: tauri::AppHandle, world: String, command: String, args: serde_json::Value) -> Answer<tauri::ipc::Response> {
     let store = store(&app)?;
     let label = command.clone();
-    let result = call(&store, &world, &command, args).await;
+    let result = call_raw(&store, &world, &command, args).await;
     if let Err(e) = &result {
         crate::applog::line("command", &format!("{world}: {label} failed: {}", e.0));
     }
-    result
+    // Handed on as it came: a whole world's view is read once, by the page.
+    Ok(tauri::ipc::Response::new(tauri::ipc::InvokeResponseBody::Json(result?)))
 }
 
 #[cfg(feature = "gui")]
@@ -455,11 +467,16 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
     // Worlds on servers, open now.
     // Only those still on a server: one moved here or into a mailbox is let go.
     open_now().retain(|w, _| remote_of(&store, w).is_some());
+    let moving: Vec<String> = open_now().keys().filter(|w| store::moving(w)).cloned().collect();
     let open: Vec<(String, u64)> = open_now().iter().map(|(w, s)| (w.clone(), *s)).collect();
-    for (world, since) in open {
-        let Ok(value) = call(&store, &world, "world_sync", serde_json::json!({ "since": since })).await else {
-            crate::tell_windows("online-unavailable", serde_json::json!({ "world": world, "error": UNREACHED }));
-            continue;
+    for (world, since) in open.into_iter().filter(|(w, _)| !moving.contains(w)) {
+        let value = match call(&store, &world, "world_sync", serde_json::json!({ "since": since })).await {
+            Ok(value) => value,
+            Err(e) => {
+                let error = if e.0.starts_with("[online]") { e.0 } else { UNREACHED.to_string() };
+                crate::tell_windows("online-unavailable", serde_json::json!({ "world": world, "error": error }));
+                continue;
+            }
         };
         if let Some(writes) = value.get("writes").and_then(|w| w.as_u64()) {
             open_now().insert(world.clone(), writes);
@@ -915,8 +932,6 @@ const PIECE: usize = 4 * 1024 * 1024;
 /// Brings a world lying in `dir` to a server — its GM's — piece by piece.
 /// `tell`: how far, in bytes.
 async fn bring(store: &Store, code: &str, world: &str, name: &str, dir: &Path, tell: &(dyn Fn(u64, u64) + Sync)) -> Answer<()> {
-    use base64::Engine;
-    use std::io::Read;
     let mut files = vec![(aw_store::db::FILE.to_string(), dir.join(aw_store::db::FILE))];
     for entry in std::fs::read_dir(dir.join(aw_store::db::MEDIA)).into_iter().flatten().flatten() {
         if entry.file_type().is_ok_and(|t| t.is_file()) {
@@ -924,69 +939,116 @@ async fn bring(store: &Store, code: &str, world: &str, name: &str, dir: &Path, t
         }
     }
     let total: u64 = files.iter().map(|(_, p)| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)).sum();
-    let mut done = 0;
-    for (file, path) in files {
-        let mut f = std::fs::File::open(&path)?;
-        let mut at = 0u64;
-        loop {
-            let mut buf = Vec::with_capacity(PIECE);
-            (&mut f).take(PIECE as u64).read_to_end(&mut buf)?;
-            // An empty file comes as one empty piece.
-            if buf.is_empty() && at > 0 {
-                break;
+    let done = std::sync::atomic::AtomicU64::new(0);
+    // Several files at once: each piece waits for its answer, and a world
+    // of thousands of pictures would wait thousands of times in a row.
+    let lane = |n: usize| {
+        let (files, done) = (&files, &done);
+        async move {
+            for (file, path) in files.iter().skip(n).step_by(LANES) {
+                put_file(store, code, world, file, path, &|n| tell(done.fetch_add(n, std::sync::atomic::Ordering::Relaxed) + n, total)).await?;
             }
-            let n = buf.len() as u64;
-            let data = base64::engine::general_purpose::STANDARD.encode(&buf);
-            match ask(store, code, world, Ask::Put { file: file.clone(), at, data }).await? {
-                Reply::Taken => {}
-                Reply::Requested => return Err(AppError("The server's admin has not let you bring worlds there yet.".into())),
-                _ => return Err(AppError("The server did not take the world.".into())),
-            }
-            at += n;
-            done += n;
-            tell(done, total);
-            if n < PIECE as u64 {
-                break;
-            }
+            Answer::Ok(())
         }
-    }
+    };
+    let (a, b, c, d) = tokio::join!(lane(0), lane(1), lane(2), lane(3));
+    a.and(b).and(c).and(d)?;
     match ask(store, code, world, Ask::Bring { name: name.to_string() }).await? {
         Reply::Joined => Ok(()),
         _ => Err(AppError("The server did not take the world.".into())),
     }
 }
 
-/// Fetches a world from its server into `dir` — its GM's.
-async fn fetch(store: &Store, code: &str, world: &str, dir: &Path, tell: &(dyn Fn(u64, u64) + Sync)) -> Answer<()> {
+/// Files on their way at once.
+const LANES: usize = 4;
+
+/// One file of a world brought to a server, a piece at a time.
+async fn put_file(store: &Store, code: &str, world: &str, file: &str, path: &Path, sent: &(dyn Fn(u64) + Sync)) -> Answer<()> {
     use base64::Engine;
-    use std::io::Write;
-    let Reply::Files { files } = ask(store, code, world, Ask::Files).await? else {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
+    let mut at = 0u64;
+    loop {
+        let mut buf = Vec::with_capacity(PIECE);
+        (&mut f).take(PIECE as u64).read_to_end(&mut buf)?;
+        // An empty file comes as one empty piece.
+        if buf.is_empty() && at > 0 {
+            break;
+        }
+        let n = buf.len() as u64;
+        let data = base64::engine::general_purpose::STANDARD.encode(&buf);
+        match ask(store, code, world, Ask::Put { file: file.to_string(), at, data }).await? {
+            Reply::Taken => {}
+            Reply::Requested => return Err(AppError("The server's admin has not let you bring worlds there yet.".into())),
+            _ => return Err(AppError("The server did not take the world.".into())),
+        }
+        at += n;
+        sent(n);
+        if n < PIECE as u64 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Fetches a world from its server into `dir` — its GM's.
+/// Fetches a world's files from its server into `dir` — its GM's. `taking`:
+/// to take it away, closed there meanwhile; otherwise a backup, and a
+/// picture `reuse` holds already is linked from there, not fetched again.
+pub(crate) async fn fetch(store: &Store, code: &str, world: &str, dir: &Path, taking: bool, reuse: Option<&Path>, tell: &(dyn Fn(u64, u64) + Sync)) -> Answer<()> {
+    let Reply::Files { files } = ask(store, code, world, Ask::Files { taking }).await? else {
         return Err(AppError("Only its GM takes a world from its server.".into()));
     };
+    let files: Vec<(String, u64)> = files
+        .into_iter()
+        .filter(|(file, _)| file == aw_store::db::FILE || file.strip_prefix("media/").is_some_and(|n| !n.is_empty() && !n.contains(['/', '\\']) && !n.starts_with('.')))
+        .collect();
     let total: u64 = files.iter().map(|(_, n)| n).sum();
-    let mut done = 0;
     std::fs::create_dir_all(dir.join(aw_store::db::MEDIA))?;
-    for (file, size) in files {
-        if file != aw_store::db::FILE && !file.strip_prefix("media/").is_some_and(|n| !n.is_empty() && !n.contains(['/', '\\']) && !n.starts_with('.')) {
-            continue;
-        }
-        let mut out = std::fs::File::create(dir.join(&file))?;
-        let mut at = 0;
-        while at < size {
-            let Reply::Piece { data } = ask(store, code, world, Ask::Get { file: file.clone(), at }).await? else {
-                return Err(AppError("The server did not give the world.".into()));
-            };
-            let bytes = base64::engine::general_purpose::STANDARD.decode(data.as_bytes()).map_err(|_| AppError("A piece did not arrive whole.".into()))?;
-            if bytes.is_empty() {
-                return Err(AppError("The world did not arrive whole.".into()));
+    let done = std::sync::atomic::AtomicU64::new(0);
+    let got = |n: u64| tell(done.fetch_add(n, std::sync::atomic::Ordering::Relaxed) + n, total);
+    let lane = |n: usize| {
+        let (files, got) = (&files, &got);
+        async move {
+            for (file, size) in files.iter().skip(n).step_by(LANES) {
+                get_file(store, code, world, file, *size, dir, reuse, got).await?;
             }
-            out.write_all(&bytes)?;
-            at += bytes.len() as u64;
-            done += bytes.len() as u64;
-            tell(done, total);
+            Answer::Ok(())
         }
-        out.sync_all()?;
+    };
+    let (a, b, c, d) = tokio::join!(lane(0), lane(1), lane(2), lane(3));
+    a.and(b).and(c).and(d)
+}
+
+/// One file of a world fetched from its server — or, a picture `reuse`
+/// holds already, linked from there: a picture never changes under its name.
+#[allow(clippy::too_many_arguments)]
+async fn get_file(store: &Store, code: &str, world: &str, file: &str, size: u64, dir: &Path, reuse: Option<&Path>, got: &(dyn Fn(u64) + Sync)) -> Answer<()> {
+    use base64::Engine;
+    use std::io::Write;
+    let before = reuse.map(|r| r.join(file)).filter(|b| file != aw_store::db::FILE && std::fs::metadata(b).is_ok_and(|m| m.len() == size));
+    if let Some(before) = before {
+        if std::fs::hard_link(&before, dir.join(file)).is_err() {
+            std::fs::copy(&before, dir.join(file))?;
+        }
+        got(size);
+        return Ok(());
     }
+    let mut out = std::fs::File::create(dir.join(file))?;
+    let mut at = 0;
+    while at < size {
+        let Reply::Piece { data } = ask(store, code, world, Ask::Get { file: file.to_string(), at }).await? else {
+            return Err(AppError("The server did not give the world.".into()));
+        };
+        let bytes = base64::engine::general_purpose::STANDARD.decode(data.as_bytes()).map_err(|_| AppError("A piece did not arrive whole.".into()))?;
+        if bytes.is_empty() {
+            return Err(AppError("The world did not arrive whole.".into()));
+        }
+        out.write_all(&bytes)?;
+        at += bytes.len() as u64;
+        got(bytes.len() as u64);
+    }
+    out.sync_all()?;
     Ok(())
 }
 
@@ -998,9 +1060,18 @@ pub(crate) async fn move_world(store: &Store, world: &str, to_server: Option<Str
         // Here, onto a server.
         (None, Some(code)) => {
             must_be_gm(store, world, "moves a world")?;
+            // Without a server until now: what its players sent last, first.
+            let posted = store.load_network()?.posts.contains_key(world);
+            if posted {
+                mailbox::round(store, world)?;
+            }
             let db = store.db(world)?;
             let name = db.get("name")?.unwrap_or_default();
             let icon = db.get("icon")?.unwrap_or_default();
+            let slots: Vec<String> = db.members()?.into_iter().map(|m| m.slot).filter(|s| !s.is_empty()).collect();
+            // From here on closed: nobody writes what would stay behind, and
+            // the members are told it moves.
+            let away = store::Away::start(world)?;
             // The database as it is now; the pictures as they lie.
             let out = store.private_world_dir(world).join("bringing");
             let _ = std::fs::remove_dir_all(&out);
@@ -1018,22 +1089,18 @@ pub(crate) async fn move_world(store: &Store, world: &str, to_server: Option<Str
                     std::fs::copy(entry.path(), out.join(aw_store::db::MEDIA).join(entry.file_name()))?;
                 }
             }
-            // Without a server until now: what its players sent last, first.
-            let posted = store.load_network()?.posts.contains_key(world);
-            if posted {
-                mailbox::round(store, world)?;
-            }
             let brought = bring(store, &code, world, &name, &out, tell).await;
             let _ = std::fs::remove_dir_all(&out);
             brought?;
             if posted {
-                mailbox::moved(store, world, &code)?;
+                mailbox::moved(store, world, &slots, &code)?;
             }
             note_remote(store, world, Some(RemoteWorld { name, icon, server: code.clone(), asked: false }))?;
             keeper::here(store)?.moved(world, Some(&code))?;
             let mut settings = store.load_network()?;
             settings.shared.retain(|w| w != world);
             store.save_network(&settings)?;
+            drop(away);
             store.delete_world(world)?;
             Ok(())
         }
@@ -1042,11 +1109,13 @@ pub(crate) async fn move_world(store: &Store, world: &str, to_server: Option<Str
             if to.as_deref() == Some(remote.server.as_str()) {
                 return Ok(());
             }
+            // Not asked for meanwhile; the server keeps everyone else out.
+            let _away = store::Away::start(world)?;
             let root = to_folder.unwrap_or_else(|| store.worlds_dir());
             let temp = root.join(format!(".{}.coming", store::dir_name(world)));
             let _ = std::fs::remove_dir_all(&temp);
             std::fs::create_dir_all(&temp)?;
-            let fetched = fetch(store, &remote.server, world, &temp, tell).await;
+            let fetched = fetch(store, &remote.server, world, &temp, true, None, tell).await;
             if let Err(e) = fetched {
                 let _ = std::fs::remove_dir_all(&temp);
                 return Err(e);

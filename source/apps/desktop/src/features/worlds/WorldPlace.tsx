@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, type NetworkView, type ServerEntry, type StorageView, type WorldInfo } from "../../api/client";
+import { setMoving } from "../../api/changes";
 import { CloudIcon, FolderIcon, NetworkIcon, ServerIcon } from "../../shared/ui/Icons";
 
 /** The folder a path lies in. */
@@ -263,6 +264,13 @@ function MoveDialog({
     if (!chosen || (chosen.value.startsWith("mailboxes:") && !toMailboxes)) return;
     setBusy(true);
     setProgress(null);
+    // Closed while it moves — here and for everyone in it; the app shows how far.
+    const moves = !copy;
+    const tell = (on: boolean) => window.dispatchEvent(new CustomEvent("world-moving", { detail: { world: world.id, name: world.name, on } }));
+    if (moves) {
+      setMoving(world.id, true);
+      tell(true);
+    }
     try {
       const destination = toServer
         ? ({ kind: "server", server: toServer } as const)
@@ -279,6 +287,10 @@ function MoveDialog({
       onError(e);
     } finally {
       setBusy(false);
+      if (moves) {
+        setMoving(world.id, false);
+        tell(false);
+      }
     }
   };
   return (

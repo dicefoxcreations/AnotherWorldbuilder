@@ -85,7 +85,22 @@ export function announce(world: string) {
  */
 const online = new Set<string>();
 const unavailable = new Set<string>();
-const HERE = new Set(["dice_log", "dice_log_add", "dice_log_clear", "dice_favorites_set", "window_open", "world_delete", "world_move", "network_join", "server_backups", "world_connect", "world_disconnect"]);
+const HERE = new Set([
+  "dice_log", "dice_log_add", "dice_log_clear", "dice_favorites_set", "window_open", "world_delete", "world_move", "world_copy",
+  "mailbox_setup", "network_join", "server_backups", "backup_view", "backup_now", "backup_plan_set", "backup_open", "world_connect", "world_disconnect",
+]);
+
+/**
+ * Worlds this app is moving right now: closed to every command but the
+ * move itself — nothing written meanwhile would come along.
+ */
+const moving = new Set<string>();
+const WHILE_MOVING = new Set(["world_move", "world_copy", "mailbox_setup", "world_connect", "world_disconnect"]);
+
+export function setMoving(world: string, on: boolean) {
+  if (on) moving.add(world);
+  else moving.delete(world);
+}
 
 export function setOnline(worlds: string[]) {
   online.clear();
@@ -103,8 +118,13 @@ export function resumeOnlineWorld(world: string) { unavailable.delete(world); }
 /** A command of the app; what changes a world is told to the other windows. */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const world = args?.world;
+  // Paused already: why is told once, not overwritten by each call after.
+  const paused = typeof world === "string" && unavailable.has(world);
   let result: T;
   try {
+    if (typeof world === "string" && moving.has(world) && !WHILE_MOVING.has(cmd)) {
+      throw "[moving] The world is moving.";
+    }
     if (typeof world === "string" && online.has(world) && unavailable.has(world) && !HERE.has(cmd)) {
       throw "[online] Editing is paused. Reconnect to this server world first.";
     }
@@ -113,11 +133,11 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
       : await call<T>(cmd, args);
   } catch (error) {
     // Into the app's log — a server world's command the app logs itself.
-    if (cmd !== "app_log" && !(typeof world === "string" && online.has(world))) {
+    if (cmd !== "app_log" && !String(error).startsWith("[moving]") && !(typeof world === "string" && online.has(world))) {
       call("app_log", { kind: "command", text: `${typeof world === "string" ? world + ": " : ""}${cmd} failed: ${String(error)}` }).catch(() => {});
     }
     // There is deliberately no retry against the local command handler.
-    if (typeof world === "string" && String(error).includes("[online]")) {
+    if (typeof world === "string" && !paused && String(error).includes("[online]")) {
       suspendOnlineWorld(world);
       window.dispatchEvent(new CustomEvent("online-unavailable", { detail: { world, error: String(error) } }));
     }

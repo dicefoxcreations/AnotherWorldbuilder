@@ -223,11 +223,12 @@ pub fn moving(world_id: &str) -> bool {
     moving_worlds().lock().is_ok_and(|all| all.contains(world_id))
 }
 
-/// A world noted as moving while this lives.
-struct Away(String);
+/// A world noted as moving while this lives: closed to every command, and
+/// to the members asking for it — they are told it moves.
+pub(crate) struct Away(String);
 
 impl Away {
-    fn start(world_id: &str) -> Result<Self> {
+    pub(crate) fn start(world_id: &str) -> Result<Self> {
         moving_worlds().lock().map_err(|_| err("a lock was poisoned"))?.insert(world_id.to_string());
         Ok(Away(world_id.to_string()))
     }

@@ -50,7 +50,7 @@ challenge with its identity; the holder checks the id belongs to those keys.
 | `Backups { plan }` | how a server backs a world up |
 | `MayIBring` | asks a server's admin to let one bring worlds |
 | `Put` / `Bring` | a world brought to a server, 4 MiB at a time, then taken in |
-| `Files` / `Get` | a world taken away by its GM, 4 MiB at a time |
+| `Files { taking }` / `Get` | a world fetched by its GM, 4 MiB at a time — taken away, or backed up |
 
 A world moved from a GM's app onto a server leaves a note there: whoever asks
 for it gets `Moved { server }`, and their app follows.
@@ -92,6 +92,11 @@ database (as it is at that moment) and the pictures go in pieces; the server
 takes the world in only if the one bringing it is its GM and the admin lets
 them bring worlds. Afterwards the world lies there alone: the GM's copy is
 gone, the server it left deletes its own.
+
+While it moves the world is **closed**: on the GM's device (`store::Away`)
+and, taken from a server (`Files { taking: true }`), there too — every other
+ask gets `Busy` until it is gone, or ten minutes after the last piece. The
+members see that it is moving; the GM sees how far. Four files travel at once.
 
 ## A server's admin
 

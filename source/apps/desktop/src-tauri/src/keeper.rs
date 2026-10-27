@@ -67,7 +67,14 @@ pub(crate) struct Keeper {
     data: PathBuf,
     me: IdentityPublic,
     book: Mutex<Book>,
+    /// Worlds their GM is taking away, since when last asked for a piece:
+    /// closed to everyone else meanwhile.
+    leaving: Mutex<BTreeMap<String, std::time::Instant>>,
 }
+
+/// A world being taken away, not asked for a piece this long: given up —
+/// open again.
+const LEAVING_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 fn secs() -> u64 {
     store::now() / 1000
@@ -82,7 +89,7 @@ impl Keeper {
         let me = store.load_identity()?.public();
         // What was on its way when it stopped is asked for again.
         let _ = std::fs::remove_dir_all(data.join("outgoing"));
-        Ok(Keeper { store, in_app: false, admin, data: data.to_path_buf(), me, book: Mutex::new(book) })
+        Ok(Keeper { store, in_app: false, admin, data: data.to_path_buf(), me, book: Mutex::new(book), leaving: Mutex::default() })
     }
 
     fn book(&self) -> Answer<std::sync::MutexGuard<'_, Book>> {
@@ -171,6 +178,11 @@ impl Keeper {
         if !world.is_empty() && store::moving(world) {
             return Ok(Reply::Busy);
         }
+        // Being taken away by its GM: nothing else meanwhile, that would
+        // stay behind.
+        if !world.is_empty() && self.leaving(world) && !matches!(ask, Ask::Files { .. } | Ask::Get { .. }) {
+            return Ok(Reply::Busy);
+        }
         match ask {
             Ask::Worlds => Ok(Reply::Worlds {
                 worlds: self.offers(Some(&id))?,
@@ -182,6 +194,7 @@ impl Keeper {
             // Its GM takes their own world away — to another server, say.
             Ask::Manage { order: Some(Order::Delete { world }) } if !self.in_app && self.store.holds(&world) && self.gm_of(&world)?.is_some_and(|g| g.id == id) => {
                 self.store.delete_world(&world)?;
+                self.leave(&world, false);
                 println!("{world}: taken away by {}", who.name);
                 Ok(Reply::Managed { state: ServerState::default() })
             }
@@ -243,14 +256,25 @@ impl Keeper {
                 let done = store::acting_for(&id, || remote::call(&self.store, world, &command, &args));
                 note_writes(world, before, db.writes(), &id);
                 Ok(match done {
-                    Ok(value) => Reply::Called { value: Some(serde_json::to_string(&value)?), error: None },
+                    Ok(value) => Reply::Called { value: Some(value), error: None },
                     Err(e) => Reply::Called { value: None, error: Some(e.0) },
                 })
             }
             // Its GM takes it along — to their own device, or another server.
-            Ask::Files | Ask::Get { .. } if !self.gm_of(world)?.is_some_and(|g| g.id == id) => Ok(Reply::NotOffered),
-            Ask::Files => self.files(world),
-            Ask::Get { file, at } => self.get(world, &file, at),
+            Ask::Files { .. } | Ask::Get { .. } if !self.gm_of(world)?.is_some_and(|g| g.id == id) => Ok(Reply::NotOffered),
+            Ask::Files { taking } => {
+                if taking {
+                    self.leave(world, true);
+                }
+                self.files(world)
+            }
+            Ask::Get { file, at } => {
+                // Still on its way: closed a while longer.
+                if self.leaving(world) {
+                    self.leave(world, true);
+                }
+                self.get(world, &file, at)
+            }
         }
     }
 
@@ -272,6 +296,24 @@ impl Keeper {
     /// The worlds gone from here to a server.
     pub(crate) fn gone(&self) -> Vec<String> {
         self.book().map(|b| b.moved.keys().filter(|w| !self.store.holds(w)).cloned().collect()).unwrap_or_default()
+    }
+
+    /// Whether a world is being taken away right now.
+    fn leaving(&self, world: &str) -> bool {
+        let Ok(mut all) = self.leaving.lock() else { return false };
+        all.retain(|_, since| since.elapsed() < LEAVING_FOR);
+        all.contains_key(world)
+    }
+
+    /// Notes a world as being taken away — or no more.
+    fn leave(&self, world: &str, on: bool) {
+        if let Ok(mut all) = self.leaving.lock() {
+            if on {
+                all.insert(world.to_string(), std::time::Instant::now());
+            } else {
+                all.remove(world);
+            }
+        }
     }
 
     /// Whose writes are not noted — the app's own user; a server writes
@@ -305,7 +347,7 @@ impl Keeper {
         } else if at != had {
             return Err(AppError(format!("Expected the piece at {had}.")));
         }
-        if at + bytes.len() as u64 > MAX_WORLD || size(&self.incoming(world, id)) > MAX_WORLD {
+        if at + bytes.len() as u64 > MAX_WORLD {
             return Err(AppError("This world is too large for the server.".into()));
         }
         use std::io::Write;
@@ -317,6 +359,11 @@ impl Keeper {
     /// The world brought here is whole: one whose GM brought it, not here yet.
     fn bring(&self, world: &str, who: &IdentityPublic, name: &str) -> Answer<Reply> {
         let from = self.incoming(world, who.id.as_str());
+        // Its size once, when it is whole — not at every piece.
+        if size(&from) > MAX_WORLD {
+            let _ = std::fs::remove_dir_all(&from);
+            return Err(AppError("This world is too large for the server.".into()));
+        }
         let db = WorldDb::open(&from).map_err(|_| AppError("The world did not arrive whole.".into()))?;
         if db.get("id")?.as_deref() != Some(world) {
             return Err(AppError("This is another world.".into()));
@@ -461,6 +508,7 @@ impl Keeper {
                 if self.store.holds(&world) {
                     self.store.delete_world(&world)?;
                 }
+                self.leave(&world, false);
             }
             Order::Block { id } | Order::Kick { id } if id == self.admin || book.admins.contains(&id) => {
                 return Err(AppError("An admin cannot be turned away.".into()));
@@ -741,7 +789,7 @@ mod tests {
         assert!(call(&keeper, &world, &olaf, "world_icon_set", json!({ "icon": "🐉" })).is_err(), "only the GM");
         // Someone else gets nothing.
         assert_eq!(call(&keeper, &world, &eve, "view", json!({})).unwrap_err(), "NotMember");
-        assert!(!matches!(keeper.answer(&world, &eve.card(), Ask::Files), Reply::Files { .. }));
+        assert!(!matches!(keeper.answer(&world, &eve.card(), Ask::Files { taking: false }), Reply::Files { .. }));
 
         // What the player writes, the GM is told of; their own writing not.
         let synced = call(&keeper, &world, &marla, "world_sync", json!({ "since": 0 })).unwrap();
@@ -757,12 +805,21 @@ mod tests {
     #[test]
     fn its_gm_takes_a_world_back_whole() {
         let at = place("fetch");
-        let marla = someone(&at, "Marla");
+        let (marla, olaf) = (someone(&at, "Marla"), someone(&at, "Olaf"));
         let keeper = server(&at, &marla);
         let world = new_world_of(&marla);
         assert_eq!(bring_world(&keeper, &marla, &world), Reply::Joined);
         assert_eq!(bring_world(&keeper, &marla, &world), Reply::Failed { error: "This world is here already.".into() });
-        let Reply::Files { files } = keeper.answer(&world, &marla.card(), Ask::Files) else { panic!("its GM gets the files") };
+        keeper.answer(&world, &olaf.card(), Ask::Join);
+        call(&keeper, &world, &marla, "join_answer", json!({ "id": olaf.me.id().to_string(), "accept": true })).unwrap();
+        assert!(call(&keeper, &world, &olaf, "view", json!({})).is_ok());
+        // Backed up, it stays open.
+        assert!(matches!(keeper.answer(&world, &marla.card(), Ask::Files { taking: false }), Reply::Files { .. }));
+        assert!(call(&keeper, &world, &olaf, "view", json!({})).is_ok());
+        let Reply::Files { files } = keeper.answer(&world, &marla.card(), Ask::Files { taking: true }) else { panic!("its GM gets the files") };
+        // While its GM takes it away, nobody works in it — the GM neither.
+        assert_eq!(keeper.answer(&world, &olaf.card(), Ask::Call { command: "view".into(), args: "{}".into() }), Reply::Busy);
+        assert_eq!(keeper.answer(&world, &marla.card(), Ask::Call { command: "view".into(), args: "{}".into() }), Reply::Busy);
         let (name, size) = &files[0];
         assert_eq!(name, aw_store::db::FILE);
         let Reply::Piece { data } = keeper.answer(&world, &marla.card(), Ask::Get { file: name.clone(), at: 0 }) else { panic!("a piece") };
