@@ -1,0 +1,21 @@
+{
+  "approvedVersion": 12,
+  "approvedOn": "2026-10-27",
+  "source": "artifacts/branding/dicefox-layered-v12/full.svg",
+  "sourceSha256": "5ebcfbcaa845003a99264873b781b26b2a7174f0d10727d40c6db998d638a333",
+  "canvas": [
+    1254,
+    1254
+  ],
+  "imagesSha256": {
+    "00-fox-base.webp": "51480d19fe088f155775be06c0646920c8f5bd47655241c98452bef0fff5fb4d",
+    "paw-cutout.webp": "3368865eea26e7d7f969b501a6fc5aca218cba4821a33a815df40cbb4a1e7095",
+    "20-earth.webp": "4736170c0d4b0bba799b07238b49d6f6d875c5f43b65a0708658d75da2dceef9",
+    "30-grass.webp": "92cdf7808a3500081e8b99898110e3e78291c334c32c6f6bb7c0b92d9ab85577",
+    "40-mountains.webp": "983b5650c22234b5d711d83fdde38874a5f9b1121903c34e48e2ad6a44d42e4d",
+    "50-river.webp": "77fa35d95c918ff84db62d3d42efbc4fe6053aff4d93729949153eb73dff29dd",
+    "60-trees.webp": "06bbad266fb1570c7151e3948b07336fc3a5e585526d5f1a4bbec6f5d3ca404c",
+    "70-clouds.webp": "2e464795b0de2301f92f86cb055cd60b91709a1578fe0280804de5eb8cf6a95a",
+    "80-castle.webp": "d8a9c18cb83c0bf7c486fd3591caf80f53656a489328aef8a62f3b680d216b1e"
+  }
+}

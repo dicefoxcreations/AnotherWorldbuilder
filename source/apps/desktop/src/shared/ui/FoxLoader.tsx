@@ -1,22 +1,19 @@
-import fox from "../../assets/fox-loader.webp";
+import { DiceFox } from "./DiceFox";
 
 /**
- * The DiceFox with his d20 — the die fills as something loads. `progress`
- * from 0 to 1; `null` while how far is not known: the die glows on and off.
+ * The DiceFox builds the landscape inside his world die. `progress`
+ * from 0 to 1; null repeats the build without claiming a percentage.
  */
 export function FoxLoader({ progress, label, detail }: { progress: number | null; label: string; detail?: string }) {
-  const share = progress === null ? null : Math.max(0.04, Math.min(1, progress));
+  const share = progress === null ? null : Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
   return (
     <div className="fox-loader" role="status" aria-live="polite">
       <div className="fox-frame">
-        <img src={fox} alt="" draggable={false} />
-        {/* The die's outline in the picture: the fill rises inside it. */}
-        <div className="fox-die">
-          <div className={share === null ? "fox-fill waiting" : "fox-fill"} style={share === null ? undefined : { height: `${share * 100}%` }} />
-        </div>
+        <DiceFox progress={share} />
       </div>
       <strong>{label}</strong>
       <small className="small muted">{detail ?? (share === null ? "" : `${Math.floor(share * 100)} %`)}</small>
+      <span className="fox-progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={share === null ? undefined : Math.floor(share * 100)} />
     </div>
   );
 }

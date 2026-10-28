@@ -358,20 +358,11 @@ button.icon.more-button, .phone-only { display: none; }
    open from inside the options window. */
 .dialog-backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(5,10,12,.72); display: grid; place-items: center; padding: 16px; }
 .online-status { z-index: 100; background: var(--base); }
-/* The DiceFox with his d20: the die fills as a world loads or moves. */
+/* The same transparent DiceFox as the app icon, with a world that builds. */
 .fox-loader { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
 .fox-loader strong { margin-top: 10px; font-size: 15px; }
-.fox-frame { position: relative; width: 220px; height: 220px; border-radius: 50%; overflow: hidden; border: 2px solid var(--accent-line, var(--accent)); box-shadow: 0 0 0 6px var(--card), 0 8px 30px rgba(0, 0, 0, .35); }
-.fox-frame img { width: 100%; height: 100%; display: block; user-select: none; }
-/* The die's outline in the picture, as a share of it. */
-.fox-die { position: absolute; left: 8.3%; top: 56.5%; width: 19.8%; height: 21.6%;
-  clip-path: polygon(50% 1%, 98.5% 27.3%, 96.5% 70.8%, 52% 99%, 1.5% 67.6%, 1% 26.9%); }
-.fox-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 4%;
-  background: linear-gradient(to top, color-mix(in srgb, var(--accent) 85%, transparent), color-mix(in srgb, var(--accent) 45%, white 20%));
-  mix-blend-mode: screen; box-shadow: 0 -2px 8px color-mix(in srgb, var(--accent) 70%, white); transition: height .45s ease-out; }
-.fox-fill.waiting { animation: fox-fill 1.8s ease-in-out infinite; }
-@keyframes fox-fill { 0% { height: 8%; } 50% { height: 96%; } 100% { height: 8%; } }
-@media (prefers-reduced-motion: reduce) { .fox-fill.waiting { animation: none; height: 60%; } }
+.fox-frame { width: min(300px, 70vw, 46vh); max-width: 100%; aspect-ratio: 1; }
+.fox-progress { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Sending to or loading from a server, in a corner while it lasts. */
 .transfer-note { position: fixed; right: 16px; bottom: 16px; z-index: 90; padding: 6px 12px; border-radius: 999px; background: var(--popover); border: 1px solid var(--border); font-size: 13px; color: var(--muted); }

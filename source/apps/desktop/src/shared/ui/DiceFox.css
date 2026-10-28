@@ -1,0 +1,51 @@
+.dicefox {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  user-select: none;
+  --earth: 1;
+  --grass: 1;
+  --mountains: 1;
+  --river: 1;
+  --trees: 1;
+  --clouds: 1;
+  --castle: 1;
+}
+.dicefox .earth-chunk,
+.dicefox .grass-patch,
+.dicefox .mountain-form,
+.dicefox .tree-form,
+.dicefox .cloud-form,
+.dicefox .castle-form { transform-origin: var(--cx) var(--cy); }
+.dicefox .earth-chunk { opacity: var(--earth); transform: translateY(calc((1 - var(--earth))*27px)) scale(calc(.02 + var(--earth)*.98)); }
+.dicefox .grass-patch { opacity: var(--grass); transform: scale(var(--grass)); }
+.dicefox .mountain-form { opacity: var(--mountains); transform: scaleY(var(--mountains)); }
+.dicefox .river-form { opacity: var(--river); }
+.dicefox .water-reveal-path { stroke-dasharray: 1; stroke-dashoffset: calc(1 - var(--river)); }
+.dicefox .river-current { animation: dicefox-water-flow 2.6s linear infinite; }
+.dicefox .river-glint { animation: dicefox-water-glimmer 2.3s ease-in-out infinite alternate; }
+.dicefox .water-drop { animation: dicefox-falling-drop var(--duration) linear infinite; animation-delay: var(--delay); }
+.dicefox .tree-form { opacity: var(--trees); transform: scaleY(var(--trees)); }
+.dicefox .cloud-form { opacity: var(--clouds); transform: scale(var(--clouds)); }
+.dicefox .sky-backdrop { opacity: var(--clouds); }
+.dicefox .cloud-drift { animation: dicefox-cloud-float 9s ease-in-out infinite alternate; animation-delay: calc(var(--order)*-2.1s); }
+.dicefox .castle-form { opacity: var(--castle); transform: scaleY(var(--castle)); }
+.dicefox-paused .river-current,
+.dicefox-paused .river-glint,
+.dicefox-paused .water-drop,
+.dicefox-paused .cloud-drift { animation-play-state: paused; }
+@keyframes dicefox-water-flow { to { stroke-dashoffset: -76; } }
+@keyframes dicefox-water-glimmer { from { opacity: .06; } to { opacity: .26; } }
+@keyframes dicefox-falling-drop {
+  0% { opacity: 0; transform: translate(0, 0); }
+  15% { opacity: .8; }
+  100% { opacity: 0; transform: translate(1px, var(--fall)); }
+}
+@keyframes dicefox-cloud-float { from { transform: translate(-5px, 0); } to { transform: translate(8px, -2px); } }
+@media (prefers-reduced-motion: reduce) {
+  .dicefox .river-current,
+  .dicefox .river-glint,
+  .dicefox .water-drop,
+  .dicefox .cloud-drift { animation: none; }
+}
