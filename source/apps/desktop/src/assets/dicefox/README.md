@@ -1,17 +1,9 @@
-# Approved DiceFox artwork, v12
+# DiceFox artwork, revision 12
 
-Approved by the user on 2026-10-27. Source: `artifacts/branding/dicefox-layered-v12/` at the repository root.
+Unchanged copies from the publisher's DiceFox asset library (kept outside this repository; animation `aw-world-loader`, revision 12). `provenance.json` records the source and the checksums of every layer.
 
-The nine WebP files are unchanged source layers on a 1254 × 1254 canvas. `scene.svg` preserves the approved geometry, metallic gradients, layer order, placement and corrected foreground finger mask. The large left finger stays fixed; two rear fingers remain behind the world. Keep these layers registered together.
+The nine WebP files are source layers on a 1254 × 1254 canvas and stay registered together. `scene.svg` holds the composition: geometry, metallic gradients, layer order and the foreground finger mask.
 
-`DiceFox.tsx` loads this repository-owned template as text, replaces the image tokens with bundled Vite URLs, and prefixes every SVG ID per instance. It controls the approved growth phases and ambient movement. `FoxLoader` supplies the real progress value or `null` for a repeating build.
+`DiceFox.tsx` loads the template as text, puts in the bundled image URLs and gives every SVG id a prefix per instance. It drives the growth phases and the ambient movement; `FoxLoader` gives it the real progress, or `null` for a build that repeats.
 
-To export again, run from the repository root:
-
-```sh
-python3 artifacts/branding/dicefox-layered-v12/export-app.py
-```
-
-This requires only Python's standard library and does not regenerate artwork. `provenance.json` records hashes of the approved SVG and all source images. Substituting the original IDs and embedded images into the exported template reproduces the approved `full.svg` exactly.
-
-Visual and lifecycle checks: `tests/browser/dicefox.html` in the desktop test bench. Results and comparison images: `artifacts/branding/dicefox-layered-v12/qa/app-*`.
+A new revision is exported from the library and replaces these files as a whole. Visual and lifecycle check: `tests/browser/dicefox.html` in the desktop test bench.

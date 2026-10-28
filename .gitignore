@@ -15,7 +15,6 @@ identity.json
 __pycache__/
 
 # Local browser QA artifacts
-/.playwright-mcp/
 /source/apps/desktop/tests/browser/private/
 
 # Test profiles, test worlds and their tools
