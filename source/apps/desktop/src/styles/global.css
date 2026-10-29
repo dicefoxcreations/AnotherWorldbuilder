@@ -1771,7 +1771,6 @@ input.invalid { border-color: var(--danger-line); }
    The table: a canvas over the whole window while dice roll — clicks go through. */
 .dice-table { position: fixed; inset: 0; z-index: 300; pointer-events: none; transition: opacity .45s; }
 .dice-table.fading { opacity: 0; }
-.pair-code { font-size: 22px; letter-spacing: .18em; padding: 4px 10px; }
 /* The side bar: a line to roll, the dice, the favourites, the log. */
 .dice-panel { gap: 10px; }
 .dice-input { display: flex; gap: 6px; }
@@ -2013,6 +2012,12 @@ img.zoomable { cursor: zoom-in; }
 .brick-menu .brick-formats { display: flex; flex-wrap: wrap; gap: 2px; }
 .brick-menu .brick-formats button { display: inline-block; width: auto; min-width: 30px; text-align: center; }
 .listing-search { display: block; width: 220px; margin: 0 0 10px; }
+/* Where the words searched for stand in a book's chapters, and in the side bar. */
+.document-search-results { list-style: none; padding: 0; margin: 0 0 14px; }
+.document-search-results li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.document-search-results p { margin: 4px 0 0; font-size: .9em; color: var(--muted); }
+.nav-search-snippet { margin: 0 8px 7px 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.nav-section .nav-label { font-size: 13px; }
 .shortcut-table { border-collapse: collapse; margin: 6px 0 18px; }
 .shortcut-table td { padding: 5px 14px 5px 0; vertical-align: middle; }
 kbd { display: inline-block; min-width: 22px; padding: 1px 7px; font: 12px/1.6 var(--mono, monospace); text-align: center; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; background: var(--card); }
@@ -2044,7 +2049,7 @@ button.region-access:hover .bubble { border-color: var(--accent-line); }
 
 /* Where a link to an anchor (`@@#^2f9e17|…@@`) arrives: lit up for a moment. */
 @keyframes anchor-lit { 0%, 40% { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-line); } 100% { background: transparent; box-shadow: 0 0 0 2px transparent; } }
-.anchor-lit { animation: anchor-lit 2.4s ease-out; border-radius: 4px; }
+.anchor-lit { animation: anchor-lit 2.4s ease-out; border-radius: 4px; scroll-margin-top: calc(var(--header-height, 53px) + 16px); }
 /* An anchor closing a line (`^2f9e17`): the page shows nothing, the editor shows it faint. */
 .flow-anchor { color: var(--muted); font-size: 11px; opacity: .8; margin-left: 4px; cursor: pointer; user-select: none; }
 

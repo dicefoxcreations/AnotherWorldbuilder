@@ -6,6 +6,10 @@ import { FoldChevron } from "../../shared/ui/BlockFold";
 import { Inspector, InspectorSection } from "../wiki/Inspector";
 import { useSideBar } from "../../shared/ui/SideBar";
 import { SearchPick } from "../../shared/ui/SearchPick";
+import { defaultNavigation } from "../../shared/navigation";
+import { documentOutline, searchDocument, type TextHit } from "../../shared/documentText";
+import { leadTo } from "../../shared/Anchors";
+import { OutlineLinks, openHit } from "../wiki/OutlineLinks";
 
 /**
  * The side bar on the left: the world's outline, as the GM sets it out —
@@ -18,12 +22,6 @@ import { SearchPick } from "../../shared/ui/SearchPick";
  */
 
 const newId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`).slice(0, 12);
-
-/** Until the GM sets one out: the home page, then every type at the top. */
-function outline(world: WorldInfo, templates: Template[]): NavEntry[] {
-  const home: NavEntry[] = world.home ? [{ id: "home", kind: "document", target: world.home }] : [];
-  return [...home, ...realTypes(templates).filter((t) => !t.supertype).map((t): NavEntry => ({ id: `type-${t.id}`, kind: "type", target: t.id }))];
-}
 
 /** A device's own memory of what is unfolded, per world. */
 function useOpen(world: string): [ReadonlySet<string>, (key: string, open?: boolean) => void] {
@@ -141,7 +139,7 @@ export function NavBar({
   useEffect(() => {
     api.navigationLoad(world.id).then(setSaved).catch(onError);
   }, [world.id, fresh, onError]);
-  const entries = useMemo(() => saved ?? outline(world, templates), [saved, world, templates]);
+  const entries = useMemo(() => saved ?? defaultNavigation(world, templates), [saved, world, templates]);
   const commit = (next: NavEntry[]) => {
     setSaved(next);
     api.navigationSet(world.id, next).catch((e) => {
@@ -321,7 +319,11 @@ export function NavBar({
       }
     }
     const all = [...docs, ...placed];
-    if (q) return capped(entry, all.filter((d) => matches(d.name)), depth, (d) => docRow(entry, d, [], depth));
+    if (q) {
+      // Found in the name or in the text — each place it stands, below the document.
+      const hits = new Map(all.map((d) => [d.id, searchDocument(d, q)]));
+      return capped(entry, all.filter((d) => hits.get(d.id)!.length > 0), depth, (d) => docRow(entry, d, [], depth, false, hits.get(d.id)));
+    }
     const below = new Map<string, ArticleView[]>();
     const roots: ArticleView[] = [];
     // Whose parent stands elsewhere is listed under it all the same — the
@@ -370,26 +372,57 @@ export function NavBar({
     ];
   };
 
-  /** A document's row — `context`: one that only stands above some of this entry's. */
-  const docRow = (entry: NavEntry, d: ArticleView, kids: ReactElement[], depth: number, context = false) => {
+  const current = place.kind === "article" ? place.id : null;
+  /** Where the words stand in a document: its headings down to there, and a bit of the text. */
+  const hitRows = (d: ArticleView, hits: TextHit[], depth: number) => (
+    <ul className="nav-search-results">
+      {hits.map((hit, i) => (
+        <li key={i}>
+          <div className="nav-row" style={{ paddingLeft: depth * 14 }}>
+            <span className="nav-fold" />
+            <button className="nav-label" onClick={() => openHit(hit, q, current, () => onPlace(placeOf(d)))}>
+              {hit.path?.join(" › ") || hit.section || d.name}
+            </button>
+          </div>
+          <p className="nav-search-snippet" style={{ paddingLeft: depth * 14 + 22 }}>
+            {hit.snippet}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+  /**
+   * A document's row — `context`: one that only stands above some of this
+   * entry's. Without documents below it, its headings fold out instead;
+   * `hits`: where the words searched for stand in it.
+   */
+  const docRow = (entry: NavEntry, d: ArticleView, kids: ReactElement[], depth: number, context = false, hits: TextHit[] = []) => {
     const key = `${entry.id}/${d.id}`;
     const unfolded = open.has(key);
     const p = placeOf(d);
+    const outline = !q && !context && kids.length === 0 ? documentOutline(d) : [];
+    const folds = kids.length > 0 || outline.length > 0;
     return (
       <li key={context ? `context-${d.id}` : d.id}>
         <div className={["nav-row", here(p) && !context ? "here" : "", context ? "context" : ""].filter(Boolean).join(" ")} style={{ paddingLeft: depth * 14 }}>
-          {kids.length > 0 ? (
+          {folds ? (
             <button className="nav-fold" aria-expanded={unfolded} onClick={() => toggle(key)}>
               <FoldChevron open={unfolded} />
             </button>
           ) : (
             <span className="nav-fold" />
           )}
-          <button className="nav-label" onClick={() => onPlace(p)}>
+          <button className="nav-label" onClick={() => openHit(hits[0], q, current, () => onPlace(p))}>
             {d.name}
           </button>
         </div>
-        {unfolded && kids.length > 0 && <ul>{kids}</ul>}
+        {hits.length > 0 && hitRows(d, hits, depth + 1)}
+        {unfolded && folds && (
+          <ul>
+            {kids}
+            <OutlineLinks entries={outline} navigation depth={depth + 1} onOpen={(anchor) => leadTo(d.id, anchor, current, () => onPlace(p))} />
+          </ul>
+        )}
       </li>
     );
   };
@@ -399,6 +432,7 @@ export function NavBar({
     const label = nameOf(e);
     const type = e.kind === "type" ? findType(templates, e.target ?? "") : undefined;
     const doc = e.kind === "document" ? articles.find((a) => a.id === e.target) : undefined;
+    const hits = q && doc ? searchDocument(doc, q) : [];
     // What this reader cannot open does not stand there — only the GM,
     // setting it out, sees what is missing.
     if (!editing && ((e.kind === "type" && !type) || (e.kind === "document" && !doc))) return null;
@@ -412,7 +446,7 @@ export function NavBar({
     const unfolded = !!q || open.has(e.id);
     // Only what is unfolded is worked out: thousands of rows a fold hides cost all the same.
     const docRows = !editing && type && unfolded ? docTree(e, docs.filter(own), hangingOf(type.id).filter(own), depth + 1) : [];
-    if (q && !matches(label) && groupRows.length === 0 && docRows.length === 0) return null;
+    if (q && !matches(label) && groupRows.length === 0 && docRows.length === 0 && hits.length === 0) return null;
     if (!editing && e.kind === "group" && groupRows.length === 0) return null;
 
     const folds = e.kind === "group" || groupRows.length > 0 || (!editing && docs.length > 0);
@@ -447,6 +481,7 @@ export function NavBar({
           </button>
           {type && !editing && <small className="nav-count">{docs.length}</small>}
         </div>
+        {doc && hits.length > 0 && hitRows(doc, hits, depth + 1)}
         {unfolded && (groupRows.length > 0 || docRows.length > 0) && (
           <ul>
             {groupRows}
@@ -467,7 +502,7 @@ export function NavBar({
   return (
     <nav className={editing ? "nav-bar editing" : "nav-bar"} aria-label="Navigation">
       <div className="outline-head">
-        <input className="nav-find" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find" onKeyDown={(e) => e.key === "Escape" && setQuery("")} />
+        <input className="nav-find" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find names or text" aria-label="Find names or text" onKeyDown={(e) => e.key === "Escape" && setQuery("")} />
         {editable && (
           <button className={editing ? "ghost icon round on" : "ghost icon round"} title={editing ? "Done" : "Arrange"} onClick={() => setEditing((x) => !x)}>
             {editing ? "✓" : "✎"}

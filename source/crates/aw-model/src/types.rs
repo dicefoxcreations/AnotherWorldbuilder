@@ -343,6 +343,7 @@ mod tests {
             icon: String::new(),
             supertype: supertype.into(),
             group: false,
+            navigation_hidden: false,
             rules: Vec::new(),
             description: String::new(),
             auth: None,

@@ -16,7 +16,6 @@ import {
   isA,
   isProperties,
   parentChain,
-  parentIdOf,
   picksFor,
   propertyNamed,
   propertyValues,
@@ -33,6 +32,10 @@ import { WorldImage } from "../../shared/ui/WorldImage";
 import { AddPick } from "../../shared/ui/MultiPick";
 import { editOnOpen } from "./Document";
 import { makeDocument } from "./Article";
+import { OutlineLinks, openHit } from "./OutlineLinks";
+import { asTree } from "../../shared/documentTree";
+import { documentOutline, searchDocument, type TextHit } from "../../shared/documentText";
+import { leadTo } from "../../shared/Anchors";
 
 type ListingNode = Extract<Node, { kind: "listing" }>;
 
@@ -215,15 +218,23 @@ function ListingOf({ node }: { node: ListingNode }) {
   // A long list gets a search: its names and what it shows.
   const searchable = !node.count && node.style !== "inline" && entries.length >= SEARCH_FROM;
   const q = searchable ? needle.trim().toLowerCase() : "";
+  // A tree — a book's chapters — is searched through its text as well; one
+  // of the document it stands in, that document's own text too.
+  const inText = node.style === "tree";
+  const standsIn = inText && q && (node.below === "self" || node.filter.some(([, wanted]) => wanted === "self")) ? articles.find((a) => a.id === current) : undefined;
+  const searched = standsIn && !entries.some((e) => e.pick.id === standsIn.id) ? [scopeOf(standsIn), ...entries] : entries;
+  const hitsIn = new Map(inText && q ? searched.map(({ pick: a }) => [a.id, searchDocument(a, q)]) : []);
   const found = q
-    ? entries.filter(({ pick: a }) => [a.name, ...node.show.map((s) => shown(templates, articles, a, s))].some((t) => t.toLowerCase().includes(q)))
+    ? searched.filter(
+        ({ pick: a }) => !!hitsIn.get(a.id)?.length || [a.name, ...node.show.map((s) => shown(templates, articles, a, s))].some((t) => t.toLowerCase().includes(q)),
+      )
     : entries;
   const docs = found.map((e) => e.pick);
   const search = searchable ? (
     <input
       className="search listing-search"
       value={needle}
-      placeholder="Search"
+      placeholder={inText ? "Search the text" : "Search"}
       onChange={(e) => setNeedle(e.target.value)}
       onKeyDown={(e) => e.key === "Escape" && setNeedle("")}
     />
@@ -357,6 +368,28 @@ function ListingOf({ node }: { node: ListingNode }) {
     );
 
   const open = (a: ArticleView) => onPlace({ kind: "article", id: a.id });
+  if (inText && q) {
+    // Each place the words stand, under its headings; a document found by its name alone, once.
+    const hits = docs.flatMap((a): TextHit[] => (hitsIn.get(a.id)?.length ? hitsIn.get(a.id)! : [{ article: a, snippet: "" }]));
+    return (
+      <div className="listing-box">
+        {search}
+        <p className="small muted">
+          {hits.length} {hits.length === 1 ? "match" : "matches"} in {docs.length} {docs.length === 1 ? "document" : "documents"}
+        </p>
+        <ul className="document-search-results">
+          {hits.map((hit, i) => (
+            <li key={`${hit.article.id}/${i}`}>
+              <button className="wikilink" onClick={() => openHit(hit, q, current, () => open(hit.article))}>
+                {[hit.article.name, ...(hit.path ?? (hit.section ? [hit.section] : []))].join(" › ")}
+              </button>
+              {hit.snippet && <p>{hit.snippet}</p>}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   if (node.count) return <Tally node={node} docs={docs} templates={templates} articles={articles} type={type} open={open} />;
   // What follows the picks keeps their order; anything else sorts by a click on its column.
   const sorting = picked || along ? undefined : { sorted, onSort: setSorted };
@@ -623,6 +656,7 @@ function Tree({
 }) {
   // What the reader opened or closed; the rest as it starts.
   const [turned, setTurned] = useState<ReadonlySet<string>>(new Set());
+  const current = useContext(CurrentDocument);
   const flat = asTree(templates, docs);
   const below = new Map<string, ArticleView[]>();
   const roots: ArticleView[] = [];
@@ -637,12 +671,15 @@ function Tree({
   const values = node.show.filter((s) => s.toLowerCase() !== "image" && fieldFor(templates, docs[0], s)?.kind !== "image");
   const draw = (a: ArticleView, depth: number): ReactNode => {
     const kids = below.get(a.id) ?? [];
-    const openNow = kids.length > 0 && (depth === 0) !== turned.has(a.id);
+    // A chapter without chapters below it: its headings fold out instead, folded at first.
+    const outline = kids.length === 0 ? documentOutline(a) : [];
+    const folds = kids.length > 0 || outline.length > 0;
+    const openNow = folds && (kids.length > 0 && depth === 0) !== turned.has(a.id);
     const picture = cardImage(templates, a, ["image"]);
     return (
       <li key={a.id}>
         <div className="tree-row">
-          {kids.length > 0 ? (
+          {folds ? (
             <button
               className="tree-fold"
               aria-expanded={openNow}
@@ -669,7 +706,7 @@ function Tree({
             {a.name}
           </DocLink>
           {remove(a)}
-          {kids.length > 0 && <span className="tree-count">{count(a)}</span>}
+          {folds && <span className="tree-count">{kids.length ? count(a) : outline.length}</span>}
           {values.map((col) => {
             const text = shown(templates, articles, a, col);
             return text ? (
@@ -679,7 +716,12 @@ function Tree({
             ) : null;
           })}
         </div>
-        {openNow && <ul>{kids.map((k) => draw(k, depth + 1))}</ul>}
+        {openNow && (
+          <ul>
+            {kids.map((k) => draw(k, depth + 1))}
+            <OutlineLinks entries={outline} onOpen={(anchor) => leadTo(a.id, anchor, current, () => open(a))} />
+          </ul>
+        )}
       </li>
     );
   };
@@ -986,39 +1028,3 @@ function cardImage(all: Template[], article: ArticleView, show: string[]): strin
 const wantsImage = (all: Template[], article: ArticleView, show: string[]) =>
   show.some((s) => s.toLowerCase() === "image" || fieldFor(all, article, s)?.kind === "image");
 
-/**
- * The documents in tree order, each with its depth.
- *
- * A document whose parent is among them hangs below it. One whose parent
- * lies outside — another type, or unreadable here — starts a tree of its own.
- */
-export function asTree(
-  templates: Template[],
-  articles: ArticleView[],
-): { article: ArticleView; depth: number }[] {
-  const inList = new Set(articles.map((a) => a.id));
-  const children = new Map<string, ArticleView[]>();
-  const roots: ArticleView[] = [];
-  for (const a of articles) {
-    const parent = parentIdOf(templates, a);
-    if (parent && inList.has(parent) && parent !== a.id) {
-      children.set(parent, [...(children.get(parent) ?? []), a]);
-    } else {
-      roots.push(a);
-    }
-  }
-  const byName = (x: ArticleView, y: ArticleView) => x.name.localeCompare(y.name);
-  const out: { article: ArticleView; depth: number }[] = [];
-  const seen = new Set<string>();
-  const walk = (a: ArticleView, depth: number) => {
-    if (seen.has(a.id)) return;
-    seen.add(a.id);
-    out.push({ article: a, depth });
-    for (const c of (children.get(a.id) ?? []).sort(byName)) walk(c, depth + 1);
-  };
-  roots.sort(byName).forEach((r) => walk(r, 0));
-  // A cycle among parents leaves documents unvisited — they still belong in
-  // the list.
-  for (const a of articles) if (!seen.has(a.id)) walk(a, 0);
-  return out;
-}

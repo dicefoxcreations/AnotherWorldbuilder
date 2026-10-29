@@ -89,9 +89,6 @@ export type BrowserView = {
   open: boolean;
   port: number;
   problem: string | null;
-  /** The code to type into the extension, while it holds. */
-  code: string | null;
-  browsers: { id: string; name: string; since: number }[];
 };
 
 export type NetworkView = {
@@ -421,6 +418,8 @@ export type Template = {
   supertype: string;
   /** A property group, not a type: properties only, no documents, no page. */
   group: boolean;
+  /** Not in the outline the app sets out by itself — a type only other documents point to. */
+  navigationHidden?: boolean;
   /** The rules of the game its documents reckon with — see `shared/Dice`. */
   rules: Rule[];
   description: string;
@@ -673,6 +672,7 @@ const toTemplate = (r: Raw): Template => ({
   icon: r.icon ?? "",
   supertype: r.supertype ?? "",
   group: !!r.group,
+  navigationHidden: !!r.navigation_hidden,
   rules: ((r.rules as Raw[]) ?? []).map((x) => ({ name: x.name, params: (x.params as string[]) ?? [], formula: x.formula ?? "" })),
   description: r.description ?? "",
   properties: ((r.properties as Raw[]) ?? []).map(toField),
@@ -682,6 +682,7 @@ const toTemplate = (r: Raw): Template => ({
   page: r.page ?? "",
   blocks: ((r.blocks as Raw[]) ?? []).map(toBlock),
   order: (r.order as string[]) ?? [],
+  sort: (r.sort as string[]) ?? [],
   create: (r.create as string) ?? "",
 });
 
@@ -691,6 +692,7 @@ const fromTemplate = (t: Template): Raw => ({
   icon: t.icon,
   supertype: t.supertype,
   group: t.group,
+  navigation_hidden: !!t.navigationHidden,
   rules: t.rules,
   description: t.description,
   properties: t.properties.map(fromField),
@@ -700,6 +702,7 @@ const fromTemplate = (t: Template): Raw => ({
   page: t.page,
   blocks: t.blocks.map(fromBlock),
   order: t.order ?? [],
+  sort: t.sort ?? [],
   create: t.create ?? "",
 });
 
@@ -1113,9 +1116,6 @@ export const api = {
   networkSettings: () => invoke<NetworkView>("network_settings"),
   browserSettings: () => invoke<BrowserView>("browser_settings"),
   browserEnable: (enabled: boolean) => invoke<BrowserView>("browser_enable", { enabled }),
-  /** A code to pair a browser extension with — six digits, five minutes. */
-  browserPair: () => invoke<BrowserView>("browser_pair"),
-  browserForget: (id: string) => invoke<BrowserView>("browser_forget", { id }),
   networkEnable: (enabled: boolean) => invoke<NetworkView>("network_enable", { enabled }),
   networkInternet: (enabled: boolean, stun: string[]) => invoke<NetworkView>("network_internet", { enabled, stun }),
   networkPort: (port: number | null) => invoke<NetworkView>("network_port", { port }),

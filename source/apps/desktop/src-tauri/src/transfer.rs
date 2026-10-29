@@ -691,6 +691,42 @@ mod tests {
     }
 
     #[test]
+    fn a_type_kept_out_of_the_outline_and_a_parent_of_another_type_come_in() {
+        let to = world("book-tree", "Marla");
+        let book = "art:01J00000000000000000000011";
+        let chapter = "art:01J00000000000000000000012";
+        let package: Package = serde_json::from_value(serde_json::json!({
+            "format": "aw-package", "version": 1,
+            "types": [
+                { "id": "book", "name": "Book" },
+                { "id": "book-chapter", "name": "Book chapter", "navigation_hidden": true,
+                  "properties": [{ "key": "book", "label": "Book", "kind": "reference", "article_type": "book", "parent": true }] }
+            ],
+            "documents": [
+                { "id": book, "type": "book", "name": "Garden Book", "view": "all", "edit": "gm", "fields": {},
+                  "parts": [{ "section": "overview", "text": "A fictional book introduction.", "fields": {}, "view": "all", "edit": "gm" },
+                            { "section": "contents", "text": "<list type=book-chapter where=book=self style=tree>", "fields": {}, "view": "all", "edit": "gm" }] },
+                { "id": chapter, "type": "book-chapter", "name": "Tracking", "view": "all", "edit": "gm", "fields": {},
+                  "parts": [{ "section": "properties", "text": "", "fields": { "book": book }, "view": "all", "edit": "gm" },
+                            { "section": "content", "text": "A fictional chapter.", "fields": {}, "view": "all", "edit": "gm" }] }
+            ]
+        }))
+        .unwrap();
+        import(&to.store, &to.id, &to.dir, &package, &|_, _| {}).unwrap();
+        let types = to.store.load_templates(&to.id).unwrap();
+        let chapter_type = types.iter().find(|t| t.id == "book-chapter").unwrap();
+        assert!(chapter_type.navigation_hidden);
+        let parent = aw_model::types::parent_field(chapter_type).unwrap();
+        assert!(matches!(&parent.kind, aw_model::template::FieldKind::Reference { article_type, parent: true, .. } if article_type == "book"));
+        let db = to.store.db(&to.id).unwrap();
+        let root = db.document(book).unwrap().unwrap();
+        assert!(root.layers.iter().any(|p| p.text.contains("book introduction")));
+        assert!(root.layers.iter().any(|p| p.text.contains("<list type=book-chapter")));
+        let child = db.document(chapter).unwrap().unwrap();
+        assert!(child.layers.iter().any(|p| p.fields.get("book").is_some_and(|value| value == book)));
+    }
+
+    #[test]
     fn the_package_page_becomes_the_world_page_while_that_is_empty() {
         let to = world("home", "Tim");
         let empty = to.store.load_world_meta(&to.id).unwrap().home;

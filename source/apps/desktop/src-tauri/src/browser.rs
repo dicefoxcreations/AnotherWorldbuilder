@@ -4,9 +4,9 @@
 //! Closed until the user opens it in the options. Open, the app listens on
 //! this device's loopback address only — nothing from the network reaches
 //! it — and answers browser extensions alone: a web page cannot get in, nor
-//! a site posing under another name for this address. An extension pairs
-//! once, with a code the app shows for a few minutes; from then on it
-//! carries a token. It sees the worlds this device leads (only a game master
+//! a site posing under another name for this address. Switching it on is
+//! the consent: an extension finds the app by itself, on one of a few ports,
+//! without pairing. It sees the worlds this device leads (only a game master
 //! takes packages in) and sends packages; the app takes them in as from a
 //! folder (`transfer::import`).
 
@@ -15,47 +15,49 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 use tauri::Emitter;
 
-/// Where extensions knock — fixed, so that they find the app.
+/// Where extensions knock: the first of these ports that is free — fixed,
+/// so that they find the app; more than one, for a second app or profile.
 pub const PORT: u16 = 47823;
+pub const LAST_PORT: u16 = PORT + 7;
+/// What the extension asks for — it says so when the app is older.
+const API_VERSION: u8 = 3;
 /// A package with its pictures — larger ones the extension sends in parts.
 const LARGEST: usize = 256 * 1024 * 1024;
-const CODE_FOR: Duration = Duration::from_secs(5 * 60);
-/// Wrong guesses before a code is gone — six digits are not to be tried through.
-const GUESSES: u8 = 5;
 const FILE: &str = "browser.json";
 
-/// What the profile keeps: whether the door is open, and the browsers paired.
+/// What the profile keeps: whether the door is open.
 #[derive(Serialize, Deserialize, Default)]
 pub struct Settings {
     pub enabled: bool,
-    #[serde(default)]
-    pub browsers: Vec<Paired>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Paired {
-    pub id: String,
-    /// As the extension names itself.
-    pub name: String,
-    /// Milliseconds since 1970.
-    pub since: u64,
-    /// The token's hash — the token itself only the extension keeps.
-    pub hash: String,
-}
-
-/// Open now, and the code shown to pair with.
+/// Open now, on which port — or why it could not open.
 struct Door {
     listening: Option<Arc<AtomicBool>>,
-    /// The code, since when, and the wrong guesses at it.
-    code: Option<(String, Instant, u8)>,
+    port: Option<u16>,
     problem: Option<String>,
 }
 
-static DOOR: Mutex<Door> = Mutex::new(Door { listening: None, code: None, problem: None });
+static DOOR: Mutex<Door> = Mutex::new(Door { listening: None, port: None, problem: None });
+
+/// This running app with this profile — not a key, a name to ask for: a
+/// world chosen in the extension never lands in another app that took over
+/// the port after this one closed.
+fn instance_id(store: &Store) -> String {
+    static PROCESS: OnceLock<String> = OnceLock::new();
+    let process = PROCESS.get_or_init(|| {
+        let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        format!("{}-{}", std::process::id(), since.as_nanos())
+    });
+    let mut hash = blake3::Hasher::new();
+    hash.update(process.as_bytes());
+    hash.update(store.profile_dir().as_os_str().as_encoded_bytes());
+    hash.finalize().to_hex().to_string()
+}
 
 fn load(store: &Store) -> Settings {
     std::fs::read(store.profile_dir().join(FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
@@ -65,14 +67,6 @@ fn save(store: &Store, s: &Settings) -> Answer<()> {
     std::fs::create_dir_all(store.profile_dir())?;
     aw_store::durable::write(&store.profile_dir().join(FILE), &serde_json::to_vec_pretty(s)?)?;
     Ok(())
-}
-
-fn hash(token: &str) -> String {
-    blake3::hash(token.as_bytes()).to_hex().to_string()
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 // --- Listening ------------------------------------------------------------------
@@ -91,27 +85,41 @@ fn open(app: &tauri::AppHandle) {
     if door.listening.is_some() {
         return;
     }
-    match TcpListener::bind(("127.0.0.1", PORT)) {
-        Ok(listener) => {
-            let on = Arc::new(AtomicBool::new(true));
-            door.listening = Some(on.clone());
-            door.problem = None;
+    let mut listener = None;
+    for port in PORT..=LAST_PORT {
+        match TcpListener::bind(("127.0.0.1", port)) {
+            Ok(bound) => {
+                listener = Some((bound, port));
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(e) => {
+                door.problem = Some(format!("Could not open: {e}"));
+                return;
+            }
+        }
+    }
+    let Some((listener, port)) = listener else {
+        door.problem = Some(format!("Ports {PORT}–{LAST_PORT} are taken."));
+        return;
+    };
+    let on = Arc::new(AtomicBool::new(true));
+    door.listening = Some(on.clone());
+    door.port = Some(port);
+    door.problem = None;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if !on.load(Ordering::SeqCst) {
+                break;
+            }
+            let Ok(stream) = stream else { continue };
             let app = app.clone();
             std::thread::spawn(move || {
-                for stream in listener.incoming() {
-                    if !on.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    let Ok(stream) = stream else { continue };
-                    let app = app.clone();
-                    std::thread::spawn(move || {
-                        let _ = serve(&app, stream);
-                    });
-                }
+                let _ = serve(&app, stream);
             });
         }
-        Err(e) => door.problem = Some(format!("Port {PORT} is taken: {e}")),
-    }
+    });
 }
 
 fn close() {
@@ -119,9 +127,11 @@ fn close() {
     if let Some(on) = door.listening.take() {
         on.store(false, Ordering::SeqCst);
         // The loop waits for a caller: one last knock lets it see it is closed.
-        let _ = TcpStream::connect_timeout(&([127, 0, 0, 1], PORT).into(), Duration::from_millis(300));
+        if let Some(port) = door.port {
+            let _ = TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(300));
+        }
     }
-    door.code = None;
+    door.port = None;
 }
 
 // --- HTTP, as little of it as a browser needs ---------------------------------
@@ -131,7 +141,10 @@ struct Request {
     path: String,
     host: String,
     origin: Option<String>,
-    token: Option<String>,
+    /// The app it means — see [`instance_id`].
+    instance: Option<String>,
+    /// Where it came in.
+    port: u16,
     body: Vec<u8>,
 }
 
@@ -142,7 +155,7 @@ fn read_request(stream: &TcpStream) -> std::io::Result<Request> {
     let mut words = line.split_whitespace();
     let method = words.next().unwrap_or("").to_string();
     let path = words.next().unwrap_or("").to_string();
-    let (mut host, mut origin, mut token, mut length) = (String::new(), None, None, 0usize);
+    let (mut host, mut origin, mut instance, mut length) = (String::new(), None, None, 0usize);
     loop {
         let mut header = String::new();
         if r.read_line(&mut header)? == 0 || header.trim().is_empty() {
@@ -153,7 +166,7 @@ fn read_request(stream: &TcpStream) -> std::io::Result<Request> {
         match name.trim().to_ascii_lowercase().as_str() {
             "host" => host = value,
             "origin" => origin = Some(value),
-            "authorization" => token = value.strip_prefix("Bearer ").map(str::to_string),
+            "x-dicefox-instance" => instance = Some(value),
             "content-length" => length = value.parse().unwrap_or(usize::MAX),
             _ => {}
         }
@@ -163,7 +176,7 @@ fn read_request(stream: &TcpStream) -> std::io::Result<Request> {
     }
     let mut body = vec![0; length];
     r.read_exact(&mut body)?;
-    Ok(Request { method, path, host, origin, token, body })
+    Ok(Request { method, path, host, origin, instance, port: stream.local_addr()?.port(), body })
 }
 
 /// Browser extensions only: their addresses are theirs alone.
@@ -175,7 +188,8 @@ fn from_extension(origin: &str) -> bool {
 /// a browser sent it. Another name for this address (a site rebinding its
 /// own) or a web page: no.
 fn admitted(r: &Request) -> Option<Option<String>> {
-    let local = [format!("127.0.0.1:{PORT}"), format!("localhost:{PORT}")].contains(&r.host);
+    let port = r.port;
+    let local = (PORT..=LAST_PORT).contains(&port) && [format!("127.0.0.1:{port}"), format!("localhost:{port}")].contains(&r.host);
     match &r.origin {
         _ if !local => None,
         Some(o) if from_extension(o) => Some(Some(o.clone())),
@@ -216,12 +230,13 @@ fn reply(mut stream: &TcpStream, origin: Option<&str>, status: u16, body: &serde
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        409 => "Conflict",
         _ => "Error",
     };
     let mut head = format!("HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n", text.len());
     if let Some(o) = origin {
         head.push_str(&format!(
-            "Access-Control-Allow-Origin: {o}\r\nAccess-Control-Allow-Headers: authorization, content-type\r\nAccess-Control-Allow-Methods: GET, POST\r\nVary: Origin\r\n"
+            "Access-Control-Allow-Origin: {o}\r\nAccess-Control-Allow-Headers: content-type, x-dicefox-instance\r\nAccess-Control-Allow-Methods: GET, POST\r\nVary: Origin\r\n"
         ));
     }
     head.push_str("\r\n");
@@ -239,54 +254,63 @@ fn fail<E: std::fmt::Display>(e: E) -> (u16, String) {
 /// Tells the app's page what happened: an event and its payload.
 type Tell<'a> = &'a dyn Fn(&str, serde_json::Value);
 
-fn route(store: &Store, tell: Tell, r: &Request) -> Routed {
-    let settings = load(store);
-    let paired = r.token.as_deref().map(hash).and_then(|h| settings.browsers.iter().find(|b| b.hash == h).cloned());
-    let (path, query) = r.path.split_once('?').unwrap_or((&r.path, ""));
-    let world = query.split('&').find_map(|kv| kv.strip_prefix("world=")).unwrap_or("");
-    match (r.method.as_str(), path) {
-        ("GET", "/v1/hello") => Ok(serde_json::json!({
-            "app": "AnotherWorldbuilder",
-            "version": env!("CARGO_PKG_VERSION"),
-            "paired": paired.is_some(),
-        })),
-        ("POST", "/v1/pair") => pair(store, tell, settings, &r.body),
-        (_, _) if paired.is_none() => Err((401, "Not paired.".into())),
-        ("GET", "/v1/worlds") => worlds(store),
-        ("GET", "/v1/types") => types(store, world),
-        ("POST", "/v1/import") => take(store, tell, paired.as_ref().map(|p| p.name.as_str()).unwrap_or(""), &r.body),
-        _ => Err((404, "No such thing.".into())),
+/// A value of the query, decoded once — `world%3Aabc` is `world:abc`.
+fn query_value(query: &str, name: &str) -> Result<String, (u16, String)> {
+    fn decode(text: &str) -> Result<String, (u16, String)> {
+        let bad = || (400, "Bad encoding.".to_string());
+        let bytes = text.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'%' => {
+                    let digits = bytes.get(i + 1..i + 3).and_then(|d| std::str::from_utf8(d).ok()).ok_or_else(bad)?;
+                    out.push(u8::from_str_radix(digits, 16).map_err(|_| bad())?);
+                    i += 3;
+                    continue;
+                }
+                b'+' => out.push(b' '),
+                byte => out.push(byte),
+            }
+            i += 1;
+        }
+        String::from_utf8(out).map_err(|_| bad())
     }
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if decode(key)? == name {
+            return decode(value);
+        }
+    }
+    Ok(String::new())
 }
 
-fn pair(store: &Store, tell: Tell, mut settings: Settings, body: &[u8]) -> Routed {
-    #[derive(Deserialize)]
-    struct Ask {
-        code: String,
-        #[serde(default)]
-        name: String,
+fn route(store: &Store, tell: Tell, r: &Request) -> Routed {
+    // Closed a moment ago: what the listener took in already gets no further.
+    if !load(store).enabled {
+        return Err((403, "Switched off in the app.".into()));
     }
-    let ask: Ask = serde_json::from_slice(body).map_err(|e| (400, e.to_string()))?;
-    {
-        let mut door = DOOR.lock().unwrap();
-        let Some((code, _, wrong)) = door.code.as_mut().filter(|(_, since, _)| since.elapsed() < CODE_FOR) else {
-            return Err((403, "No code shown — make one in the app.".into()));
-        };
-        if *code != ask.code.trim() {
-            *wrong += 1;
-            if *wrong >= GUESSES {
-                door.code = None;
-            }
-            return Err((403, "Wrong code.".into()));
-        }
-        door.code = None;
+    let (path, query) = r.path.split_once('?').unwrap_or((&r.path, ""));
+    let instance = instance_id(store);
+    if r.method == "GET" && path == "/v1/hello" {
+        let name = store.load_identity().map(|me| me.name().to_string()).unwrap_or_else(|_| "AnotherWorldbuilder".into());
+        return Ok(serde_json::json!({
+            "app": "AnotherWorldbuilder",
+            "version": env!("CARGO_PKG_VERSION"),
+            "browser_api": API_VERSION,
+            "instance": instance,
+            "name": name,
+        }));
     }
-    let token = hex::encode(aw_crypto::random_bytes::<32>().map_err(fail)?);
-    let name = if ask.name.trim().is_empty() { "Browser".to_string() } else { ask.name.trim().chars().take(60).collect() };
-    settings.browsers.push(Paired { id: hex::encode(aw_crypto::random_bytes::<8>().map_err(fail)?), name: name.clone(), since: now_ms(), hash: hash(&token) });
-    save(store, &settings).map_err(|e| (500, e.0))?;
-    tell("browser-paired", serde_json::json!(name));
-    Ok(serde_json::json!({ "token": token }))
+    if r.instance.as_deref() != Some(instance.as_str()) {
+        return Err((409, "The app changed — look for it again.".into()));
+    }
+    match (r.method.as_str(), path) {
+        ("GET", "/v1/worlds") => worlds(store),
+        ("GET", "/v1/types") => types(store, &query_value(query, "world")?),
+        ("POST", "/v1/import") => take(store, tell, r.origin.as_deref().unwrap_or("Local extension"), &r.body),
+        _ => Err((404, "No such thing.".into())),
+    }
 }
 
 /// The worlds this device leads: here, and on their servers — asked there.
@@ -370,16 +394,6 @@ pub struct View {
     pub open: bool,
     pub port: u16,
     pub problem: Option<String>,
-    /// The code to type into the extension, while it holds.
-    pub code: Option<String>,
-    pub browsers: Vec<BrowserView>,
-}
-
-#[derive(Serialize)]
-pub struct BrowserView {
-    pub id: String,
-    pub name: String,
-    pub since: u64,
 }
 
 fn view(store: &Store) -> View {
@@ -388,10 +402,8 @@ fn view(store: &Store) -> View {
     View {
         enabled: s.enabled,
         open: door.listening.is_some(),
-        port: PORT,
+        port: door.port.unwrap_or(PORT),
         problem: door.problem.clone(),
-        code: door.code.as_ref().filter(|(_, since, _)| since.elapsed() < CODE_FOR).map(|(c, _, _)| c.clone()),
-        browsers: s.browsers.iter().map(|b| BrowserView { id: b.id.clone(), name: b.name.clone(), since: b.since }).collect(),
     }
 }
 
@@ -414,36 +426,19 @@ pub fn browser_enable(app: tauri::AppHandle, enabled: bool) -> Answer<View> {
     Ok(view(&store))
 }
 
-/// A new code to pair a browser with — six digits, for five minutes.
-#[tauri::command(async)]
-pub fn browser_pair(app: tauri::AppHandle) -> Answer<View> {
-    let store = store(&app)?;
-    let n = u32::from_le_bytes(aw_crypto::random_bytes::<4>()?) % 1_000_000;
-    DOOR.lock().unwrap().code = Some((format!("{n:06}"), Instant::now(), 0));
-    Ok(view(&store))
-}
-
-#[tauri::command(async)]
-pub fn browser_forget(app: tauri::AppHandle, id: String) -> Answer<View> {
-    let store = store(&app)?;
-    let mut s = load(&store);
-    s.browsers.retain(|b| b.id != id);
-    save(&store, &s)?;
-    Ok(view(&store))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::RefCell;
 
-    fn request(method: &str, path: &str, origin: Option<&str>, token: Option<&str>, body: serde_json::Value) -> Request {
+    fn request(method: &str, path: &str, origin: Option<&str>, instance: Option<&str>, body: serde_json::Value) -> Request {
         Request {
             method: method.into(),
             path: path.into(),
             host: format!("127.0.0.1:{PORT}"),
             origin: origin.map(str::to_string),
-            token: token.map(str::to_string),
+            instance: instance.map(str::to_string),
+            port: PORT,
             body: if body.is_null() { Vec::new() } else { body.to_string().into_bytes() },
         }
     }
@@ -462,10 +457,17 @@ mod tests {
         assert_eq!(admitted(&rebound), None);
         // A program on this device, no browser: in, without an address to answer.
         assert_eq!(admitted(&request("GET", "/v1/hello", None, None, serde_json::Value::Null)), Some(None));
+        // Any of the app's ports, as long as the name fits it.
+        let mut later = request("GET", "/v1/hello", Some(ext), None, serde_json::Value::Null);
+        later.port = LAST_PORT;
+        later.host = format!("127.0.0.1:{LAST_PORT}");
+        assert!(admitted(&later).is_some());
+        later.host = format!("localhost:{PORT}");
+        assert!(admitted(&later).is_none());
     }
 
     #[test]
-    fn a_browser_pairs_with_the_shown_code_and_then_takes_packages_into_a_world_it_leads() {
+    fn switched_on_the_app_is_found_and_takes_packages_into_a_world_it_leads() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path().join("gm"));
         let gm = Identity::create("Marla").unwrap();
@@ -475,29 +477,21 @@ mod tests {
         let tell = |event: &str, _: serde_json::Value| told.borrow_mut().push(event.to_string());
         let ask = |r: Request| route(&store, &tell, &r);
 
-        // Without a code shown, or with a wrong one: no.
-        let code = |c: &str| serde_json::json!({ "code": c, "name": "Chrome" });
-        assert_eq!(ask(request("POST", "/v1/pair", None, None, code("123456"))).unwrap_err().0, 403);
-        DOOR.lock().unwrap().code = Some(("424242".into(), Instant::now(), 0));
-        for _ in 0..GUESSES {
-            assert_eq!(ask(request("POST", "/v1/pair", None, None, code("000000"))).unwrap_err().0, 403);
-        }
-        // Guessed at too often, the code is gone — the right one no longer helps.
-        assert_eq!(ask(request("POST", "/v1/pair", None, None, code("424242"))).unwrap_err().0, 403);
-        DOOR.lock().unwrap().code = Some(("424242".into(), Instant::now(), 0));
-        let token = ask(request("POST", "/v1/pair", None, None, code("424242"))).unwrap()["token"].as_str().unwrap().to_string();
-        assert!(DOOR.lock().unwrap().code.is_none(), "a code pairs once");
-        assert!(!std::fs::read_to_string(store.profile_dir().join(FILE)).unwrap().contains(&token), "the profile keeps no token");
-
-        // Unpaired, nothing but hello.
-        assert_eq!(ask(request("GET", "/v1/worlds", None, None, serde_json::Value::Null)).unwrap_err().0, 401);
-        assert_eq!(ask(request("GET", "/v1/worlds", None, Some("feed"), serde_json::Value::Null)).unwrap_err().0, 401);
-        assert_eq!(ask(request("GET", "/v1/hello", None, Some(&token), serde_json::Value::Null)).unwrap()["paired"], true);
-        let worlds = ask(request("GET", "/v1/worlds", None, Some(&token), serde_json::Value::Null)).unwrap();
+        // Switched off: nothing, not even hello. Switched on: found, no pairing.
+        assert_eq!(ask(request("GET", "/v1/hello", None, None, serde_json::Value::Null)).unwrap_err().0, 403);
+        save(&store, &Settings { enabled: true }).unwrap();
+        let hello = ask(request("GET", "/v1/hello", None, None, serde_json::Value::Null)).unwrap();
+        assert_eq!(hello["browser_api"], 3);
+        let target = hello["instance"].as_str().unwrap().to_string();
+        // Asking for another app: no.
+        assert_eq!(ask(request("GET", "/v1/worlds", None, Some("stale"), serde_json::Value::Null)).unwrap_err().0, 409);
+        let worlds = ask(request("GET", "/v1/worlds", None, Some(&target), serde_json::Value::Null)).unwrap();
         assert_eq!(worlds[0]["id"], world.as_str());
-        let types = ask(request("GET", &format!("/v1/types?world={world}"), None, Some(&token), serde_json::Value::Null)).unwrap();
+        // The world's id as the extension sends it: encoded.
+        let encoded = world.replace(':', "%3A");
+        let types = ask(request("GET", &format!("/v1/types?world={encoded}"), None, Some(&target), serde_json::Value::Null)).unwrap();
         assert!(types.is_array());
-        assert_eq!(ask(request("GET", "/v1/types?world=world:0000000000000000", None, Some(&token), serde_json::Value::Null)).unwrap_err().0, 403);
+        assert_eq!(ask(request("GET", "/v1/types?world=world%3A0000000000000000", None, Some(&target), serde_json::Value::Null)).unwrap_err().0, 403);
 
         // A package with a picture.
         let img = image::RgbImage::from_fn(8, 8, |x, _| image::Rgb([x as u8 * 30, 90, 160]));
@@ -513,7 +507,7 @@ mod tests {
         });
         let files = serde_json::json!({ "images/owl.png": base64::engine::general_purpose::STANDARD.encode(&png) });
         let sent = serde_json::json!({ "world": world, "package": package, "files": files });
-        let summary = ask(request("POST", "/v1/import", None, Some(&token), sent)).unwrap();
+        let summary = ask(request("POST", "/v1/import", None, Some(&target), sent)).unwrap();
         assert_eq!((summary["documents_new"].as_u64(), summary["images_new"].as_u64()), (Some(1), Some(1)));
         assert!(told.borrow().contains(&"browser-imported".to_string()));
         assert!(store.db(&world).unwrap().document(page).unwrap().is_some());
@@ -521,10 +515,41 @@ mod tests {
 
         // Files only inside the package.
         let escape = serde_json::json!({ "world": world, "package": package, "files": { "../outside.png": "AAAA" } });
-        assert_eq!(ask(request("POST", "/v1/import", None, Some(&token), escape)).unwrap_err().0, 400);
+        assert_eq!(ask(request("POST", "/v1/import", None, Some(&target), escape)).unwrap_err().0, 400);
         assert!(!store.profile_dir().join("tmp").join("outside.png").exists());
         // A world it does not lead: no.
         let other = serde_json::json!({ "world": "world:0000000000000000", "package": package, "files": {} });
-        assert_eq!(ask(request("POST", "/v1/import", None, Some(&token), other)).unwrap_err().0, 403);
+        assert_eq!(ask(request("POST", "/v1/import", None, Some(&target), other)).unwrap_err().0, 403);
+    }
+
+    #[test]
+    fn query_values_are_decoded_once_and_bad_ones_refused() {
+        assert_eq!(query_value("world=world%3Aabc&other=x", "world").unwrap(), "world:abc");
+        assert_eq!(query_value("world=world%253Aabc", "world").unwrap(), "world%3Aabc");
+        assert_eq!(query_value("world=A+B%2BC", "world").unwrap(), "A B+C");
+        assert_eq!(query_value("world=%E2%9C%93", "world").unwrap(), "✓");
+        for value in ["world=%", "world=%0", "world=%zz", "world=%ff"] {
+            assert_eq!(query_value(value, "world").unwrap_err().0, 400);
+        }
+    }
+
+    #[test]
+    fn a_player_sees_no_world_and_another_profile_is_another_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().join("local"));
+        let me = Identity::create("Tim").unwrap();
+        store.save_identity(&me).unwrap();
+        let gm = Identity::create("Marla").unwrap();
+        let world = store.create_world("Marla's world", &gm).unwrap().id;
+        save(&store, &Settings { enabled: true }).unwrap();
+        let target = instance_id(&store);
+        let tell = |_: &str, _: serde_json::Value| {};
+        let ask = |store: &Store, path: &str| route(store, &tell, &request("GET", path, None, Some(&target), serde_json::Value::Null));
+        assert!(ask(&store, "/v1/worlds").unwrap().as_array().unwrap().is_empty());
+        assert_eq!(ask(&store, &format!("/v1/types?world={}", world.replace(':', "%3A"))).unwrap_err().0, 403);
+        let second = Store::new(dir.path().join("second"));
+        second.save_identity(&me).unwrap();
+        save(&second, &Settings { enabled: true }).unwrap();
+        assert_eq!(ask(&second, "/v1/worlds").unwrap_err().0, 409);
     }
 }

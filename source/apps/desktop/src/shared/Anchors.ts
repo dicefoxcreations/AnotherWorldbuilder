@@ -6,6 +6,12 @@
 
 /** An anchor asked for in a document not drawn yet — shown once it is. */
 let waiting: { doc: string; anchor: string } | null = null;
+/** Lets go of the anchor shown last — see `followAnchor`. */
+let letGo = () => {};
+/** Asked for an anchor: folded blocks and headings around it open — `{ doc, anchor }`. */
+export const LEAD_EVENT = "aw:lead-to-anchor";
+/** The anchor asked for in a document, until it is shown. */
+export const pendingAnchor = (doc: string): string | null => (waiting?.doc === doc ? waiting.anchor : null);
 
 /** What an anchor stands for: a whole table, a list item, a paragraph, a heading. */
 export function anchoredPart(spot: Element): Element | null {
@@ -36,33 +42,86 @@ export function anchoredParts(root: ParentNode, anchor: string, skip?: (spot: El
   return a < 0 || b < a ? [first] : blocks.slice(a, b + 1);
 }
 
+/** What the reader does that ends following an anchor: they move on themselves. */
+const READER = ["wheel", "touchstart", "pointerdown", "keydown"];
+
+/**
+ * Keeps a part at the top while the page around it still grows — folds
+ * opening, pictures loading — until the reader scrolls, clicks or types,
+ * or another anchor is asked for.
+ */
+function followAnchor(part: Element) {
+  letGo();
+  const page = part.closest(".article-page")!;
+  let frame = 0;
+  const align = () => {
+    frame = 0;
+    if (!part.isConnected) return stop();
+    part.scrollIntoView({ block: "start", behavior: "instant" });
+  };
+  const soon = () => {
+    if (!frame) frame = requestAnimationFrame(align);
+  };
+  const resized = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(soon);
+  const changed = new MutationObserver(soon);
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    frame = 0;
+    resized?.disconnect();
+    changed.disconnect();
+    page.removeEventListener("load", soon, true);
+    for (const event of READER) document.removeEventListener(event, stop, true);
+    window.removeEventListener("resize", soon);
+    window.removeEventListener("pagehide", stop);
+    if (letGo === stop) letGo = () => {};
+  };
+  letGo = stop;
+  resized?.observe(page);
+  changed.observe(page.parentElement ?? page, { childList: true, subtree: true, characterData: true });
+  // A picture loading fires no event that bubbles — caught on the way down.
+  page.addEventListener("load", soon, true);
+  for (const event of READER) document.addEventListener(event, stop, { capture: true, passive: true });
+  window.addEventListener("resize", soon);
+  window.addEventListener("pagehide", stop);
+  align();
+}
+
 /** Scrolls to an anchor of the open page and lights up its part. False: not drawn. */
 export function showAnchor(anchor: string): boolean {
   // On the page itself, not in a preview lying over it.
   const parts = anchoredParts(document, anchor, (s) => !s.closest(".article-page") || !!s.closest(".link-preview"));
   if (parts.length === 0) return false;
-  parts[0].scrollIntoView({ block: "center", behavior: "smooth" });
   for (const part of parts) {
     part.classList.remove("anchor-lit");
     // Again from the start when it was lit already.
     void (part as HTMLElement).offsetWidth;
     part.classList.add("anchor-lit");
   }
+  followAnchor(parts[0]);
   return true;
 }
 
 /** Goes to an anchor: here at once, elsewhere once `open` has drawn that document. */
 export function leadTo(doc: string, anchor: string, current: string | null, open: () => void) {
-  if (doc === current && showAnchor(anchor)) return;
+  letGo();
   waiting = { doc, anchor };
+  document.dispatchEvent(new CustomEvent(LEAD_EVENT, { detail: { doc, anchor } }));
+  if (doc === current && showAnchor(anchor)) {
+    waiting = null;
+    return;
+  }
   open();
 }
 
 /** An anchor drawn: if it was asked for, it is shown now. */
 export function anchorDrawn(doc: string | null, anchor: string) {
   if (!waiting || waiting.doc !== doc || waiting.anchor !== anchor) return;
-  waiting = null;
-  requestAnimationFrame(() => showAnchor(anchor));
+  const asked = waiting;
+  requestAnimationFrame(() => {
+    // Only if nothing else was asked for meanwhile — and only once it is on
+    // the page itself: a preview drawing it first does not count.
+    if (waiting === asked && showAnchor(anchor)) waiting = null;
+  });
 }
 
 /** An anchor closing a line: `… planen. ^2f9e17`, in a table's last cell too. */

@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, type DragEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type DragEvent, type ReactNode } from "react";
 import type { TemplateBlock } from "../../api/client";
 import { CreateButton } from "../../features/wiki/CreateButton";
+import { anchorsIn, LEAD_EVENT, pendingAnchor } from "../Anchors";
 
 /** What a block carries while it is dragged: its key. */
 const DRAGGED = "application/x-aw-block";
@@ -9,13 +10,35 @@ const DRAGGED = "application/x-aw-block";
 export const Unfolded = createContext(false);
 
 /**
+ * Whether a text holds the anchor asked for in its document — then it opens,
+ * whatever the reader folded, until they fold it again. `source`: the text.
+ */
+function useAnchorOpens(article: string, source?: string): [boolean, () => void] {
+  const holds = (anchor: string | null) => !!anchor && !!source && anchorsIn(source).some((mark) => mark.anchor === anchor);
+  const asked = holds(pendingAnchor(article));
+  const [opened, setOpened] = useState<string | null>(null);
+  useEffect(() => {
+    if (asked) setOpened(article);
+    const lead = (e: Event) => {
+      const { doc, anchor } = (e as CustomEvent<{ doc: string; anchor: string }>).detail;
+      if (doc === article && holds(anchor)) setOpened(article);
+    };
+    document.addEventListener(LEAD_EVENT, lead);
+    return () => document.removeEventListener(LEAD_EVENT, lead);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [article, source, asked]);
+  return [asked || opened === article, () => setOpened(null)];
+}
+
+/**
  * Whether a block of a document is folded — for this reader, on this
  * device. The type says how it starts (`fold=folded`); what the reader did last
  * is remembered, and where nothing can be remembered it starts as the type
  * says.
  */
-export function useFold(article: string, block: string, initial: boolean): [boolean, () => void] {
+export function useFold(article: string, block: string, initial: boolean, source?: string): [boolean, () => void] {
   const open = useContext(Unfolded);
+  const [revealed, unreveal] = useAnchorOpens(article, source);
   // What the reader did counts until the type says otherwise.
   const key = `fold:${article}:${block}:${initial ? "folded" : "open"}`;
   const [folded, setFolded] = useState(() => {
@@ -26,8 +49,11 @@ export function useFold(article: string, block: string, initial: boolean): [bool
       return initial;
     }
   });
-  const toggle = () =>
+  const toggle = () => {
+    unreveal();
     setFolded((was) => {
+      // Opened for an anchor: it was open, the reader folds it.
+      if (revealed) was = false;
       try {
         localStorage.setItem(key, was ? "0" : "1");
       } catch {
@@ -35,15 +61,17 @@ export function useFold(article: string, block: string, initial: boolean): [bool
       }
       return !was;
     });
-  return [folded && !open, toggle];
+  };
+  return [folded && !open && !revealed, toggle];
 }
 
 /**
  * Which headings of a block's text are folded — for this reader, on this
  * device, as `useFold` remembers a block. A heading starts open.
  */
-export function useFoldedHeadings(article: string, block: string): [ReadonlySet<string>, (head: string) => void] {
+export function useFoldedHeadings(article: string, block: string, source?: string): [ReadonlySet<string>, (head: string) => void] {
   const open = useContext(Unfolded);
+  const [revealed, unreveal] = useAnchorOpens(article, source);
   const key = `fold:${article}:${block}:headings`;
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => {
     try {
@@ -52,9 +80,10 @@ export function useFoldedHeadings(article: string, block: string): [ReadonlySet<
       return new Set();
     }
   });
-  const toggle = (head: string) =>
+  const toggle = (head: string) => {
+    unreveal();
     setFolded((was) => {
-      const now = new Set(was);
+      const now = new Set(revealed ? [] : was);
       if (!now.delete(head)) now.add(head);
       try {
         localStorage.setItem(key, JSON.stringify([...now]));
@@ -63,7 +92,8 @@ export function useFoldedHeadings(article: string, block: string): [ReadonlySet<
       }
       return now;
     });
-  return [open ? NONE : folded, toggle];
+  };
+  return [open || revealed ? NONE : folded, toggle];
 }
 
 const NONE: ReadonlySet<string> = new Set();
@@ -110,6 +140,7 @@ export function FoldBlock({
   onMove,
   access,
   children,
+  source,
 }: {
   article: string;
   block: TemplateBlock;
@@ -120,9 +151,11 @@ export function FoldBlock({
   /** Another block was dropped here — `key` goes before or after this one. */
   onMove?: (key: string, after: boolean) => void;
   children: ReactNode;
+  /** Its text: it opens when an anchor in it is asked for. */
+  source?: string;
 }) {
   const fold = block.fold ?? "open";
-  const [folded, toggle] = useFold(article, block.key, fold === "folded");
+  const [folded, toggle] = useFold(article, block.key, fold === "folded", source);
   const folds = !!block.title && fold !== "off";
   const shut = folds && folded;
   const sign = folds && <FoldChevron open={!shut} />;

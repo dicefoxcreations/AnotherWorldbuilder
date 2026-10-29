@@ -244,6 +244,7 @@ export function ArticlePage({
           key={section}
           article={article.id}
           block={block}
+          source={layers.map((l) => l.text).join("\n")}
           access={!glance && differs(layers[0])}
         >
           <BlockText article={article.id} block={section} layers={layers} base={article.visibility} access={glance ? undefined : region} resolve={resolve} values={valueOf} onPlace={onPlace} />
@@ -255,7 +256,7 @@ export function ArticlePage({
     <ReadableParts.Provider value={readableParts}>
     <RollScopeContext.Provider value={rolls}>
     <NumberHow.Provider value={numberHow}>
-    <article className="article-page">
+    <article className="article-page" data-document={article.id}>
       <ArticleHead
         icon={icon}
         title={article.name}
@@ -388,7 +389,7 @@ export function BlockText({
   // Pins set apart for some readers stand on their map again.
   const texts = useMemo(() => joinPins(layers), [layers]);
   const trees = useMarkdowns(texts);
-  const [folded, toggle] = useFoldedHeadings(article, block);
+  const [folded, toggle] = useFoldedHeadings(article, block, texts.join("\n"));
   const folds: TopFolds[] | null = useMemo(() => {
     if (!trees) return null;
     const placed = sectioned(

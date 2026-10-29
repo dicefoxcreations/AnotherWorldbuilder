@@ -697,6 +697,10 @@ pub struct Template {
     /// [`FieldKind::Group`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub group: bool,
+    /// Not in the outline the app sets out by itself — a type only other
+    /// documents point to. The GM may still place it there.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub navigation_hidden: bool,
     /// The rules of the game its documents reckon with — `mod(x) =
     /// floor((x - 10) / 2)`. Inherited like the properties, and taken in
     /// with a group.
@@ -910,6 +914,16 @@ pub fn check_pattern(pattern: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_type_kept_out_of_the_outline_says_so_and_only_then() {
+        let shown: Template = serde_json::from_str(r#"{"id":"book","name":"Book"}"#).unwrap();
+        assert!(!shown.navigation_hidden);
+        let hidden: Template = serde_json::from_str(r#"{"id":"gender","name":"Gender","navigation_hidden":true}"#).unwrap();
+        assert!(hidden.navigation_hidden);
+        assert_eq!(serde_json::to_value(hidden).unwrap()["navigation_hidden"], true);
+        assert!(serde_json::to_value(shown).unwrap().get("navigation_hidden").is_none());
+    }
+
     /// A template that contains everything there is.
     ///
     /// A world starts empty, there are no templates shipped with it. For the
@@ -921,6 +935,7 @@ mod tests {
             name: "Probe".into(),
             supertype: String::new(),
             group: false,
+            navigation_hidden: false,
             rules: Vec::new(),
             icon: "🧪".into(),
             description: "For the tests".into(),
@@ -1012,6 +1027,7 @@ mod tests {
             name: "Character".into(),
             supertype: String::new(),
             group: false,
+            navigation_hidden: false,
             rules: Vec::new(),
             icon: "📄".into(),
             description: String::new(),
@@ -1035,6 +1051,7 @@ mod tests {
             name: "Test".into(),
             supertype: String::new(),
             group: false,
+            navigation_hidden: false,
             rules: Vec::new(),
             icon: String::new(),
             description: String::new(),
@@ -1066,6 +1083,7 @@ mod tests {
             name: "Test".into(),
             supertype: String::new(),
             group: false,
+            navigation_hidden: false,
             rules: Vec::new(),
             icon: String::new(),
             description: String::new(),
