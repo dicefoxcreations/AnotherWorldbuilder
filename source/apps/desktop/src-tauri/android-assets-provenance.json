@@ -1,0 +1,56 @@
+{
+  "launcher": {
+    "source": "DiceFox brand/dicefox/v12, unchanged apps/desktop/src-tauri/icons/icon.png",
+    "sha256": "222dcff623c47edfb2553fcf0e765738a28f3ae98686ef64d54ed947bfb35f8b",
+    "use": "AnotherWorldbuilder (res/drawable/app_icon.png)"
+  },
+  "server notification": {
+    "source": "DiceFox icons/another-worldbuilder/fine/v2/compact/mono/server.svg",
+    "sourceSha256": "c8b0a5c24866f46024995041eea0ca5fcc0e60e1c8ab9986aaf0aa2c73bd0ec6",
+    "adaptation": "Android VectorDrawable, same 24px geometry and 1.5px outline, white notification mask",
+    "file": "res/drawable/server_ic_server.xml"
+  },
+  "server navigation": {
+    "source": "DiceFox icons/another-worldbuilder/fine/v2/svg/mono/list.svg",
+    "sourceSha256": "1288aea0e1b051f77b2e5162ade20c0c0a8104ed38753ff643395c8f81befc71",
+    "adaptation": "Android VectorDrawable; three full horizontal strokes in the same 24px grid and 1.35px fine outline, without list bullets.",
+    "file": "res/drawable/server_ic_menu.xml"
+  },
+  "server toolbar": {
+    "save": {
+      "source": "DiceFox icons/another-worldbuilder/fine/v2/svg/mono/done.svg",
+      "sourceSha256": "2ec1286e1f4f0a62c9f0be18e43dffe4eb586e510f350b07799a736efb3c7563",
+      "adaptation": "Android VectorDrawable; original paths and 1.35px outline, tinted by the app.",
+      "file": "res/drawable/server_ic_save.xml"
+    },
+    "reset": {
+      "source": "DiceFox icons/another-worldbuilder/fine/v2/svg/mono/undo.svg",
+      "sourceSha256": "25635d4801219cdc0ae97fc62ec07928d32f1a149f005b23e1554607de201176",
+      "adaptation": "Android VectorDrawable; original paths and 1.35px outline, tinted by the app.",
+      "file": "res/drawable/server_ic_reset.xml"
+    },
+    "stop": {
+      "source": "DiceFox icons/another-worldbuilder/fine/v2/svg/mono/close.svg",
+      "sourceSha256": "56ee37c9688c161b9c33e54e99e41ea4fae2b432809eea422ee163762ef3fa03",
+      "adaptation": "Android VectorDrawable; original paths and 1.35px outline, tinted by the app.",
+      "file": "res/drawable/server_ic_stop.xml"
+    },
+    "restart": {
+      "source": "DiceFox icons/another-worldbuilder/fine/v2/svg/mono/reset.svg",
+      "sourceSha256": "d8ce32574faf43145645768ac385667fe62414422cd72f6b0aa029d3965ac776",
+      "adaptation": "Android VectorDrawable; original paths and 1.35px outline, tinted by the app.",
+      "file": "res/drawable/server_ic_restart.xml"
+    },
+    "refresh": {
+      "source": "DiceFox icons/another-worldbuilder/fine/v2/svg/mono/refresh.svg",
+      "sourceSha256": "e35488e5c80ddad3e48ec93b48b3f4e39994403127a9601fa5c4a78c0447c7d2",
+      "adaptation": "Android VectorDrawable; original paths and 1.35px outline, tinted by the app.",
+      "file": "res/drawable/server_ic_refresh.xml"
+    }
+  },
+  "server launcher": {
+    "source": "DiceFox brand/aw-server/v1/platform/icon.png, unchanged",
+    "sha256": "abd7308c2f18fff0571750d52069e37a7d444500dc6614a71c8d497430346954",
+    "use": "AW Server's icon (res/drawable/server_icon.png); also icons/aw-server.png and .ico on Linux and Windows"
+  }
+}

@@ -1,0 +1,7 @@
+build/
+releases/
+input/
+output/
+**/node_modules/
+**/target/
+.git/

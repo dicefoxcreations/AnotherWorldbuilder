@@ -1,0 +1,210 @@
+use aw_crypto::{Identity, IdentityPublic};
+use aw_sync::world::{Ask, Host, Offer, Reply, WorldNet};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+/// A game master with one world: who is a member, who asked to join.
+struct Gm {
+    offered: Mutex<bool>,
+    members: Mutex<Vec<String>>,
+    requests: Mutex<Vec<String>>,
+}
+
+impl Host for Gm {
+    fn offers(&self) -> Vec<Offer> {
+        if !*self.offered.lock().unwrap() {
+            return Vec::new();
+        }
+        vec![Offer { world: "world:eldermere".into(), name: "Eldermere".into(), icon: "🏰".into(), gm: "Marla".into() }]
+    }
+    fn answer(&self, _world: &str, who: &IdentityPublic, ask: Ask) -> Reply {
+        let id = who.id.to_string();
+        if self.members.lock().unwrap().contains(&id) {
+            return match ask {
+                Ask::Call { command, args } => Reply::Called { value: Some(format!("{command} for {}: {} bytes", who.name, args.len())), error: None },
+                _ => Reply::Joined,
+            };
+        }
+        match ask {
+            Ask::Join => {
+                self.requests.lock().unwrap().push(id);
+                Reply::Requested
+            }
+            _ => Reply::NotMember,
+        }
+    }
+}
+
+struct Nobody;
+impl Host for Nobody {
+    fn offers(&self) -> Vec<Offer> {
+        Vec::new()
+    }
+    fn answer(&self, _: &str, _: &IdentityPublic, _: Ask) -> Reply {
+        Reply::NotOffered
+    }
+}
+
+/// What a member asks most: the world as they see it.
+fn view() -> Ask {
+    Ask::Call { command: "view".into(), args: "{}".into() }
+}
+
+fn gm() -> Arc<Gm> {
+    Arc::new(Gm { offered: Mutex::new(true), members: Mutex::new(Vec::new()), requests: Mutex::new(Vec::new()) })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stranger_asks_to_join_and_gets_the_world_once_admitted() {
+    let host = gm();
+    let gm_net = WorldNet::start(host.clone(), aw_sync::world::Reach { lan: true, ..Default::default() }).await.unwrap();
+    let player_net = WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach { lan: true, ..Default::default() }).await.unwrap();
+    let bob = Identity::create("Bob").unwrap();
+    let at = gm_net.loopback_addr();
+
+    let reply = player_net.ask_at(at.clone(), "world:eldermere", &bob, view()).await.unwrap();
+    assert_eq!(reply, Reply::NotMember);
+
+    let reply = player_net.ask_at(at.clone(), "world:eldermere", &bob, Ask::Join).await.unwrap();
+    assert_eq!(reply, Reply::Requested);
+    assert_eq!(*host.requests.lock().unwrap(), vec![bob.id().to_string()], "the request waits for the GM");
+
+    host.members.lock().unwrap().push(bob.id().to_string());
+    let big = "x".repeat(100_000);
+    let reply = player_net.ask_at(at, "world:eldermere", &bob, Ask::Call { command: "document_save".into(), args: big }).await.unwrap();
+    assert_eq!(reply, Reply::Called { value: Some("document_save for Bob: 100000 bytes".into()), error: None }, "big asks come through after the proof");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_world_not_offered_stays_closed() {
+    let host = gm();
+    host.members.lock().unwrap().push("anyone".into());
+    *host.offered.lock().unwrap() = false;
+    let gm_net = WorldNet::start(host.clone(), aw_sync::world::Reach { lan: true, ..Default::default() }).await.unwrap();
+    let player_net = WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach { lan: true, ..Default::default() }).await.unwrap();
+    let bob = Identity::create("Bob").unwrap();
+    let reply = player_net.ask_at(gm_net.loopback_addr(), "world:eldermere", &bob, Ask::Join).await.unwrap();
+    assert_eq!(reply, Reply::NotOffered);
+    assert!(host.requests.lock().unwrap().is_empty(), "nothing reached the host");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_offered_world_is_found_on_the_network() {
+    let host = gm();
+    let _gm_net = WorldNet::start(host.clone(), aw_sync::world::Reach { lan: true, ..Default::default() }).await.unwrap();
+    let player_net = WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach { lan: true, ..Default::default() }).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while !player_net.found().iter().any(|o| o.world == "world:eldermere") {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the offer was not found via mDNS");
+    let offer = player_net.found().into_iter().find(|o| o.world == "world:eldermere").unwrap();
+    assert_eq!((offer.name.as_str(), offer.gm.as_str()), ("Eldermere", "Marla"));
+
+    // And it can be asked through what was found.
+    let bob = Identity::create("Bob").unwrap();
+    let reply = player_net.ask("world:eldermere", &bob, Ask::Join).await.unwrap();
+    assert_eq!(reply, Reply::Requested);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_host_that_is_gone_is_named_as_such() {
+    let player_net = WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach { lan: true, ..Default::default() }).await.unwrap();
+    let gone = WorldNet::start(gm(), aw_sync::world::Reach { lan: true, ..Default::default() }).await.unwrap();
+    let at = gone.loopback_addr();
+    drop(gone);
+    let bob = Identity::create("Bob").unwrap();
+    // Usually no answer at all; a test running beside this one may have taken
+    // the port meanwhile — then it is the wrong host. Either way: no reply.
+    let error = player_net.ask_at(at, "world:eldermere", &bob, Ask::Join).await.unwrap_err().to_string();
+    assert!(!error.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_server_at_one_address_answers_there_again_and_again() {
+    // Only on a machine that has a network to name.
+    let Some(ip) = aw_sync::world::own_ipv4() else { return };
+    let host = gm();
+    let bob = Identity::create("Bob").unwrap();
+    host.members.lock().unwrap().push(bob.id().to_string());
+    let server_net = WorldNet::start(host.clone(), aw_sync::world::Reach { only: Some(ip), ..Default::default() }).await.unwrap();
+    let at = server_net.home_address().unwrap();
+    assert_eq!(at.ip(), std::net::IpAddr::V4(ip));
+    let server = aw_sync::world::Server { endpoint: server_net.id(), addrs: vec![at.to_string()] };
+    let player_net = WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach::default()).await.unwrap();
+    for _ in 0..3 {
+        let reply = player_net.ask_server(&server, "world:eldermere", &bob, view()).await.unwrap();
+        assert!(matches!(reply, Reply::Called { .. }), "{reply:?}");
+    }
+}
+
+/// Asks share one connection, many at once; a host started anew at the same
+/// port is reached again, without anyone noticing the old one went.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn many_asks_share_one_connection_and_a_restarted_host_is_reached_again() {
+    let host = gm();
+    let bob = Identity::create("Bob").unwrap();
+    host.members.lock().unwrap().push(bob.id().to_string());
+    let secret = Some([9u8; 32]);
+    let reach = aw_sync::world::Reach { secret, port: Some(0), ..Default::default() };
+    let gm_net = WorldNet::start(host.clone(), reach.clone()).await.unwrap();
+    let at = gm_net.loopback_addr();
+    let player_net = Arc::new(WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach::default()).await.unwrap());
+    let bob = Arc::new(bob);
+    let started = std::time::Instant::now();
+    let asks: Vec<_> = (0..40)
+        .map(|_| {
+            let (net, at, bob) = (player_net.clone(), at.clone(), bob.clone());
+            tokio::spawn(async move { net.ask_at(at, "world:eldermere", &bob, view()).await })
+        })
+        .collect();
+    for ask in asks {
+        assert!(matches!(ask.await.unwrap().unwrap(), Reply::Called { .. }));
+    }
+    assert!(started.elapsed() < Duration::from_secs(5), "40 asks took {:?}", started.elapsed());
+
+    let port = at.ip_addrs().next().unwrap().port();
+    drop(gm_net);
+    // The old socket goes a moment later: the port is taken again once free.
+    let mut again = None;
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Ok(net) = WorldNet::start(host.clone(), aw_sync::world::Reach { port: Some(port), port_required: true, ..reach.clone() }).await {
+            again = Some(net);
+            break;
+        }
+    }
+    let again = again.expect("the port is free again");
+    let reply = player_net.ask_at(again.loopback_addr(), "world:eldermere", &bob, view()).await.unwrap();
+    assert!(matches!(reply, Reply::Called { .. }), "{reply:?}");
+}
+
+/// One address holds a few connections at once, not every place there is;
+/// once one of them goes, the next may come.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_address_cannot_take_every_connection() {
+    let host = gm();
+    let bob = Identity::create("Bob").unwrap();
+    host.members.lock().unwrap().push(bob.id().to_string());
+    let gm_net = WorldNet::start(host.clone(), aw_sync::world::Reach::default()).await.unwrap();
+    let at = gm_net.loopback_addr();
+    let mut devices = Vec::new();
+    for _ in 0..9 {
+        devices.push(WorldNet::start(Arc::new(Nobody), aw_sync::world::Reach::default()).await.unwrap());
+    }
+    let mut answered = 0;
+    for device in &devices {
+        if device.ask_at(at.clone(), "world:eldermere", &bob, view()).await.is_ok() {
+            answered += 1;
+        }
+    }
+    assert_eq!(answered, 8, "the ninth from the same address is refused");
+    drop(devices.remove(0));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let last = devices.last().unwrap();
+    assert!(last.ask_at(at, "world:eldermere", &bob, view()).await.is_ok(), "a place came free");
+}

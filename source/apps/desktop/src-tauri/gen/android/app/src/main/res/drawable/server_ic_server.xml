@@ -1,0 +1,7 @@
+<!-- DiceFox Feine Kontur v2, compact/mono/server.svg; see assets-provenance.json. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M5,3.5H19A1,1 0,0 1,20 4.5V10.5H4V4.5A1,1 0,0 1,5 3.5ZM5,13.5H19A1,1 0,0 1,20 14.5V20.5H4V14.5A1,1 0,0 1,5 13.5Z"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="1.5" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#06FFFFFF" />
+    <path android:pathData="M6.4,7a0.6,0.6 0,1 0,1.2 0a0.6,0.6 0,1 0,-1.2 0M6.4,17a0.6,0.6 0,1 0,1.2 0a0.6,0.6 0,1 0,-1.2 0" android:fillColor="#FFFFFFFF" />
+</vector>

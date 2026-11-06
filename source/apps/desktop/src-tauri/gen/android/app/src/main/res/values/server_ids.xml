@@ -1,0 +1,27 @@
+<resources>
+    <item name="server_status" type="id" />
+    <item name="server_admin_id" type="id" />
+    <item name="server_name" type="id" />
+    <item name="server_port" type="id" />
+    <item name="server_addresses" type="id" />
+    <item name="server_start" type="id" />
+    <item name="server_stop" type="id" />
+    <item name="server_export" type="id" />
+    <item name="server_restart" type="id" />
+    <item name="server_navigation_menu" type="id" />
+    <item name="server_navigation_drawer" type="id" />
+    <item name="server_nav_server" type="id" />
+    <item name="server_nav_options" type="id" />
+    <item name="server_nav_worlds" type="id" />
+    <item name="server_nav_about" type="id" />
+    <item name="server_save_options" type="id" />
+    <item name="server_reset_options" type="id" />
+    <item name="server_advanced_options" type="id" />
+    <item name="server_wifi_only" type="id" />
+    <item name="server_resume_on_boot" type="id" />
+    <item name="server_connection_code" type="id" />
+    <item name="server_copy_code" type="id" />
+    <item name="server_hosted_worlds" type="id" />
+    <item name="server_refresh_worlds" type="id" />
+    <item name="server_third_party_licenses" type="id" />
+</resources>

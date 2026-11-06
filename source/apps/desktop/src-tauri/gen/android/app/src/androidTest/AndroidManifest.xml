@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The server's device test runs where the server runs: its own process. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation
+        android:name="com.dicefoxcreations.anotherworldbuilder.server.ServerInstrumentation"
+        android:targetPackage="com.dicefoxcreations.anotherworldbuilder"
+        android:targetProcesses="com.dicefoxcreations.anotherworldbuilder:server" />
+</manifest>

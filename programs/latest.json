@@ -1,0 +1,15 @@
+{
+  "version": "0.2.11",
+  "notes": "**Writing and moving text**, **who sees what in the side bar**, and **AW Server** with its own icon and tray.\n\n- **Text into a new document:** select text, choose a type and a name – it moves there and stays embedded where it stood.\n- **Side bar:** who sees and changes a document or a section is set there; the document's name and its infobox open their settings. A document under cover can be linked under its alias without giving it away.\n- **Embedded documents and sections** read exactly as on their own page.\n- **Browser import:** content imported again replaces what the world holds of it, and shows in the open world right away.\n- **AW Server:** its own icon, a tray menu to start and stop it, the admin ID taken from the app, always reachable on the local network; the app keeps off its port.\n- **Server backups** at a time of day, weekly on a weekday (needs this server version).\n- **Phone:** backups and the profile live in *Documents/AnotherWorldbuilder* and outlast reinstalling; Back closes what is open.\n- **Look:** new icons, Ember colours by default (Night to choose), a smoother loader.",
+  "pub_date": "2026-11-06T07:17:53.719Z",
+  "platforms": {
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUWMzdjc0aW5HMFk4S2JZUzEvOUpVVmpSSTM0VmJ4QU1tYmR6c3hncFlqT2RuQllkSllxZ1J1SFEram5NNlJ4KzdvNkkrekZCWGdnaE0yY3J1eFhNUXdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTQ3MzU5CWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjIuMTFfYW1kNjQuQXBwSW1hZ2UKL2RwT2IwZk5ZdW44S1hwbHNMRnVFSXVOakVIaWg1cmMzQnJhV3QxUk5qSUxmM3Rwc3NMOHArc29JVTVnQUdDNExEb0N2WDBqS25PQ0U4SEFGQ2paREE9PQo=",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.2.11/AnotherWorldbuilder_0.2.11_amd64.AppImage"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUVJKUG9QRVg3MHpEaEc3UzFTc2JVTUZ5RlNNVnlxS2JlUXBKSElCKzBhdXJpUW9KM1Zoc2YyaXFaYmJaSmFSV0lGb2hpdTZzZmRjeGk2K05zaWcweXdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzOTQ5NDQxCWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjIuMTFfeDY0LXNldHVwLmV4ZQpTTnVLVERId2FFaGhPQ2ZmNFkzTk05QURnT0RyTVJ0TmNzNGcyZWhTZEZYVUkzNVQvb2RwWEdFak5FRnk0NzRpYk9vczgrLzliT28wOHNaYVhKYWpCdz09Cg==",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.2.11/AnotherWorldbuilder_0.2.11_x64-setup.exe"
+    }
+  }
+}

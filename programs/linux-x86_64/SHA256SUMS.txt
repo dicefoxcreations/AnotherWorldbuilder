@@ -1,0 +1,2 @@
+206c4934df03792ec55e3c09177e9494b2435e95cdae5d03a0b2b16b116ec0f0  AnotherWorldbuilder_0.2.11_amd64.AppImage
+da6034850a8fcb16092258184632df962a09aa42021a3c44b10a3d92355a7f4b  AnotherWorldbuilder_0.2.11_amd64.deb

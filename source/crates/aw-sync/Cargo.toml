@@ -1,0 +1,25 @@
+[package]
+publish = false
+name = "aw-sync"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.91"
+
+[dependencies]
+aw-crypto.workspace = true
+iroh = { version = "=1.2.0", default-features = false, features = ["tls-ring"] }
+mdns-sd = "0.20"
+# Asks the router (UPnP, PCP, NAT-PMP) to open our port — no server of anyone's.
+portmapper = { version = "=0.19.3", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "net"] }
+serde.workspace = true
+serde_json.workspace = true
+hex = "0.4.3"
+zstd = "0.13"
+getrandom = "0.4.3"
+# Already used by Iroh; explicitly controls IPv6 dual-stack TCP discovery.
+socket2 = "0.6"
+
+[dev-dependencies]
+tempfile = "3"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter"] }

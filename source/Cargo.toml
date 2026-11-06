@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aw-crypto",
+    "crates/aw-model",
+    "crates/aw-store",
+    "crates/aw-sync",
+    "apps/desktop/src-tauri",
+    "tools/testbench",
+]
+
+[workspace.package]
+version = "0.2.11"
+edition = "2021"
+rust-version = "1.91"
+
+[workspace.dependencies]
+aw-crypto = { path = "crates/aw-crypto" }
+aw-model = { path = "crates/aw-model" }
+aw-store = { path = "crates/aw-store" }
+aw-sync = { path = "crates/aw-sync" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+thiserror = "2"
+# The state of a world: SQLite, built in.
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+# Debug builds are what the app is tried with day to day. Unoptimised, the
+# cryptography alone makes opening a world take seconds; optimised libraries
+# keep it as quick as a release while our own code stays easy to debug.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.aw-crypto]
+opt-level = 3
