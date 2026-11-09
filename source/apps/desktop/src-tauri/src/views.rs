@@ -31,8 +31,9 @@ fn state(store: &Store, world: &str, reader: &Reader) -> Answer<(u64, String)> {
 /// Shapes the documents into what the interface gets.
 struct Viewer {
     reader: Reader,
-    /// What one wrote that waits for the game master stands there for oneself.
-    own_waiting: bool,
+    /// What one wrote that waits for the game master stands there for
+    /// oneself: the documents it waits in, asked once.
+    own_waiting: std::collections::HashSet<String>,
     /// The types, for the sections a player may start — none for the GM.
     templates: Vec<Template>,
     effective: std::collections::HashMap<String, Option<Template>>,
@@ -40,14 +41,18 @@ struct Viewer {
 
 impl Viewer {
     fn new(store: &Store, world: &str, reader: Reader) -> Answer<Self> {
-        let own_waiting = !reader.is_gm() && store.moderated(world)?;
+        let own_waiting = if !reader.is_gm() && store.moderated(world)? {
+            store.db(world)?.waiting(Some(store.actor()?.as_str()))?.into_iter().map(|v| v.document).collect()
+        } else {
+            Default::default()
+        };
         let templates = if reader.is_gm() { Vec::new() } else { store.load_templates(world)? };
         Ok(Viewer { reader, own_waiting, templates, effective: Default::default() })
     }
 
     /// A document as this reader sees it — none where they see nothing.
     fn view(&mut self, store: &Store, world: &str, doc: store::Document) -> Answer<Option<ArticleView>> {
-        let doc = if self.own_waiting { document::with_own_waiting(store, world, doc)? } else { doc };
+        let doc = if self.own_waiting.contains(&doc.id) { document::with_own_waiting(store, world, doc)? } else { doc };
         let Some(mut view) = article_view(&doc, &self.reader) else { return Ok(None) };
         if !self.reader.is_gm() && !view.cover {
             let templates = &self.templates;

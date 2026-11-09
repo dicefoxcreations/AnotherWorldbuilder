@@ -2197,7 +2197,7 @@ pub(crate) fn caret_in(store: &Store, world: &str, article: &str, caret: Caret) 
             read.document.blocks.iter().flat_map(|b| b.parts.iter()).find_map(|p| {
                 let i = p.text.find(MARK_START)?;
                 let start = utf16_len(&p.text[..i]);
-                let end = p.text.find(MARK_END).map(|j| utf16_len(&p.text[..j]) - 1).unwrap_or(start);
+                let end = p.text.find(MARK_END).map(|j| utf16_len(&p.text[..j]).saturating_sub(1)).unwrap_or(start);
                 Some((p.key.clone(), start, end, p.text.replace([MARK_START, MARK_END], "")))
             })
         }
@@ -2229,7 +2229,7 @@ pub(crate) fn caret_at(store: &Store, world: &str, article: &str, layer: &str, s
     part.text = marked;
     let code = document::to_code(&doc);
     let (Some(i), Some(j)) = (code.find(MARK_START), code.find(MARK_END)) else { return Ok(None) };
-    Ok(Some(CaretAt { part: section.clone(), part_start, part_end, code_start: utf16_len(&code[..i]), code_end: utf16_len(&code[..j]) - 1 }))
+    Ok(Some(CaretAt { part: section.clone(), part_start, part_end, code_start: utf16_len(&code[..i]), code_end: utf16_len(&code[..j]).saturating_sub(1) }))
 }
 
 // --- Versions -------------------------------------------------------------

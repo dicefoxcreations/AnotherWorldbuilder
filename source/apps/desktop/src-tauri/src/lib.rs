@@ -80,7 +80,7 @@ pub struct IdentityInfo {
     pub avatar: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MemberInfo {
     pub id: String,
     pub name: String,
@@ -95,7 +95,7 @@ pub struct MemberInfo {
     pub slot: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WorldInfo {
     pub id: String,
     pub name: String,
@@ -1346,8 +1346,12 @@ pub(crate) fn member_attributes_set_in(store: &Store, world: &str, member: &str,
     for a in &attributes {
         a.trim().parse::<Attribute>().map_err(AppError::from)?;
     }
-    m.attributes = attributes.into_iter().map(|a| a.trim().to_string()).filter(|a| !["players", "all", "gm"].contains(&a.as_str())).collect();
-    m.attributes.dedup();
+    m.attributes = Vec::new();
+    for a in attributes.into_iter().map(|a| a.trim().to_string()) {
+        if !["players", "all", "gm"].contains(&a.as_str()) && !m.attributes.contains(&a) {
+            m.attributes.push(a);
+        }
+    }
     db.put_member(&m)?;
     Ok(())
 }
@@ -1619,7 +1623,6 @@ pub(crate) fn propose_document(store: &Store, world: &str, article_type: String,
     create_document(store, world, own.id.clone(), slug, name, auth.view.clone(), layers)
 }
 
-/// What the one a command runs for knows by name in this world.
 /// The names the one a command runs for knows — from the documents' bases,
 /// kept while the world stays as it is (`document::known_shared`).
 fn known_to_me(store: &Store, world: &str) -> Answer<std::sync::Arc<document::Known>> {
@@ -2133,7 +2136,7 @@ fn template_read(
 pub(crate) fn template_read_in(store: &Store, world: String, text: String, base: Template) -> Answer<editor::ReadResult> {
     // What the supertypes and groups bring along may be bound as well.
     let templates = store.load_templates(&world)?;
-    Ok(editor::read(&text, base, &directory(store, &world)?, &templates))
+    Ok(editor::read(&text, base, &directory(&templates), &templates))
 }
 
 /// Which types exist in this world — id and name.
@@ -2141,8 +2144,8 @@ pub(crate) fn template_read_in(store: &Store, world: String, text: String, base:
 /// The text carries the name of a type, what is stored is its id. Without the
 /// directory neither could be translated into the other, nor could it be said
 /// that a name does not occur at all.
-fn directory(store: &Store, world: &str) -> Result<template_text::Directory, AppError> {
-    Ok(template_text::Directory::new(store.load_templates(world)?.into_iter().map(|t| (t.id, t.name))))
+fn directory(templates: &[Template]) -> template_text::Directory {
+    template_text::Directory::new(templates.iter().map(|t| (t.id.clone(), t.name.clone())))
 }
 
 #[cfg(feature = "gui")]
@@ -2166,9 +2169,10 @@ pub(crate) fn template_write_in(store: &Store, world: String, mut template: Temp
     for block in &mut template.blocks {
         block.new = document::types_as(known, &block.new, false);
     }
-    default_documents(&mut template, &known, false);
+    default_documents(&mut template, known, false);
     // The infobox shows properties by key; the text names them.
-    let mut all: Vec<Template> = store.load_templates(&world)?.into_iter().filter(|t| t.id != template.id).collect();
+    let stored = store.load_templates(&world)?;
+    let mut all: Vec<Template> = stored.iter().filter(|t| t.id != template.id).cloned().collect();
     all.push(template.clone());
     let whole = types::effective(&all, &template);
     for shown in &mut template.infobox.show {
@@ -2188,7 +2192,7 @@ pub(crate) fn template_write_in(store: &Store, world: String, mut template: Temp
             *key = p.label.clone();
         }
     }
-    Ok(template_text::to_text(&template, &directory(store, &world)?))
+    Ok(template_text::to_text(&template, &directory(&stored)))
 }
 
 #[cfg(feature = "gui")]

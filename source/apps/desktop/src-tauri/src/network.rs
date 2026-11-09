@@ -329,12 +329,8 @@ pub(crate) fn remote_worlds(store: &Store) -> Answer<Vec<WorldInfo>> {
         .remote
         .iter()
         .filter(|(_, r)| !r.asked)
-        .map(|(world, remote)| told.get(world).map(|i| as_here(clone_info(i), &remote.server)).unwrap_or_else(|| sketch(world, remote)))
+        .map(|(world, remote)| told.get(world).map(|i| as_here(i.clone(), &remote.server)).unwrap_or_else(|| sketch(world, remote)))
         .collect())
-}
-
-fn clone_info(info: &WorldInfo) -> WorldInfo {
-    serde_json::from_value(serde_json::to_value(info).unwrap_or_default()).unwrap_or_else(|_| sketch(&info.id, &RemoteWorld::default()))
 }
 
 /// Notes a world on a server — or forgets it (`None`).
@@ -410,7 +406,7 @@ pub(crate) async fn call_raw(store: &Store, world: &str, command: &str, args: se
     if value.len() < 256 * 1024 && value.contains("\"is_gm\"") {
         if let Ok(info) = serde_json::from_str::<WorldInfo>(&value) {
             if info.id == world {
-                told().insert(world.to_string(), clone_info(&info));
+                told().insert(world.to_string(), info.clone());
                 return Ok(serde_json::to_string(&as_here(info, &remote.server))?);
             }
         }
@@ -460,7 +456,7 @@ pub(crate) async fn connect(store: &Store, world: &str) -> Answer<WorldInfo> {
     let value = call(store, &world, "world_sync", serde_json::json!({ "since": 0 })).await?;
     let info: WorldInfo = serde_json::from_value(value.get("world").cloned().unwrap_or_default())?;
     open_now().insert(world.clone(), value.get("writes").and_then(|w| w.as_u64()).unwrap_or(0));
-    told().insert(world.clone(), clone_info(&info));
+    told().insert(world.clone(), info.clone());
     let server = remote_of(store, &world).map(|r| r.server).unwrap_or_default();
     // Its name and icon as they are now, for the list.
     if let Some(mut remote) = remote_of(store, &world) {
