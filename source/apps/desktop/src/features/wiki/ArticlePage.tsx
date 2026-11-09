@@ -201,8 +201,6 @@ export function ArticlePage({
   const missing = article.layerTotal - article.layers.length;
   const groups = useMemo(() => (glance ? [] : incoming(templates, all, article)), [glance, templates, all, article]);
 
-  // What `%%Name%%` and an element with `bind=` show: a declared property by
-  // its kind, a free one as the text it is.
   // Numbers with what talents and the like add to them — see `shared/Sheet`.
   const values = summedValues(templates, all, article);
   const numberHow = (key: string) => {
@@ -219,6 +217,8 @@ export function ArticlePage({
     }),
     [templates, all, article, template],
   );
+  // What `%%Name%%` and an element with `bind=` show: a declared property by
+  // its kind, a free one as the text it is.
   const valueOf: ValueOf = (name) => {
     const declared = propertyNamed(template, name);
     const key = declared?.key ?? Object.keys(values).find((k) => k.toLowerCase() === name.trim().toLowerCase());
@@ -237,10 +237,6 @@ export function ArticlePage({
     );
   };
 
-  // A block of the type, as far as this reader can open it. A part this
-  // reader could not open has no layer here — then it is missing, and the
-  // text closes up. Nor does a part with nothing written in it: a wiki shows
-  // no empty headings.
   // Beside a section's title: only what differs from the document — who views, who changes.
   const differs = (part: { policy: string; edit: string }) => {
     const view = samePolicy(part.policy, article.visibility) ? undefined : part.policy;
@@ -259,6 +255,10 @@ export function ArticlePage({
     !glance &&
     (!world.isGm || previewing) &&
     (!!article.startable?.includes(block.key) || (partsOf.get(block.key) ?? []).some((l) => l.mayEdit));
+  // A block of the type, as far as this reader can open it. A part this
+  // reader could not open has no layer here — then it is missing, and the
+  // text closes up. Nor does a part with nothing written in it: a wiki shows
+  // no empty headings.
   const drawBlock = (block: TemplateBlock) => {
     if (article.partial) return null;
     const parts = (partsOf.get(block.key) ?? []).filter((l) => l.text.trim() !== "");
@@ -539,7 +539,7 @@ function PartDisplay({
   onPlace: (o: Place) => void;
 }) {
   // Guarded means: narrower than the document itself — as the editor marks it.
-  const guarded = !first && layer.policy !== base;
+  const guarded = !first && !samePolicy(layer.policy, base);
   // What is rolled in a part only the GM sees stays with the GM.
   const scope = useContext(RollScopeContext);
   const secret = layer.policy.trim().toLowerCase() === "gm";
