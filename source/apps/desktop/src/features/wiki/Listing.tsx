@@ -209,7 +209,7 @@ function ListingOf({ node }: { node: ListingNode }) {
   const entries: Scope[] = (
     along ??
     (picked
-      ? picked.flatMap((id) => articles.filter((a) => a.id === id))
+      ? picked.flatMap((id) => articleById(articles, id) ?? [])
       : articles.filter((a) => (type ? isA(templates, a.articleType, type.id) : a.articleType !== ""))
     ).map(scopeOf)
   )

@@ -398,7 +398,7 @@ export function parentChain(
   for (;;) {
     const id = parentIdOf(all, current);
     if (!id || seen.has(id)) break;
-    const parent = articles.find((a) => a.id === id);
+    const parent = articleById(articles, id);
     if (!parent) {
       out.push(null);
       break;

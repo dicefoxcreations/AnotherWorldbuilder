@@ -2610,7 +2610,7 @@ export function VisualEditor({
     set: (key: string, ids: string[]) => {
       const i = propertyIndex(key);
       if (i < 0) return;
-      const value = ids.flatMap((id) => all.filter((a) => a.id === id)).map((a) => linkTo(templates, a)).join(", ");
+      const value = ids.flatMap((id) => articleById(all, id) ?? []).map((a) => linkTo(templates, a)).join(", ");
       setProperty(i, { value });
     },
   };
