@@ -153,8 +153,8 @@ export const api = {
   serverHostWorlds: (server: string) => invoke<NetworkView>("server_host_worlds", { server }),
   networkWorlds: () => invoke<NetWorld[]>("network_worlds"),
   /** Asks a found world's GM for it — or, with `join`, to become a member. */
-  networkJoin: async (world: string, join: boolean): Promise<JoinOutcome> => {
-    const r = await invoke<Raw>("network_join", { world, join });
+  networkJoin: async (world: string): Promise<JoinOutcome> => {
+    const r = await invoke<Raw>("network_join", { world });
     return { kind: r.kind, world: r.world ? toWorld(r.world) : null };
   },
   /** Keeps held and asked-for worlds current — over the network and through shared folders. */

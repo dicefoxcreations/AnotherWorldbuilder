@@ -567,7 +567,7 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
             out.joined.push(sketch(&world, &remote));
         }
     }
-    look_at_servers(&store).await;
+    look_at_servers_beside(&store);
     Ok(out)
 }
 
@@ -595,6 +595,20 @@ fn status(code: &str) -> ServerStatus {
 
 /// How long what a server said holds before it is asked again.
 const STATUS_FOR: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The same beside the round, not in it: a server that does not answer
+/// takes its time to say so, and the worlds' changes do not wait for that.
+fn look_at_servers_beside(store: &Store) {
+    static LOOKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if LOOKING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+    let store = store.clone();
+    tokio::spawn(async move {
+        look_at_servers(&store).await;
+        LOOKING.store(false, std::sync::atomic::Ordering::Release);
+    });
+}
 
 /// Asks each server what it holds for this device — now and then.
 async fn look_at_servers(store: &Store) {
@@ -837,9 +851,8 @@ pub struct JoinOutcome {
 /// Asks to join a world found on the network — a member already, or let in
 /// ahead of time, in at once.
 #[cfg_attr(feature = "gui", tauri::command(async))]
-pub async fn network_join(app: tauri::AppHandle, world: String, join: bool) -> Answer<JoinOutcome> {
+pub async fn network_join(app: tauri::AppHandle, world: String) -> Answer<JoinOutcome> {
     let store = store(&app)?;
-    let _ = join;
     let found = network_worlds(app.clone()).await?.into_iter().find(|w| w.id == world).ok_or_else(|| AppError("This world is not found on the network any more.".into()))?;
     let remote = RemoteWorld { name: found.name.clone(), icon: found.icon.clone(), server: found.server.clone(), asked: false };
     let kind = match ask(&store, &found.server, &world, Ask::Join).await? {

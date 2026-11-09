@@ -72,7 +72,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   const joinNetwork = async (w: NetWorld) => {
     setBusy(w.id);
     try {
-      const result = await api.networkJoin(w.id, true);
+      const result = await api.networkJoin(w.id);
       if (result.world) { onChanged(); opened(result.world.id); }
       else setStatus(s => ({ ...s, [w.id]: result.kind === "not-offered" ? "No longer available" : "Waiting for the GM" }));
     } catch (e) { onError(e); }
