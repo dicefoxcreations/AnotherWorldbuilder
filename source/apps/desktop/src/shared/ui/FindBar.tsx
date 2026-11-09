@@ -147,8 +147,9 @@ export function FindBar() {
   // Found anew as one types — and when the page changes under the bar.
   useEffect(() => {
     if (!open) return;
+    // The page of the world — where there is none, everything.
+    const root = document.querySelector(".world-body") ?? document.body;
     const find = () => {
-      const root = document.querySelector(".world-body") ?? document.body;
       // Asked for in a document: only once it is drawn — not in a preview.
       const want = asked.current;
       const scope = want?.doc
@@ -167,10 +168,18 @@ export function FindBar() {
       }
     };
     find();
-    const page = document.querySelector(".world-body");
-    const watch = new MutationObserver(() => find());
-    if (page) watch.observe(page, { childList: true, subtree: true, characterData: true });
-    return () => watch.disconnect();
+    // A burst of changes — each key typed in the page — is looked through
+    // once, at the next frame, not once for every change.
+    let frame = 0;
+    const soon = () => {
+      if (!frame) frame = requestAnimationFrame(() => ((frame = 0), find()));
+    };
+    const watch = new MutationObserver(soon);
+    watch.observe(root, { childList: true, subtree: true, characterData: true });
+    return () => {
+      watch.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [open, words, asking]);
 
   const current = found.length ? found[Math.min(at, found.length - 1)] : null;

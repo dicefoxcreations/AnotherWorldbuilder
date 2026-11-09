@@ -1,6 +1,6 @@
 import type { ArticleView, Template, TemplateField } from "../api/client";
 import { linkText, scanLinks, type Link } from "./Links";
-import { isA, isProperties, typeOf } from "./types";
+import { documentsOf, isA, isProperties, typeOf } from "./types";
 
 /**
  * Relations between documents: who someone is to whom.
@@ -98,9 +98,8 @@ export function readRelations(text: string): WrittenRelation[] {
   return out;
 }
 
-/** The documents a role may be: those of the relation's role type. */
-export const roleChoices = (templates: Template[], all: ArticleView[], field: RelationField) =>
-  all.filter((a) => isA(templates, a.articleType, field.roleType)).sort((a, b) => a.name.localeCompare(b.name));
+/** The documents a role may be: those of the relation's role type, by name. */
+export const roleChoices = (templates: Template[], all: ArticleView[], field: RelationField) => documentsOf(all, templates, field.roleType);
 
 /** A role by id or by name, among the role choices. */
 export function findRole(roles: ArticleView[], idOrName: string): ArticleView | undefined {
@@ -111,8 +110,11 @@ export function findRole(roles: ArticleView[], idOrName: string): ArticleView | 
 
 // --- The graph --------------------------------------------------------------
 
-/** A person in the graph. `article` is missing for one this reader cannot open. */
-/** `hidden`: for `???`, the document behind it — never shown, only where its card was put. */
+/**
+ * A person in the graph. `article` is missing for one this reader cannot
+ * open; `hidden` is then the document behind the `???` — never shown, only
+ * where its card was put.
+ */
 export type GraphNode = { id: string; article?: ArticleView; hidden?: string };
 
 /**
@@ -202,19 +204,19 @@ export function buildGraph(
   if (query.around) {
     // Who is reachable from the middle, step by step.
     ids = new Set([query.around]);
-    let frontier = [query.around];
-    for (let step = 0; step < Math.max(1, query.depth) && frontier.length > 0; step++) {
-      const next: string[] = [];
+    let frontier = new Set([query.around]);
+    for (let step = 0; step < Math.max(1, query.depth) && frontier.size > 0; step++) {
+      const next = new Set<string>();
       for (const e of edges.values()) {
         for (const [x, y] of [
           [e.a, e.b],
           [e.b, e.a],
         ]) {
-          if (frontier.includes(x) && !ids.has(y)) {
+          if (frontier.has(x) && !ids.has(y)) {
             const target = byId.get(y);
             if (target && !listed(target)) continue;
             ids.add(y);
-            next.push(y);
+            next.add(y);
           }
         }
       }
