@@ -2,7 +2,7 @@ import { createContext, useContext, type ReactNode } from "react";
 import { Icon } from "../../shared/ui/Icons";
 import type { ArticleView, Infobox, Place, Template, TemplateField } from "../../api/client";
 import { linker, scanLinks } from "../../shared/Links";
-import { documentsOf, picksOf, targetOf, type Pick } from "../../shared/types";
+import { documentsOf, picksOf, targetOf, type Pick, articleById } from "../../shared/types";
 import { DocLink } from "./DocLink";
 import { entriesOf } from "../../shared/Relations";
 import { WorldImage } from "../../shared/ui/WorldImage";
@@ -273,11 +273,11 @@ function Display({
   if (field.kind === "relation") {
     // One line each: who, and what they are to this document. Whom this
     // reader cannot open stays ??? — that there is someone is no secret.
-    const name = (id: string) => articles.find((a) => a.id === id)?.name ?? "???";
+    const name = (id: string) => articleById(articles, id)?.name ?? "???";
     return (
       <span className="relations">
         {entriesOf(value).map((e, i) => {
-          const target = articles.find((a) => a.id === e.with);
+          const target = articleById(articles, e.with);
           return (
             <span key={i} className="relation">
               {target && onPlace ? (
@@ -300,7 +300,7 @@ function Display({
         {picksOf(value).map(({ id, count }) => {
           // Every value is a document, so every value is a link — even “male”.
           // Whoever writes about it later finds the page already linked.
-          const target = articles.find((a) => a.id === id);
+          const target = articleById(articles, id);
           const link =
             target && onPlace ? (
               <DocLink id={id} articleType={target.articleType} templates={ctx.templates} context={targetOf(ctx.templates, ctx.articleType, field)} onOpen={() => onPlace({ kind: "article", id })}>
@@ -375,7 +375,7 @@ function Input({
         const store = (picks: Pick[]) => set(picks.map((p) => (p.count === undefined ? p.id : { with: p.id, count: p.count })));
         return (
           <MultiPick
-            chosen={chosen.map((p) => ({ key: p.id, name: articles.find((a) => a.id === p.id)?.name ?? "???", count: p.count === undefined ? "" : String(p.count) }))}
+            chosen={chosen.map((p) => ({ key: p.id, name: articleById(articles, p.id)?.name ?? "???", count: p.count === undefined ? "" : String(p.count) }))}
             open={targets.filter((z) => !chosen.some((p) => p.id === z.id))}
             onRemove={(i) => store(chosen.filter((_, j) => j !== i))}
             onAdd={(z) => store([...chosen, { id: z.id }])}

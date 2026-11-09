@@ -1,5 +1,5 @@
 import type { ArticleView, Template, TemplateField } from "../api/client";
-import { idsIn, isA, picksFor, propertyNamed, propertyValues, typeOf } from "./types";
+import { idsIn, isA, picksFor, propertyNamed, propertyValues, typeOf, articleById } from "./types";
 import { parse, reckon, type Lookup, type Scope } from "./Dice";
 import { perLists } from "./Cache";
 
@@ -126,7 +126,7 @@ function effects(templates: Template[], articles: ArticleView[], article: Articl
   for (const ref of adding(typeOf(templates, article.articleType))) {
     for (const id of idsIn(article, ref.key)) {
       if (seen.has(id)) continue;
-      const pick = articles.find((a) => a.id === id);
+      const pick = articleById(articles, id);
       if (!pick) continue;
       const n = numberIn(templates, pick, name);
       const inner = effects(templates, articles, pick, name, new Set(seen));
@@ -234,7 +234,7 @@ function lookupIn(templates: Template[], articles: ArticleView[], article: Artic
     return picksFor(templates, articles, article, field)
       .filter((p) => !only || only.includes(p.id))
       .flatMap((p) => {
-        const pick = articles.find((a) => a.id === p.id);
+        const pick = articleById(articles, p.id);
         if (!pick) return [];
         const count: [string, number] | undefined = counted ? [counted, p.count ?? 0] : undefined;
         return [{ pick, look: lookupIn(templates, articles, pick, busy, { count, outer: look }) }];

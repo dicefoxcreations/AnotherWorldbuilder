@@ -3,7 +3,7 @@ import { Icon } from "../../shared/ui/Icons";
 import { DocumentPage } from "../wiki/Document";
 import { ArticleHead } from "../wiki/ArticleHead";
 import { coverOf } from "../../shared/Links";
-import { findType, isA, pageOwner, subtypes, mayCreate } from "../../shared/types";
+import { findType, isA, pageOwner, subtypes, mayCreate, articleById } from "../../shared/types";
 
 export type { Place };
 
@@ -42,7 +42,7 @@ export function WorldOverview({
       : place.kind === "list"
         ? findType(templates, place.articleType)?.page
         : world.home;
-  const article = id ? articles.find((a) => a.id === id) : undefined;
+  const article = id ? articleById(articles, id) : undefined;
   // Made just now: on its way, not missing.
   if (!article && (loading || (place.kind === "article" && justMade(place.id)))) return <p className="note">Loading …</p>;
   const cover = !article && place.kind === "article" ? coverOf(place.id) : undefined;

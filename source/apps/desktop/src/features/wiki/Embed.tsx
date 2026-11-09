@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { pageOwner } from "../../shared/types";
+import { pageOwner, articleById } from "../../shared/types";
 import { FoldChevron, useFold } from "../../shared/ui/BlockFold";
 import { CurrentDocument, useWorldData } from "../worlds/WorldData";
 import { CreateButton } from "./CreateButton";
@@ -25,7 +25,7 @@ export function Embed({ of, fold = "", title = "", section = "" }: { of: string;
   const chain = useContext(Embedding);
   const current = useContext(CurrentDocument);
   const wanted = of.trim().toLowerCase();
-  const doc = data?.articles.find((a) => a.id === of.trim()) ?? data?.articles.find((a) => a.name.toLowerCase() === wanted);
+  const doc = (data ? articleById(data.articles, of.trim()) : undefined) ?? data?.articles.find((a) => a.name.toLowerCase() === wanted);
   const [foldedNow, toggle] = useFold(current ?? "", `embed:${doc?.id ?? of}${section ? `:${section}` : ""}`, fold === "folded");
   const headless = title === "off";
   // One section names its document inside, as its own first line.

@@ -140,7 +140,8 @@ export class WorldReader {
         this.touched.set(a.id, this.tick);
       }
       this.forget(part.gone);
-      this.renew.push(...part.changed.filter((id) => !this.renew.includes(id)));
+      const renewing = new Set(this.renew);
+      this.renew.push(...part.changed.filter((id) => !renewing.has(id)));
       this.writes = part.writes;
     }
     this.tell();

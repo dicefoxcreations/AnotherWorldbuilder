@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type ArticleView, type Here } from "../api/client";
 import { colourOf, initialsOf } from "../shared/editor/RemoteCarets";
 import { pace, SLOW_MS } from "./live";
+import { articleById } from "../shared/types";
 
 /**
  * Who else is in the world right now — each in their colour, the one their
@@ -45,7 +46,7 @@ export function WhoIsHere({
   }, [world, article]);
 
   if (here.length === 0) return null;
-  const nameOf = (id: string) => articles.find((a) => a.id === id)?.name;
+  const nameOf = (id: string) => articleById(articles, id)?.name;
   return (
     <span className="who-is-here">
       {here.map((h) => {

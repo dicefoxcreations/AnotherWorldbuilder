@@ -3,6 +3,7 @@ import { anchoredParts } from "../../shared/Anchors";
 import { Unfolded } from "../../shared/ui/BlockFold";
 import { useWorldData } from "../worlds/WorldData";
 import { ArticlePage } from "./ArticlePage";
+import { articleById } from "../../shared/types";
 
 /**
  * A look at a document without opening it: resting the pointer on a link
@@ -99,7 +100,7 @@ export function LinkPreview() {
   return (
     <>
       {stack.map((card, i) => {
-        const article = data.articles.find((a) => a.id === card.id);
+        const article = articleById(data.articles, card.id);
         if (!article) return null;
         // Where there is more room: below the link or above it.
         const below = window.innerHeight - card.box.bottom - 16;

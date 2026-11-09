@@ -55,7 +55,7 @@ import { sideBarOwner, useSideBar } from "../../shared/ui/SideBar";
 import { AccessRows, AccessSection, Inspector, InspectorSection, PartAccessContext, PieceMoveContext, SectionAccess } from "./Inspector";
 import { TypeRows } from "./TypeRows";
 import { blockRank, lookOf, PLACE_RANK } from "../../shared/BlockOrder";
-import { ancestors, documentsOf, findType, isA, mayCreate, pageOwner, propertyNamed, propertyValues, targetOf, typeOf } from "../../shared/types";
+import { ancestors, documentsOf, findType, isA, mayCreate, pageOwner, propertyNamed, propertyValues, targetOf, typeOf, articleById } from "../../shared/types";
 import { comboOf, loadShortcuts } from "../../shared/Shortcuts";
 import { DEFAULT_CALENDAR } from "../../shared/Calendar";
 import { WorldImage } from "../../shared/ui/WorldImage";
@@ -1988,7 +1988,7 @@ function useBricks(gm: boolean, text: string, onText: (t: string) => void, links
     while (to > from && MARKS.test(text[to - 1]) && MARKS.test(text[to] ?? "")) to--;
     const words = text.slice(from, to).trim();
     if (to <= from || !words || !worldData || worldData.previewing) return undefined;
-    const source = links.all.find((a) => a.id === links.selfId);
+    const source = articleById(links.all, links.selfId);
     return {
       types: links.templates.filter((t) => mayCreate(worldData.world, t)).sort((a, b) => a.name.localeCompare(b.name)),
       // The words need a text section there — with what the type inherits.
@@ -2595,7 +2595,7 @@ export function VisualEditor({
     setCount: (key: string, id: string, n: string) => {
       const i = propertyIndex(key);
       const field = type?.properties.find((f) => f.key === key);
-      const picked = all.find((a) => a.id === id);
+      const picked = articleById(all, id);
       if (i < 0 || !picked) return;
       let es = entries(doc.properties[i].value);
       es = es.some((e) => e.id === id) ? es.map((e) => (e.id === id ? { ...e, count: n } : e)) : [...es, { id, text: linkTo(templates, picked), count: n }];
@@ -3220,7 +3220,7 @@ function useGraphEdit(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.properties, all, templates, article]);
 
-  const name = (id: string) => all.find((a) => a.id === id)?.name ?? "";
+  const name = (id: string) => articleById(all, id)?.name ?? "";
   /**
    * Changes what this document's text says about `other`: the relation of
    * the roles it `was` — none of them: one more — without, every one.
@@ -3228,7 +3228,7 @@ function useGraphEdit(
   const writeOwn = (other: string, property: string, roles: [string, string] | null, was?: [string, string]) => {
     const label = templates.flatMap((t) => t.properties).find((f) => f.key === property)?.label ?? "";
     const field = own.find((f) => f.key === property) ?? own.find((f) => f.label.toLowerCase() === label.toLowerCase());
-    const target = all.find((a) => a.id === other);
+    const target = articleById(all, other);
     if (!field || !target) return false;
     const resolve = linker(all, templates);
     const doc = latest.current;
@@ -3354,9 +3354,9 @@ function PropertyInput({
   }
   if (field?.kind === "reference" && field.from) {
     // What points here: shown, never set — it changes where it points from.
-    const self = all.find((a) => a.id === selfId);
+    const self = articleById(all, selfId);
     const ids = self ? idsOfValue(summedValues(templates, all, self)[field.key]) : [];
-    const names = ids.map((id) => all.find((a) => a.id === id)?.name).filter(Boolean);
+    const names = ids.map((id) => articleById(all, id)?.name).filter(Boolean);
     return (
       <span className="small muted" title={`Set by their “${field.from}”`}>
         {names.length ? names.join(", ") : "—"} · from their “{field.from}”
@@ -3493,7 +3493,7 @@ function RelationInput({
   const rows = readRelations(value);
   const people = documentsOf(all, templates, field.articleType).filter((a) => a.id !== selfId);
   const roles = roleChoices(templates, all, field);
-  const name = (id: string) => all.find((a) => a.id === id)?.name ?? "???";
+  const name = (id: string) => articleById(all, id)?.name ?? "???";
   const locked = (stored ? relationsOf(stored, field.key) : []).filter((e) => !all.some((a) => a.id === e.with));
   const saved = stored ? relationsOf(stored, field.key) : [];
   const write = (next: WrittenRelation[]) => onValue(writeRelations(next));
@@ -4040,7 +4040,7 @@ function PartFlow({
     if (!link) return { text: written, dead: true };
     // `#^2f9e17`: a line of the target — of this document without a name.
     const anchor = link.property.startsWith("^") ? link.property.slice(1) : undefined;
-    const target = anchor && !link.name ? links.all.find((a) => a.id === current) : resolve(link);
+    const target = anchor && !link.name ? articleById(links.all, current) : resolve(link);
     return {
       text: link.text !== link.name ? link.text : (target?.name ?? link.name),
       dead: !target,

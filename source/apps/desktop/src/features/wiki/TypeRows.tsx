@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ArticleView, Template, WorldInfo } from "../../api/client";
-import { isA, mayCreate, parentField, realTypes, targetOf, typeOf } from "../../shared/types";
+import { isA, mayCreate, parentField, realTypes, targetOf, typeOf, articleById } from "../../shared/types";
 import { MultiPick } from "../../shared/ui/MultiPick";
 import { InspectorSection } from "./Inspector";
 
@@ -34,7 +34,7 @@ export function TypeRows({
   const several = field?.kind === "reference" && field.multiple;
   const of = field ? targetOf(templates, to, field) : "";
   const open = field ? all.filter((a) => a.id !== article.id && !parents.includes(a.id) && isA(templates, a.articleType, of)) : [];
-  const name = (id: string) => all.find((a) => a.id === id)?.name ?? "???";
+  const name = (id: string) => articleById(all, id)?.name ?? "???";
   const pick = (id: string) => setParents(several ? [...parents, id] : [id]);
   return (
     <InspectorSection title="Type">

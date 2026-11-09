@@ -17,7 +17,7 @@ import { ImageRow } from "./ImageCard";
 import { PropertyValue } from "./InfoboxForm";
 import { CurrentDocument, ReadableParts, useWorldData } from "../worlds/WorldData";
 import { ZoomImage } from "../../shared/ui/ImageZoom";
-import { effective, propertyNamed, takesIn, typeOf } from "../../shared/types";
+import { effective, propertyNamed, takesIn, typeOf, articleById } from "../../shared/types";
 import { summedValues } from "../../shared/Sheet";
 import { MARK, type MarkKind } from "../../shared/Marks";
 import { RollLabel, RollScopeContext, useDice } from "../dice/DiceTray";
@@ -402,7 +402,7 @@ function Element({
       const own = node.text !== node.target;
       // `#^2f9e17`: a line of the target, or of this document without a name.
       if (node.property.startsWith("^")) {
-        const doc = node.target ? target : world?.articles.find((a) => a.id === current);
+        const doc = node.target ? target : (world ? articleById(world.articles, current) : undefined);
         const shown = node.text || (doc?.name ?? "???");
         if (!doc) return <span className="dead-link">{shown}</span>;
         return (
@@ -601,7 +601,7 @@ export function GroupView({ of, resolve, onPlace }: { of: string; resolve: Resol
   if (!group || chain.includes(group.id)) return <code className="value-name">&lt;view of={group?.name ?? of}&gt;</code>;
   // A document whose type does not have the group's values shows nothing of
   // it: one character sheet for all, the player's part only for players.
-  const doc = world?.articles.find((a) => a.id === current);
+  const doc = (world ? articleById(world.articles, current) : undefined);
   if (doc && world && !takesIn(world.templates, doc.articleType, group.id)) return null;
   return (
     <ViewChain.Provider value={[...chain, group.id]}>
@@ -658,7 +658,7 @@ export function Abilities({
   const dot = also?.indexOf(".") ?? -1;
   const ref = also && dot > 0 ? also.slice(0, dot).trim() : "";
   const prop = also && dot > 0 ? also.slice(dot + 1).trim() : "";
-  const doc = world?.articles.find((a) => a.id === current);
+  const doc = (world ? articleById(world.articles, current) : undefined);
   const refField = ref && world && doc ? propertyNamed(typeOf(world.templates, doc.articleType), ref) : undefined;
   /** The second line of a tile: how well, the number, a roll — or its number to change. */
   const second = (name: string) => {

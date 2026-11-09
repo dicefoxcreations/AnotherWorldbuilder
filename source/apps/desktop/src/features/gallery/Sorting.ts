@@ -1,5 +1,5 @@
 import type { ArticleView, FolderNode, GalleryImage, NavEntry, Template } from "../../api/client";
-import { ancestors, findType, isA, isProperties, parentIdOf } from "../../shared/types";
+import { ancestors, findType, isA, isProperties, parentIdOf, articleById } from "../../shared/types";
 
 /**
  * Folders after the navigation: an image lies where its document stands in
@@ -23,7 +23,7 @@ export type Places = {
 export function navigationPlaces(nav: NavEntry[], articles: ArticleView[], templates: Template[]): Places {
   const name = (e: NavEntry) =>
     e.label?.trim() ||
-    (e.kind === "type" ? findType(templates, e.target ?? "")?.name : e.kind === "document" ? articles.find((a) => a.id === e.target)?.name : "") ||
+    (e.kind === "type" ? findType(templates, e.target ?? "")?.name : e.kind === "document" ? articleById(articles, e.target)?.name : "") ||
     "";
   const types: { type: string; path: string[]; depth: number }[] = [];
   const documents = new Map<string, string[]>();

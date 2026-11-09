@@ -29,6 +29,7 @@ import {
   typeSort,
   documentOrder,
   type SortKey,
+  articleById,
 } from "../../shared/types";
 import { relationsOf } from "../../shared/Relations";
 import { WorldImage } from "../../shared/ui/WorldImage";
@@ -145,7 +146,7 @@ function ListingOf({ node }: { node: ListingNode }) {
   // whoever may change the document adds and removes here with a click.
   // A path goes on through the picks: `from=Classes.Features` lists what
   // each class brings, and is only read.
-  const self = node.from ? articles.find((a) => a.id === current) : undefined;
+  const self = node.from ? articleById(articles, current) : undefined;
   const picker = self ? typeOf(templates, self.articleType) : undefined;
   const deep = /[.[]/.test(node.from);
   const along = deep && self ? picksAlong(templates, articles, self, node.from) : undefined;
@@ -224,7 +225,7 @@ function ListingOf({ node }: { node: ListingNode }) {
   // A tree — a book's chapters — is searched through its text as well; one
   // of the document it stands in, that document's own text too.
   const inText = node.style === "tree";
-  const standsIn = inText && q && (node.below === "self" || node.filter.some(([, wanted]) => wanted === "self")) ? articles.find((a) => a.id === current) : undefined;
+  const standsIn = inText && q && (node.below === "self" || node.filter.some(([, wanted]) => wanted === "self")) ? articleById(articles, current) : undefined;
   const searched = standsIn && !entries.some((e) => e.pick.id === standsIn.id) ? [scopeOf(standsIn), ...entries] : entries;
   const hitsIn = new Map(inText && q ? searched.map(({ pick: a }) => [a.id, searchDocument(a, q)]) : []);
   const found = q
@@ -290,7 +291,7 @@ function ListingOf({ node }: { node: ListingNode }) {
   const backType = type && !node.from && !node.count ? typeOf(templates, type.id) : undefined;
   const back =
     backType && current && node.filter.length === 1 && node.filter[0][1] === "self" ? propertyNamed(backType, node.filter[0][0]) : undefined;
-  const here = back ? articles.find((a) => a.id === current) : undefined;
+  const here = back ? articleById(articles, current) : undefined;
   const backTarget = back && type ? targetOf(templates, type.id, back) : "";
   const making = node.add === "new";
   const fits = !!back && !!here && back.kind === "reference" && !!backTarget && isA(templates, here.articleType, backTarget);
@@ -967,7 +968,7 @@ function shown(all: Template[], articles: ArticleView[], article: ArticleView, l
       .map((p) => (typeof p === "string" ? p : p.text !== p.name ? p.text : (resolveIn(all, articles)(p)?.name ?? "???")))
       .join("");
   if (field.kind === "relation") {
-    const name = (id: string) => articles.find((a) => a.id === id)?.name ?? "???";
+    const name = (id: string) => articleById(articles, id)?.name ?? "???";
     return relationsOf(article, field.key)
       .map((e) => (e.role ? `${name(e.with)} (${name(e.role)})` : name(e.with)))
       .join(", ");
@@ -978,7 +979,7 @@ function shown(all: Template[], articles: ArticleView[], article: ArticleView, l
   }
   const values = idsIn(article, field.key);
   if (field.kind !== "reference") return values.join(", ");
-  return values.map((id) => articles.find((a) => a.id === id)?.name ?? "???").join(", ");
+  return values.map((id) => articleById(articles, id)?.name ?? "???").join(", ");
 }
 
 /**

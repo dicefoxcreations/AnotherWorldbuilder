@@ -14,7 +14,7 @@ import {
   type WorldInfo,
 } from "../../api/client";
 import { CurrentDocument, useWorldData } from "../worlds/WorldData";
-import { findType, isA, propertyValues, subtypes, typeOf } from "../../shared/types";
+import { findType, isA, propertyValues, subtypes, typeOf, articleById } from "../../shared/types";
 import { imageUrl } from "../../shared/ui/WorldImage";
 import {
   buildGraph,
@@ -195,7 +195,7 @@ function Drawn({
     return out;
   }, [written]);
 
-  const roleName = (id: string) => articles.find((a) => a.id === id)?.name ?? "???";
+  const roleName = (id: string) => articleById(articles, id)?.name ?? "???";
 
   const graph = useMemo(
     () =>
@@ -312,8 +312,8 @@ function Drawn({
       [from, to],
       [to, from],
     ]) {
-      const a = articles.find((d) => d.id === x);
-      const b = articles.find((d) => d.id === y);
+      const a = articleById(articles, x);
+      const b = articleById(articles, y);
       const f = a && b && relationFields(templates, a.articleType).find((f) => viaWanted(f) && isA(templates, b.articleType, f.articleType));
       if (f) return [x, y, f.key];
     }
@@ -344,7 +344,7 @@ function Drawn({
   };
 
   // --- The graph's own text -------------------------------------------------
-  const nameOf = (id: string) => articles.find((a) => a.id === id)?.name ?? "";
+  const nameOf = (id: string) => articleById(articles, id)?.name ?? "";
   /**
    * Everyone as they stand now, on the grid — by name, as written — with
    * their cards as set, and some changed.
@@ -504,7 +504,7 @@ function Drawn({
     return "";
   };
   // The page the graph stands on is a person only when it can hold relations.
-  const pageIsPerson = !!current && relationFields(templates, articles.find((a) => a.id === current)?.articleType ?? "").length > 0;
+  const pageIsPerson = !!current && relationFields(templates, articleById(articles, current)?.articleType ?? "").length > 0;
   return (
     // Editing, the graph is chosen like every element in the text: outlined
     // on pointing, its settings in the side bar on a click.
@@ -1612,7 +1612,7 @@ function GraphMenu({
         </div>
       ) : menu.person ? (
         <div className="brick-group">
-          <h5>{articles.find((a) => a.id === menu.person)?.name}</h5>
+          <h5>{articleById(articles, menu.person)?.name}</h5>
           <button className="ghost" onClick={pick(() => onCard(menu.person!))}>
             Card
           </button>
@@ -1862,7 +1862,7 @@ function RelationCard({
   /** The relation that `was` so removed — without, every one between them. */
   onRemove: (was?: Pair) => void;
 }) {
-  const name = (id: string) => articles.find((a) => a.id === id)?.name ?? "???";
+  const name = (id: string) => articleById(articles, id)?.name ?? "???";
   const roles = rolesFor(templates, articles, e);
   const pairs: Pair[] = e.pairs.length > 0 ? e.pairs : [["", ""]];
   const pick = (pair: Pair, end: 0 | 1) => (
@@ -1939,7 +1939,7 @@ function ConnectorCard({
   onSeparate: () => void;
   onRemove: () => void;
 }) {
-  const name = (id: string) => articles.find((a) => a.id === id)?.name ?? "???";
+  const name = (id: string) => articleById(articles, id)?.name ?? "???";
   const names = (end: string[]) => end.map(name).join(" & ");
   const roles = c.covered.length ? rolesFor(templates, articles, c.covered[0]) : [];
   const row = (x: string) => {

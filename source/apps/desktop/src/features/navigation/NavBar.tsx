@@ -3,7 +3,7 @@ import { SearchField } from "../../shared/ui/SearchField";
 import { Icon } from "../../shared/ui/Icons";
 import { perLists } from "../../shared/Cache";
 import { api, type ArticleView, type NavEntry, type Place, type Template, type WorldInfo } from "../../api/client";
-import { documentOrder, findType, isA, pageOwner, parentIdOf, realTypes, ancestors } from "../../shared/types";
+import { documentOrder, findType, isA, pageOwner, parentIdOf, realTypes, ancestors, articleById } from "../../shared/types";
 import { FoldChevron } from "../../shared/ui/BlockFold";
 import { Inspector, InspectorSection } from "../wiki/Inspector";
 import { useSideBar } from "../../shared/ui/SideBar";
@@ -205,7 +205,7 @@ export function NavBar({
     let parent = parentIdOf(templates, a);
     while (parent && !seen.has(parent)) {
       seen.add(parent);
-      const p = articles.find((x) => x.id === parent);
+      const p = articleById(articles, parent);
       if (!p) return null;
       if (isA(templates, p.articleType, type)) return 100;
       parent = parentIdOf(templates, p);
@@ -216,7 +216,7 @@ export function NavBar({
   // Where one goes, the way there unfolds: its group, its type, its parents.
   useEffect(() => {
     if (place.kind !== "article") return;
-    const a = articles.find((x) => x.id === place.id);
+    const a = articleById(articles, place.id);
     if (!a) return;
     // The entry that holds it most closely: the document's own, else its
     // type's before a supertype's — a weapon under Weapons, not under Items.
@@ -235,7 +235,7 @@ export function NavBar({
         while (parent && !seen.has(parent)) {
           seen.add(parent);
           toggle(`${e.id}/${parent}`, true);
-          const p = articles.find((x) => x.id === parent);
+          const p = articleById(articles, parent);
           parent = p && parentIdOf(templates, p);
         }
       }
@@ -296,7 +296,7 @@ export function NavBar({
   const nameOf = (e: NavEntry) => {
     if (e.label) return e.label;
     if (e.kind === "type") return findType(templates, e.target ?? "")?.name ?? "???";
-    if (e.kind === "document") return articles.find((a) => a.id === e.target)?.name ?? "???";
+    if (e.kind === "document") return articleById(articles, e.target)?.name ?? "???";
     return "Group";
   };
   const matches = (text: string) => !q || text.toLowerCase().includes(q);
@@ -340,7 +340,7 @@ export function NavBar({
       return docRow(entry, d, kids.map((k) => draw(k, level + 1, inner)), level);
     };
     const context = [...outside.entries()]
-      .map(([p, docs]) => [articles.find((a) => a.id === p)!, docs] as const)
+      .map(([p, docs]) => [articleById(articles, p)!, docs] as const)
       .sort(([a], [b]) => a.name.localeCompare(b.name))
       .map(([parent, docs]) => docRow(entry, parent, docs.map((d) => draw(d, depth + 1, new Set([parent.id]))), depth, true));
     return [...context, ...capped(entry, roots, depth, (d) => draw(d, depth, new Set()))];
@@ -430,7 +430,7 @@ export function NavBar({
     if (previewing && e.gm) return null;
     const label = nameOf(e);
     const type = e.kind === "type" ? findType(templates, e.target ?? "") : undefined;
-    const doc = e.kind === "document" ? articles.find((a) => a.id === e.target) : undefined;
+    const doc = e.kind === "document" ? articleById(articles, e.target) : undefined;
     const hits = q && doc ? searchDocument(doc, q) : [];
     // What this reader cannot open does not stand there — only the GM,
     // setting it out, sees what is missing.

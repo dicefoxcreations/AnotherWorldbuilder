@@ -2,7 +2,7 @@ import { useContext } from "react";
 import { Icon } from "../../shared/ui/Icons";
 import type { Node, Template, TemplateField } from "../../api/client";
 import { attr, withAttr, writeListLine, writeTagLine, type ImageAttrs } from "../../shared/ImageTag";
-import { findType, isA, isProperties, typeOf } from "../../shared/types";
+import { findType, isA, isProperties, typeOf, articleById } from "../../shared/types";
 import { SearchPick, type Pickable } from "../../shared/ui/SearchPick";
 import { CurrentDocument, useWorldData } from "../worlds/WorldData";
 import { Listing } from "./Listing";
@@ -130,7 +130,7 @@ function ListSettings({ attrs, onChange }: { attrs: ImageAttrs; onChange: (next:
   const node = listNode(attrs);
 
   // What this document can list from itself: its properties that pick several.
-  const own = typeOf(templates, articles.find((a) => a.id === current)?.articleType ?? "");
+  const own = typeOf(templates, articleById(articles, current)?.articleType ?? "");
   const picking = (own?.properties ?? []).filter((f): f is TemplateField & { kind: "reference" } => f.kind === "reference" && f.multiple);
   const from = node.from ? picking.find((f) => f.label.toLowerCase() === node.from.toLowerCase() || f.key === node.from) : undefined;
   const listed = from ? typeOf(templates, from.articleType) : node.of.replace(/[«»]/g, "") ? typeOf(templates, typeNamed(templates, node.of)?.id ?? "") : undefined;
@@ -264,7 +264,7 @@ function ListSettings({ attrs, onChange }: { attrs: ImageAttrs; onChange: (next:
             chosen={articles.filter((a) => a.id === node.below || a.name === node.below).map((a) => a.id)}
             placeholder="Find a document"
             none="the whole tree"
-            onAdd={(id) => set("below", articles.find((a) => a.id === id)?.name ?? "")}
+            onAdd={(id) => set("below", articleById(articles, id)?.name ?? "")}
             onRemove={() => set("below", "")}
           />
         </div>
@@ -577,7 +577,7 @@ export function EmbedCard({ attrs, onChange }: { attrs: ImageAttrs; onChange: (n
               single
               placeholder="Page …"
               none="No such page."
-              onAdd={(id) => onChange(writeTagLine("embed", withAttr(attrs, "of", articles.find((a) => a.id === id)?.name ?? id)))}
+              onAdd={(id) => onChange(writeTagLine("embed", withAttr(attrs, "of", articleById(articles, id)?.name ?? id)))}
               onRemove={() => onChange(writeTagLine("embed", withAttr(attrs, "of", "")))}
             />
           </InspectorSection>

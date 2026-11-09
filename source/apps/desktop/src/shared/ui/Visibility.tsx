@@ -10,7 +10,7 @@ import type { CSSProperties } from "react";
 import type { ArticleView, Template, WorldInfo } from "../../api/client";
 import { CurrentDocument, useWorldData } from "../../features/worlds/WorldData";
 import { Icon, EyeIcon, PenIcon } from "./Icons";
-import { letsIn } from "../types";
+import { letsIn, articleById } from "../types";
 
 /**
  * Visibility as a clickable property.
@@ -67,13 +67,13 @@ export function label(
   if (term === "gm") return short ? "GM" : "GM only";
   // `self`: whoever is assigned to the document — saved as its `doc:…`,
   // and called by its name: on Yen's page, “Yen”.
-  if (term === "self") return (around?.self && around.articles.find((a) => a.id === around.self)?.name) || "Assigned";
+  if (term === "self") return (around?.self && articleById(around.articles, around.self)?.name) || "Assigned";
   // `parent`, in a type: whoever is assigned to the document a new one lies
   // in — a backstory's character. Made, it is that document's `doc:…`.
   if (term === "parent") return short ? "Parent's" : "Whoever has its parent";
   if (term.startsWith("doc:")) {
     const id = `art:${term.slice(4)}`;
-    const named = around?.articles.find((a) => a.id === id);
+    const named = (around ? articleById(around.articles, id) : undefined);
     if (named) return named.name;
   }
   if (term.startsWith("type:")) {
@@ -147,7 +147,7 @@ export function VisibilityPicker({
     };
   }, [open]);
 
-  const selfType = around.articles.find((a) => a.id === self)?.articleType;
+  const selfType = articleById(around.articles, self)?.articleType;
   const holds = (rule: string) => letsIn(world, rule, own ? { doc: own, type: selfType } : undefined);
   // A change that would shut oneself out waits for a yes.
   const [shutting, setShutting] = useState<string | null>(null);

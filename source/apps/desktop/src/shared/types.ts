@@ -20,6 +20,16 @@ const numeric = new Intl.Collator(undefined, { numeric: true }).compare;
 
 export const findType = (all: Template[], id: string) => all.find((t) => t.id === id);
 
+/** The documents by id — made once per list. */
+const byIdIn = perList((articles: ArticleView[]) => new Map(articles.map((a) => [a.id, a])));
+
+/**
+ * A document by its id — looked up, not searched for: a list of hundreds
+ * of rows, each naming documents, would search thousands each time.
+ */
+export const articleById = (articles: ArticleView[], id: string | undefined | null): ArticleView | undefined =>
+  id ? byIdIn(articles).get(id) : undefined;
+
 /** The supertypes above `start`, the direct one first. */
 export function ancestors(all: Template[], start: Template): Template[] {
   const out: Template[] = [];

@@ -5,6 +5,7 @@ import { WorldImage } from "./WorldImage";
 import { CurrentDocument, useWorldData } from "../../features/worlds/WorldData";
 import { FolderTile } from "../../features/gallery/FolderTile";
 import { folderAt, navigationPlaces } from "../../features/gallery/Sorting";
+import { articleById } from "../types";
 
 /**
  * Choosing an image: uploading a new one under a name, or taking one from
@@ -50,7 +51,7 @@ export function ImagePicker({
           const [f, nav] = sorted;
           setFolders(f);
           // Where the document stands: its images most likely lie there.
-          const doc = data?.articles.find((a) => a.id === near);
+          const doc = (data ? articleById(data.articles, near) : undefined);
           const path = doc && navigationPlaces(nav ?? [], data!.articles, data!.templates).of(doc);
           const start = path && folderAt(f, path);
           if (start) setAt(start);

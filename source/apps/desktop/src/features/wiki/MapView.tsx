@@ -2,7 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import type { ArticleView, MapAccess, MapArea, MapNode, MapPin, Place, WorldInfo } from "../../api/client";
 import { COLOURS, firstMap, joinPins, MARKERS } from "../../shared/GraphText";
-import { findType } from "../../shared/types";
+import { findType, articleById } from "../../shared/types";
 import { Icon, MaximizeIcon, MinimizeIcon } from "../../shared/ui/Icons";
 import { ImagePicker } from "../../shared/ui/ImagePicker";
 import { MarkerIcon } from "../../shared/ui/MapIcons";
@@ -215,7 +215,7 @@ export function MapView({
 
   /** A document's map in place, where it has one; otherwise the document. */
   const go = (to: string) => {
-    const doc = articles.find((a) => a.id === to);
+    const doc = articleById(articles, to);
     if (!doc) return;
     const there = joinPins(doc.layers.map((l) => ({ text: l.text ?? "", policy: l.policy }))).map(firstMap).find(Boolean);
     if (there?.src) setLevels((ls) => [...ls, { map: there, id: doc.id, name: doc.name }]);
@@ -681,7 +681,7 @@ export function MapCard({ world, map, onChange }: { world: WorldInfo; map: MapNo
   // While writing, `to` is a document's name as the code has it — or an id, once picked.
   const docOf = (to: string) => {
     const all = data?.articles ?? [];
-    return all.find((a) => a.id === to) ?? all.find((a) => a.name.toLowerCase() === to.trim().toLowerCase());
+    return articleById(all, to) ?? all.find((a) => a.name.toLowerCase() === to.trim().toLowerCase());
   };
   const nameOf = (to: string) => docOf(to)?.name;
   const item = pin ?? area;

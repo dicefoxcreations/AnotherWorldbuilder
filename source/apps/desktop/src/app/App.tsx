@@ -22,7 +22,7 @@ import { FoxLoader } from "../shared/ui/FoxLoader";
 import { WorldOverview, type Place } from "../features/worlds/WorldOverview";
 import { Options } from "../features/settings/Options";
 import { StorageSetup } from "../features/settings/Storage";
-import { findType, pageOwner } from "../shared/types";
+import { findType, pageOwner, articleById } from "../shared/types";
 import { takeCovers } from "../shared/Links";
 import { WorldReader } from "../api/worldReader";
 import { NavBar } from "../features/navigation/NavBar";
@@ -453,7 +453,7 @@ export default function App() {
    */
   const place = useMemo((): Place => {
     if (where.kind !== "article" || !world) return where;
-    const a = articles.find((x) => x.id === where.id);
+    const a = articleById(articles, where.id);
     const owner = a && pageOwner(templates, world.home, a);
     if (owner?.kind === "world") return { kind: "types" };
     if (owner?.kind === "type") return { kind: "list", articleType: owner.type.id };
@@ -493,7 +493,7 @@ export default function App() {
       else if (p.kind === "list") {
         const t = findType(templates, p.articleType);
         path.push({ label: t?.name ?? p.articleType, icon: t?.icon, onClick });
-      } else path.push({ label: articles.find((a) => a.id === p.id)?.name ?? "???", onClick });
+      } else path.push({ label: articleById(articles, p.id)?.name ?? "???", onClick });
     });
     if (newType) path.push({ label: "New" });
     return path;
@@ -504,7 +504,7 @@ export default function App() {
     (p: Place, part?: string) => {
       if (!openWorld) return;
       const title =
-        p.kind === "article" ? articles.find((a) => a.id === p.id)?.name : p.kind === "list" ? findType(templates, p.articleType)?.name : world?.name;
+        p.kind === "article" ? articleById(articles, p.id)?.name : p.kind === "list" ? findType(templates, p.articleType)?.name : world?.name;
       api.windowOpen(openWorld, p, title ?? "", part).catch(report);
     },
     [openWorld, articles, templates, world, report],
@@ -561,7 +561,7 @@ export default function App() {
       setPlace(p);
     };
     if (place.kind === "article") {
-      const found = articles.find((a) => a.id === place.id);
+      const found = articleById(articles, place.id);
       up(found?.articleType ? { kind: "list", articleType: found.articleType } : { kind: "types" });
       return;
     }

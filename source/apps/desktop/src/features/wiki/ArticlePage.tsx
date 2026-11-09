@@ -18,7 +18,7 @@ import { headingOf, MarkdownText, useMarkdowns, type TopFolds, type ValueOf } fr
 import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
 import { InfoboxForm, NumberHow, PropertyValue } from "./InfoboxForm";
 import { linker, linksIn, type Resolve } from "../../shared/Links";
-import { findType, idsIn, propertyNamed, isProperties, pageOwner, permits, typeOf } from "../../shared/types";
+import { findType, idsIn, propertyNamed, isProperties, pageOwner, permits, typeOf, articleById } from "../../shared/types";
 import { explain, lookupFor, sumOf, summedValues } from "../../shared/Sheet";
 import { RollScopeContext, type RollScope } from "../dice/DiceTray";
 import { CurrentDocument, ReadableParts, useWorldData } from "../worlds/WorldData";
@@ -108,7 +108,7 @@ function Backlinks({
     for (const field of typeOf(templates, a.articleType)?.properties ?? []) {
       if (field.kind !== "reference") continue;
       const id = idsIn(a, field.key)[0];
-      const name = id && all.find((x) => x.id === id)?.name;
+      const name = id && articleById(all, id)?.name;
       if (name) return name;
     }
     return "";
