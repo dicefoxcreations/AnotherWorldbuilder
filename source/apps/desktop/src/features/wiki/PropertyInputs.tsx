@@ -204,8 +204,8 @@ function RelationInput({
   const people = documentsOf(all, templates, field.articleType).filter((a) => a.id !== selfId);
   const roles = roleChoices(templates, all, field);
   const name = (id: string) => articleById(all, id)?.name ?? "???";
-  const locked = (stored ? relationsOf(stored, field.key) : []).filter((e) => !!!articleById(all, e.with));
   const saved = stored ? relationsOf(stored, field.key) : [];
+  const locked = saved.filter((e) => !articleById(all, e.with));
   const write = (next: WrittenRelation[]) => onValue(writeRelations(next));
   const set = (i: number, part: Partial<WrittenRelation>) => write(rows.map((r, j) => (j === i ? { ...r, ...part } : r)));
   const linkFor = (a: ArticleView): WrittenRelation["link"] => ({

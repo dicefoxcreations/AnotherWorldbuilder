@@ -21,6 +21,32 @@ function problem(c: WorldCalendar): string | null {
 /** A number as typed — `29.5` or `29,5`. */
 const typedNumber = (text: string) => Number(text.replace(",", ".").replace(/[^\d.]/g, ""));
 
+/**
+ * A moon's days from full to full, as typed — `29,` stays while one writes
+ * on. Another moon in its place, or one copied over, shows its own.
+ */
+function MoonPeriod({ period, disabled, onPeriod }: { period: number; disabled: boolean; onPeriod: (p: number) => void }) {
+  const [text, setText] = useState(String(period));
+  const [was, setWas] = useState(period);
+  if (period !== was) {
+    setWas(period);
+    if (typedNumber(text) !== period) setText(String(period));
+  }
+  return (
+    <input
+      className="cal-days"
+      inputMode="decimal"
+      disabled={disabled}
+      value={text}
+      title="Days from full to full"
+      onChange={(e) => {
+        setText(e.target.value);
+        onPeriod(typedNumber(e.target.value));
+      }}
+    />
+  );
+}
+
 /** What an era's calendar is, in a line: `12 months · 362 days`. */
 const yearLine = (e: Era) => `${e.months.length} months · ${e.months.reduce((n, m) => n + m.days, 0)} days`;
 
@@ -226,14 +252,7 @@ function EraFold({
                 </label>
                 <input className="cal-moon-name" value={m.name} disabled={!gm} placeholder="Name" onChange={(e) => setMoon(i, { name: e.target.value })} />
                 <span className="muted">every</span>
-                <input
-                  className="cal-days"
-                  inputMode="decimal"
-                  disabled={!gm}
-                  defaultValue={m.period}
-                  title="Days from full to full"
-                  onChange={(e) => setMoon(i, { period: typedNumber(e.target.value) })}
-                />
+                <MoonPeriod period={m.period} disabled={!gm} onPeriod={(period) => setMoon(i, { period })} />
                 <span className="muted">days, full on</span>
                 {drawable && <WorldMomentPicker days calendar={calendar} value={m.full} onValue={(v) => gm && v !== null && setMoon(i, { full: Math.floor(v) })} />}
                 {gm && (
@@ -312,7 +331,6 @@ export function CalendarArea({ world, onChanged, onError }: { world: WorldInfo; 
           </button>
         )}
       </Fold>
-
 
       {!wrong && (
         <Fold title="Preview" summary={formatDay(draft, latestDay ?? last.start)}>

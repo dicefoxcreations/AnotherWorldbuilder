@@ -258,7 +258,7 @@ export class DiceTable {
       if (d.sides === 100) {
         const v = d.value % 100;
         return [
-          { sides: 100, label: `${Math.floor(v / 10)}0`.replace(/^00$/, "00"), tens: true },
+          { sides: 100, label: `${Math.floor(v / 10)}0`, tens: true },
           { sides: 10, label: String(v % 10) },
         ];
       }
