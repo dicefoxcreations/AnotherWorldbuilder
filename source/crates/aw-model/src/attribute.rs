@@ -1,11 +1,11 @@
 //! Attributes and policies — the language in which access grants are written.
 //!
-//! An attribute is what a grant hangs on: `class:rogue`, `player:bob`,
+//! An attribute is what a grant hangs on: `team:blue`, `player:bob`,
 //! `players`. A policy is an OR over AND groups:
 //!
 //! ```text
-//! class:rogue OR background:noble
-//! class:rogue AND faction:thieves-guild
+//! team:blue OR team:red
+//! team:blue AND place:north
 //! ```
 //!
 //! NOT does not exist: a rule says who may, never who may not.
@@ -42,7 +42,7 @@ pub enum Attribute {
     Players,
     /// Game master and co-game masters.
     Gm,
-    /// Everything else: `class:rogue`, `player:bob`, `knowledge:traitor`.
+    /// Everything else: `team:blue`, `player:bob`, `knowledge:traitor`.
     Named { kind: String, value: String },
 }
 

@@ -421,7 +421,7 @@ export const BRICKS: Group[] = [
       {
         name: "Players make documents",
         line: '<article view=«players» edit=«players» create=«players»>',
-        what: "create= on a type: who besides the GM may make its documents — players, class:rogue, … A player's new document goes to the GM's app, which makes it with the type's access.",
+        what: "create= on a type: who besides the GM may make its documents — players, team:blue, … A player's new document goes to the GM's app, which makes it with the type's access.",
       },
       {
         name: "Secret marker, its name below",
@@ -468,7 +468,7 @@ export const BRICKS: Group[] = [
         name: "view, edit",
         where: "legend-only",
         line: "view=«players» edit=gm",
-        what: "all, players, gm, an attribute like class:rogue — several with OR.",
+        what: "all, players, gm, an attribute like team:blue — several with OR.",
       },
       {
         name: "%%input%%, %%count%%",

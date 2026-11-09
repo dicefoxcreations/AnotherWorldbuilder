@@ -15,10 +15,10 @@ import { letsIn, articleById } from "../types";
 /**
  * Visibility as a clickable property.
  *
- * A policy is an OR over terms: `players OR class:rogue`. Every term appears
+ * A policy is an OR over terms: `players OR team:blue`. Every term appears
  * as a bubble with ×. ＋ offers the basics; below them a field finds the rest
  * by name as one types — a player, a type, a document. What it does not
- * find, Enter takes as written: `class:rogue AND faction:guild`.
+ * find, Enter takes as written: `team:blue AND place:north`.
  *
  * The game master holds every key: they see and change everything anyway.
  * So *Everyone*, *All players* and *GM only* exclude each other, and whoever

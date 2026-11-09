@@ -16,19 +16,22 @@ const EVERY_PLAYER = ["all", "players", "gm"];
 /** Closes a dropdown on a click beside it or on Escape. */
 function useOutsideClick(open: boolean, close: () => void) {
   const ref = useRef<HTMLDivElement>(null);
+  // The latest `close`, without listening anew on every render.
+  const latest = useRef(close);
+  latest.current = close;
   useEffect(() => {
     if (!open) return;
     const click = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
+      if (ref.current && !ref.current.contains(e.target as Node)) latest.current();
     };
-    const key = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const key = (e: KeyboardEvent) => e.key === "Escape" && latest.current();
     document.addEventListener("mousedown", click);
     document.addEventListener("keydown", key);
     return () => {
       document.removeEventListener("mousedown", click);
       document.removeEventListener("keydown", key);
     };
-  }, [open, close]);
+  }, [open]);
   return ref;
 }
 
@@ -36,7 +39,7 @@ function useOutsideClick(open: boolean, close: () => void) {
 export function Avatar({ me, large }: { me: IdentityInfo; large?: boolean }) {
   const className = large ? "avatar large" : "avatar";
   if (me.avatar) return <img className={className} src={me.avatar} alt="" />;
-  return <span className={className}>{me.name.slice(0, 1).toUpperCase()}</span>;
+  return <span className={className}>{([...me.name][0] ?? "?").toUpperCase()}</span>;
 }
 
 /**
@@ -245,6 +248,8 @@ function ProfilePopover({ me, onClose, onChanged, onError }: { me: IdentityInfo;
 
   const [copied, setCopied] = useState(false);
   const [keys, setKeys] = useState<"backup" | null>(null);
+  // Where the player id was saved — said here, not in a box one must click away.
+  const [saved, setSaved] = useState<string | null>(null);
   const copyId = () =>
     navigator.clipboard
       .writeText(me.id)
@@ -261,8 +266,7 @@ function ProfilePopover({ me, onClose, onChanged, onError }: { me: IdentityInfo;
         filters: [{ name: "Player id", extensions: ["awid"] }],
       });
       if (!path) return;
-      const where = await api.identityExport(path);
-      alert(`Saved: ${where}`);
+      setSaved(await api.identityExport(path));
     } catch (e) {
       onError(e);
     }
@@ -302,8 +306,8 @@ function ProfilePopover({ me, onClose, onChanged, onError }: { me: IdentityInfo;
 
       <div className="line">
         <button onClick={pickImage}>{me.avatar ? "Change picture" : "Pick a picture"}</button>
-        {me.avatar && <button onClick={() => api.avatarRemove().then(onChanged).catch(onError)}>remove</button>}
-        {!renaming && <button onClick={() => setRenaming(true)}>rename</button>}
+        {me.avatar && <button onClick={() => api.avatarRemove().then(onChanged).catch(onError)}>Remove</button>}
+        {!renaming && <button onClick={() => setRenaming(true)}>Rename</button>}
       </div>
 
       <section>
@@ -333,6 +337,7 @@ function ProfilePopover({ me, onClose, onChanged, onError }: { me: IdentityInfo;
             <code className="wrap">{me.file}</code>
           </dd>
         </dl>
+        {saved && <p className="small muted">Saved: {saved}</p>}
       </section>
 
       <button className="close" onClick={onClose}>
@@ -413,7 +418,7 @@ function EyePopover({
             .catch(onError);
         }}
       >
-        <input value={fresh} onChange={(e) => setFresh(e.target.value)} placeholder="class:rogue" />
+        <input value={fresh} onChange={(e) => setFresh(e.target.value)} placeholder="team:blue" />
         <button type="submit" disabled={!fresh.trim()}>
           Add
         </button>

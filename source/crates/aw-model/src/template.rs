@@ -753,7 +753,7 @@ pub struct Template {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sort: Vec<String>,
     /// Who besides the GM may make documents of this type — a view, as
-    /// `players` or `class:rogue`. Empty: the GM alone. A player's new
+    /// `players` or `team:blue`. Empty: the GM alone. A player's new
     /// document goes to the GM's device, which makes it with this type's
     /// access (see `journal::Proposal`).
     #[serde(default, skip_serializing_if = "String::is_empty")]

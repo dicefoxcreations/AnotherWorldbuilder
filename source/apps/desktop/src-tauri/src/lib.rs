@@ -1279,7 +1279,7 @@ pub(crate) fn calendar_set_in(store: &Store, world: String, calendar: WorldCalen
 // --- Roles --------------------------------------------------------------
 
 #[cfg(feature = "gui")]
-/// A role to give — `class:rogue`, `knowledge:crypt`. The GM's or a supporter's.
+/// A role to give — `team:blue`, `knowledge:crypt`. The GM's or a supporter's.
 #[cfg_attr(feature = "gui", tauri::command(async))]
 fn attribute_create(app: tauri::AppHandle, world: String, attribute: String) -> Answer<Vec<String>> {
     attribute_create_in(&store(&app)?, world, attribute)
