@@ -54,7 +54,16 @@ export function MultiPick({
  * ＋ and what may be added: a search over the names, the matches below it —
  * Enter takes the first, Escape closes. One after another, it stays open.
  */
-export function AddPick({ open, onAdd, title = "Add" }: { open: ArticleView[]; onAdd: (a: ArticleView) => void; title?: string }) {
+export function AddPick({
+  open,
+  onAdd,
+  title = "Add",
+}: {
+  /** What may be added — or how to find it, asked only once the menu opens. */
+  open: ArticleView[] | (() => ArticleView[]);
+  onAdd: (a: ArticleView) => void;
+  title?: string;
+}) {
   const [shown, setShown] = useState(false);
   const [text, setText] = useState("");
   const box = useRef<HTMLSpanElement>(null);
@@ -67,7 +76,7 @@ export function AddPick({ open, onAdd, title = "Add" }: { open: ArticleView[]; o
     return () => document.removeEventListener("mousedown", away);
   }, [shown]);
   const needle = text.trim().toLowerCase();
-  const matches = open.filter((c) => !needle || c.name.toLowerCase().includes(needle)).slice(0, 50);
+  const matches = !shown ? [] : (typeof open === "function" ? open() : open).filter((c) => !needle || c.name.toLowerCase().includes(needle)).slice(0, 50);
   const take = (c: ArticleView) => {
     onAdd(c);
     setText("");

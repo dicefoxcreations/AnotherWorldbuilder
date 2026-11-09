@@ -262,26 +262,16 @@ function ListingOf({ node }: { node: ListingNode }) {
       </span>
     ) : null;
   const target = field && self ? targetOf(templates, self.articleType, field) : "";
-  const addable = mayPick
-    ? articles
-        .filter((a) => a.id !== self!.id && !(picked ?? []).includes(a.id) && target && isA(templates, a.articleType, target))
-        .sort((a, b) => a.name.localeCompare(b.name))
-    : [];
+  // Found once the menu opens: a world may hold thousands of them.
+  const addable = () =>
+    articles
+      .filter((a) => a.id !== self!.id && !(picked ?? []).includes(a.id) && isA(templates, a.articleType, target))
+      .sort((a, b) => a.name.localeCompare(b.name));
   const add =
-    addable.length > 0 ? (
-      <select
-        className="pick-add listing-add"
-        value=""
-        title={`Add to ${field!.label}`}
-        onChange={(e) => e.target.value && setPicked([...(picked ?? []), e.target.value])}
-      >
-        <option value="">＋</option>
-        {addable.map((a) => (
-          <option key={a.id} value={a.id}>
-            {a.name}
-          </option>
-        ))}
-      </select>
+    mayPick && target ? (
+      <span className="listing-add">
+        <AddPick title={`Add to ${field!.label}`} open={addable} onAdd={(a) => setPicked([...(picked ?? []), a.id])} />
+      </span>
     ) : null;
 
   // A list of what names this document — `where="Owner=self"`: added and
@@ -343,9 +333,11 @@ function ListingOf({ node }: { node: ListingNode }) {
   )) : !mayBack ? null : (
     <AddPick
       title={`Add to ${here!.name}`}
-      open={articles
-        .filter((a) => isA(templates, a.articleType, type!.id) && !idsIn(a, back!.key).includes(current!))
-        .sort((a, b) => a.name.localeCompare(b.name))}
+      open={() =>
+        articles
+          .filter((a) => isA(templates, a.articleType, type!.id) && !idsIn(a, back!.key).includes(current!))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      }
       onAdd={(a) =>
         void api
           .referencesSet(data.world.id, a.id, back!.key, [...idsIn(a, back!.key), current!])

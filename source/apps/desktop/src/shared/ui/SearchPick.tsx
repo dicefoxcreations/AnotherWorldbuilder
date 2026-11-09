@@ -3,6 +3,9 @@ import { Icon } from "./Icons";
 
 export type Pickable = { id: string; name: string; icon?: string; hint?: string };
 
+/** How many matches the open list shows — typing narrows the rest down. */
+const SHOWN = 200;
+
 /**
  * Picks from many by typing: what is chosen stands as chips with ×, a field
  * beside them finds the rest — by name, as one types — and Enter or a click
@@ -35,10 +38,15 @@ export function SearchPick({
   // The one the arrow keys stand on stays in sight.
   useEffect(() => list.current?.querySelector(".on")?.scrollIntoView({ block: "nearest" }), [at]);
   const query = text.trim().toLowerCase();
-  const found = items
-    .filter((i) => !chosen.includes(i.id) && (!query || i.name.toLowerCase().includes(query)))
-    // What begins with the text first, then what holds it.
-    .sort((a, b) => Number(!a.name.toLowerCase().startsWith(query)) - Number(!b.name.toLowerCase().startsWith(query)));
+  // Looked for only while the list is open, and only so many shown: a side
+  // bar may offer every document of a world.
+  const found = !open
+    ? []
+    : items
+        .filter((i) => !chosen.includes(i.id) && (!query || i.name.toLowerCase().includes(query)))
+        // What begins with the text first, then what holds it.
+        .sort((a, b) => Number(!a.name.toLowerCase().startsWith(query)) - Number(!b.name.toLowerCase().startsWith(query)))
+        .slice(0, SHOWN);
   // Over the page, not in what holds the field: a side bar would cut it off.
   // Below the field, or above where there is more room; it scrolls itself.
   const place = (): CSSProperties => {
