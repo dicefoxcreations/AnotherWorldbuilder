@@ -121,15 +121,25 @@ pub(crate) fn world_presence_in(store: &Store, world: String, article: String) -
         note_presence(&world, Presence { member: me.clone(), name, article, layer: String::new(), start: 0, end: 0, editing: false });
     }
     // Where someone is, only on a page this reader may see.
+    // Asked of the few pages someone is on, not of the whole world: every
+    // member asks this every few seconds.
     let reader = store.reader(&world)?;
-    let seen: std::collections::HashSet<String> = if reader.is_gm() { Default::default() } else { store.db(&world)?.names_for(&reader)?.into_iter().map(|(id, ..)| id).collect() };
-    let mut out: Vec<Here> = present(&world, &me)
-        .into_iter()
-        .map(|p| {
-            let article = if reader.is_gm() || seen.contains(&p.article) { p.article } else { String::new() };
-            Here { id: p.member, name: p.name, editing: p.editing && !article.is_empty(), article }
-        })
-        .collect();
+    let db = store.db(&world)?;
+    let mut seen: std::collections::HashMap<String, bool> = Default::default();
+    let mut out = Vec::new();
+    for p in present(&world, &me) {
+        let shown = reader.is_gm()
+            || match seen.get(&p.article) {
+                Some(&known) => known,
+                None => {
+                    let known = db.document(&p.article)?.is_some_and(|d| d.seen_by(&reader).is_some());
+                    seen.insert(p.article.clone(), known);
+                    known
+                }
+            };
+        let article = if shown { p.article } else { String::new() };
+        out.push(Here { id: p.member, name: p.name, editing: p.editing && !article.is_empty(), article });
+    }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
