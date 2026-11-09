@@ -2352,7 +2352,7 @@ pub(crate) mod history {
             return Ok((doc, version));
         }
         versions.retain(|v| v.review == "counted" && (v.ended, &v.session) > (version.ended, &version.session));
-        versions.sort_by(|a, b| b.ended.cmp(&a.ended));
+        versions.sort_by_key(|x| std::cmp::Reverse(x.ended));
         for later in versions {
             for after in &later.content.layers {
                 match later.content.before.iter().find(|b| b.id == after.id) {
@@ -2449,7 +2449,7 @@ pub(crate) mod history {
             .filter(|v| v.review == "counted" || reader.is_gm() || v.author == me)
             .filter_map(|v| v.seen_by(doc, reader).or_else(|| (v.content.layers.is_empty() && v.content.before.is_empty()).then_some(v)))
             .collect();
-        out.sort_by(|a, b| b.ended.cmp(&a.ended));
+        out.sort_by_key(|x| std::cmp::Reverse(x.ended));
         Ok(out)
     }
 
@@ -2780,7 +2780,7 @@ pub(crate) mod history {
         }
         let db = store.db(world)?;
         let mut versions = db.versions(article)?;
-        versions.sort_by(|a, b| b.ended.cmp(&a.ended));
+        versions.sort_by_key(|x| std::cmp::Reverse(x.ended));
         let newest = versions.iter().find(|v| v.review == "counted").map(|v| v.session.clone());
         let Some(v) = versions.iter().find(|v| v.session == session) else { return Ok(()) };
         if newest.as_deref() == Some(session) || v.review == "waiting" {

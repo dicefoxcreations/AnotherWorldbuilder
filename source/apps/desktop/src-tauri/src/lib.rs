@@ -2016,7 +2016,7 @@ pub(crate) fn trash_list_in(store: &Store, world: &str) -> Answer<Vec<TrashedVie
             Some(TrashedView { id: d.id.clone(), name: d.name().to_string(), article_type: d.doc_type.clone(), at: t.at, by })
         })
         .collect();
-    out.sort_by(|a, b| b.at.cmp(&a.at));
+    out.sort_by_key(|x| std::cmp::Reverse(x.at));
     Ok(out)
 }
 

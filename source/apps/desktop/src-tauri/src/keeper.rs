@@ -570,7 +570,7 @@ impl Keeper {
         }
         worlds.sort_by_key(|a| a.name.to_lowercase());
         let mut users: Vec<Person> = book.users.keys().map(|id| person(id)).collect();
-        users.sort_by(|a, b| b.last.cmp(&a.last));
+        users.sort_by_key(|x| std::cmp::Reverse(x.last));
         Ok(ServerState {
             worlds,
             admins: std::iter::once(&self.admin).chain(book.admins.iter()).map(|id| person(id)).collect(),
@@ -583,7 +583,9 @@ impl Keeper {
 
 /// Who wrote last, by world: the writes from and to, and by whom — for
 /// telling each member what the others changed.
-static WRITTEN: std::sync::OnceLock<Mutex<BTreeMap<String, std::collections::VecDeque<(u64, u64, String)>>>> = std::sync::OnceLock::new();
+static WRITTEN: std::sync::OnceLock<Mutex<BTreeMap<String, Written>>> = std::sync::OnceLock::new();
+/// One world's last writes: from, to, by whom.
+type Written = std::collections::VecDeque<(u64, u64, String)>;
 /// How many writes are noted per world.
 const NOTED: usize = 500;
 

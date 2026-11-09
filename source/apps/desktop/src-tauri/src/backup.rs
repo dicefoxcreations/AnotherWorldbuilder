@@ -152,7 +152,7 @@ pub(crate) fn list(folder: &Path) -> Vec<(About, PathBuf)> {
             (about.format == FORMAT).then_some((about, path))
         })
         .collect();
-    out.sort_by(|a, b| b.0.at.cmp(&a.0.at));
+    out.sort_by_key(|(about, _)| std::cmp::Reverse(about.at));
     out
 }
 
@@ -402,7 +402,7 @@ pub(crate) fn found(root: &Path) -> Vec<Found> {
         .flat_map(|e| list(&e.path()))
         .map(|(about, path)| Found { at: about.at, name: about.name, world: about.world, path: restorable(&path).display().to_string() })
         .collect();
-    out.sort_by(|a, b| b.at.cmp(&a.at));
+    out.sort_by_key(|x| std::cmp::Reverse(x.at));
     out
 }
 

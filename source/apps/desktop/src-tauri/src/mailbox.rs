@@ -200,13 +200,18 @@ pub(crate) fn round(store: &Store, world: &str) -> Answer<bool> {
     for member in db.members()?.into_iter().filter(|m| !m.slot.is_empty() && m.role != Role::Gm) {
         came |= collect(store, world, &folder, &member)?;
     }
+    // What every player sees: asked once for all of them, when one is due.
+    let mut everyone = None;
     for member in db.members()?.into_iter().filter(|m| !m.slot.is_empty() && m.role != Role::Gm) {
         let key = (world.to_string(), member.slot.clone());
         if delivered().get(&key) == Some(&db.writes()) {
             continue;
         }
         let writes = db.writes();
-        deliver(store, world, &folder, &member)?;
+        if everyone.is_none() {
+            everyone = Some(everyone_sees(store, world)?);
+        }
+        deliver(store, world, &folder, &member, everyone.as_ref().unwrap_or(&BTreeSet::new()))?;
         delivered().insert(key, writes);
     }
     Ok(came)
@@ -283,13 +288,12 @@ fn take(store: &Store, world: &str, id: &mut String, member: &Member, signed: &S
 }
 
 /// Gives a player the world as they see it.
-fn deliver(store: &Store, world: &str, folder: &Path, member: &Member) -> Answer<()> {
+fn deliver(store: &Store, world: &str, folder: &Path, member: &Member, everyone: &BTreeSet<String>) -> Answer<()> {
     let db = store.db(world)?;
     let gm = db.members()?.into_iter().find(|m| m.role == Role::Gm).map(|m| m.id).unwrap_or_default();
     let reader = Reader::of(member);
     let images = store::acting_for(&member.id, || store.images_seen(world))?;
     // Pictures every player sees go to all of them, once.
-    let everyone = everyone_sees(store, world)?;
     let temp = store.private_world_dir(world).join("delivering").join(&member.slot);
     let _ = std::fs::remove_dir_all(&temp);
     db.view_copy(&temp, &reader, &[gm, member.id.clone()], &images)?;
