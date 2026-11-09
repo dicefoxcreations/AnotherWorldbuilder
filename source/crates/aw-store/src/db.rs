@@ -1002,7 +1002,7 @@ impl WorldDb {
             .into_iter()
             .filter_map(|(id, _, _, access, cover)| {
                 let (alias, cover) = cover?;
-                (!alias.trim().is_empty() && (reader.sees(&access) || reader.sees(&cover))).then(|| (id, alias, access))
+                (!alias.trim().is_empty() && (reader.sees(&access) || reader.sees(&cover))).then_some((id, alias, access))
             })
             .collect())
     }

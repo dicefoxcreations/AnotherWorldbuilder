@@ -1675,10 +1675,8 @@ fn assign_ids<T>(
     // Second pass: the rest in order. Whoever stands where they stood before
     // is the same one — only renamed.
     let mut free = (0..previous.len()).filter(|j| !taken[*j]);
-    for i in 0..fresh.len() {
-        if mapping[i].is_none() {
-            mapping[i] = free.next();
-        }
+    for slot in mapping.iter_mut().filter(|m| m.is_none()) {
+        *slot = free.next();
     }
 
     for (i, target) in mapping.into_iter().enumerate() {
