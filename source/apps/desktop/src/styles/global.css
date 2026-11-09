@@ -169,7 +169,6 @@ fieldset input, fieldset textarea, fieldset select { width: 100%; margin-bottom:
 .menu-section.line { display: flex; align-items: center; }
 .menu-section button { text-transform: none; letter-spacing: normal; font-size: 13px; }
 .world-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 18px; min-height: 150px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; text-align: left; }
-.world-card.dashed { border-style: dashed; background: transparent; }
 .world-card.new { gap: 10px; }
 .world-card strong { font-size: 17px; }
 .world-card small { color: var(--muted); font-size: 12px; }
@@ -520,7 +519,6 @@ body:has(.frame.nav-over) .side-panel { z-index: 19; }
 /* The caption reads like the one under a picture — a field only when one writes in it. */
 .image-card-caption { width: 100%; min-width: 0; contain: inline-size; border-color: transparent; background: transparent; font-size: 12px; color: var(--muted); padding: 2px 4px; }
 .image-card-caption:hover, .image-card-caption:focus { border-color: var(--border); background: var(--field); color: var(--text); }
-.image-card-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .image-card-width { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
 .image-card-width input { width: 80px; }
 .image-card-hidden { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -1271,14 +1269,12 @@ svg.graph.fit { max-width: 100%; height: auto; }
 .graph-menu .graph-hit .muted { white-space: nowrap; }
 .graph-menu .brick-group { max-height: 260px; overflow-y: auto; overflow-x: hidden; }
 .graph-menu .new-person input, .graph-menu .new-person select { width: 100%; min-width: 0; box-sizing: border-box; }
-.graph .family-line { fill: none; stroke: var(--muted); stroke-width: 1.6; }
 .graph .arrow { fill: var(--muted); }
 .graph .edge path { fill: none; stroke: var(--edge, var(--muted)); stroke-width: 1.8; }
 /* A label sits on a plate of its own, so no line runs through its words. */
 .graph .pill rect { fill: var(--sunken); stroke: var(--edge, var(--muted)); stroke-width: 1; }
 .graph .pill .role { fill: var(--text); font-size: 12px; text-anchor: middle; dominant-baseline: central; }
 .graph .edge.chosen path:not(.hit), .graph .drop.chosen path:not(.hit) { stroke-width: 3.4; }
-.graph .drop.chosen .family-line { stroke: var(--accent); }
 /* Wide and invisible: lines are easy to hit while editing. */
 .graph .hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
 .graph .drag-line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; pointer-events: none; }
@@ -1332,7 +1328,6 @@ svg.graph.fit { max-width: 100%; height: auto; }
 .graph-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--muted); }
 .graph-legend li { display: flex; align-items: center; gap: 6px; }
 .graph-legend .swatch { width: 14px; height: 3px; border-radius: 2px; background: var(--edge); }
-.add-person { font-size: 13px; padding: 4px 8px; }
 /* The roles of what was clicked in a graph — in the side bar, where the
    versions stand, and above them while open. */
 .side-panel { position: fixed; z-index: 16; top: var(--header-height, 53px); right: 0; bottom: 0; width: var(--versions-width); overflow-y: auto; border-left: 1px solid var(--border); background: var(--card); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -1371,7 +1366,6 @@ svg.graph.fit { max-width: 100%; height: auto; }
 .document { display: flex; flex-direction: column; gap: 12px; }
 .document .article-page { width: 100%; }
 .document-columns { min-height: 60vh; }
-.document-title { margin: 0; font-size: 26px; }
 /* The code, read-only: the same face as the editor, without the field. */
 /* The visual side: the properties as a form, the sections as text fields. */
 .visual-editor { display: flex; flex-direction: column; gap: 16px; }
@@ -1493,8 +1487,6 @@ select.pick-add:hover { color: var(--accent); border-color: var(--accent); }
 .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: var(--warn); color: #fff; font-size: 11px; font-weight: 600; line-height: 1; }
 .gear .badge { position: absolute; top: -6px; right: -7px; }
 .options-nav button .badge { margin-left: auto; }
-.network-section { margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--border); }
-.network-section h3 { margin: 0 0 12px; }
 .world-card.net { border-color: var(--info-line); }
 .world-tile > .primary { width: 100%; margin-top: 6px; }
 .folder-box { margin: 10px 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
@@ -1510,7 +1502,6 @@ select.pick-add:hover { color: var(--accent); border-color: var(--accent); }
 .storage-field input[readonly] { color: var(--muted); }
 .storage-rows { display: flex; flex-direction: column; gap: 12px; margin: 8px 0 16px; }
 /* A drawn icon in front of the label. */
-button.with-icon { display: inline-flex; align-items: center; gap: 6px; }
 /* A question with a few answers: like the delete dialog, without the red. */
 .dialog { width: min(460px, 92vw); background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
 .dialog h3, .dialog p { margin: 0; }
@@ -1679,10 +1670,6 @@ fieldset.then textarea, fieldset.then input, fieldset.then select { opacity: 1; 
 .fold-body > .foldout.level-2:last-of-type { border-bottom: 1px solid var(--border); }
 
 .date-pick { gap: 4px; flex-wrap: nowrap; }
-.cal-card .date-pick select[aria-label="Day"] { width: 58px; }
-.cal-card .date-pick select[aria-label="Month"] { width: 132px; }
-.cal-card .date-pick select[aria-label="Era"] { width: 72px; }
-.cal-card .date-pick .date-year { width: 6ch; }
 
 .cal-save { display: flex; align-items: center; gap: 8px; margin: 18px 0 8px; }
 .calendar-area .month-view { margin: 0; }
@@ -1876,7 +1863,6 @@ input.invalid { border-color: var(--danger-line); }
    What was rolled, one's own and the session's: bottom right, over the page. */
 .dice-head { display: flex; align-items: center; gap: 8px; }
 .dice-head > :last-child { margin-left: auto; }
-.dice-title { font-size: 16px; }
 .dice-log { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
 .dice-entry { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 5px 8px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--border); }
 .dice-entry.mine { border-color: var(--accent-line); }
@@ -1953,7 +1939,6 @@ body:has(.side-panel, .versions) .map-view.maximized { right: var(--versions-wid
 .map-corner.draft { cursor: crosshair; }
 .map-corner.closes { cursor: pointer; }
 .map-corner.closes::before { background: var(--accent); width: 14px; height: 14px; left: -7px; top: -7px; }
-.map-view.adding-area .map-box, .map-view.adding-area .map-area { cursor: crosshair; }
 /* A marker with a sign: a round badge centred on its point. */
 .map-pin-badge {
   position: absolute; left: -13px; top: -13px; width: 26px; height: 26px; border-radius: 50%;
@@ -2013,7 +1998,6 @@ body:has(.side-panel, .versions) .map-view.maximized { right: var(--versions-wid
 
 /* The editor's head: who sees, who changes — one line, as the read view's mark. */
 .head-access { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.switch-row.sub-switch { margin-left: 30px; max-width: 730px; }
 .switch-row.off { opacity: .55; }
 .switch-progress { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 12px; }
 .progress-bar { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
