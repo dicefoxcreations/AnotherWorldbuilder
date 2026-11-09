@@ -1,8 +1,8 @@
-import { useContext } from "react";
+import { useContext, useMemo } from "react";
 import { Icon } from "../../shared/ui/Icons";
 import type { Node, Template, TemplateField } from "../../api/client";
 import { attr, withAttr, writeListLine, writeTagLine, type ImageAttrs } from "../../shared/ImageTag";
-import { findType, isA, isProperties, typeOf, articleById } from "../../shared/types";
+import { documentsOf, findType, isA, isProperties, typeOf, articleById } from "../../shared/types";
 import { SearchPick, type Pickable } from "../../shared/ui/SearchPick";
 import { CurrentDocument, useWorldData } from "../worlds/WorldData";
 import { Listing } from "./Listing";
@@ -133,8 +133,8 @@ function ListSettings({ attrs, onChange }: { attrs: ImageAttrs; onChange: (next:
   const own = typeOf(templates, articleById(articles, current)?.articleType ?? "");
   const picking = (own?.properties ?? []).filter((f): f is TemplateField & { kind: "reference" } => f.kind === "reference" && f.multiple);
   const from = node.from ? picking.find((f) => f.label.toLowerCase() === node.from.toLowerCase() || f.key === node.from) : undefined;
-  const listed = from ? typeOf(templates, from.articleType) : node.of.replace(/[«»]/g, "") ? typeOf(templates, typeNamed(templates, node.of)?.id ?? "") : undefined;
-  const fields = listable(listed);
+  const listedType = from ? typeOf(templates, from.articleType) : node.of.replace(/[«»]/g, "") ? typeOf(templates, typeNamed(templates, node.of)?.id ?? "") : undefined;
+  const fields = listable(listedType);
   const tree = fields.some((f) => f.kind === "reference" && f.parent);
   const show = node.show;
   const on = (label: string) => show.some((x) => x.toLowerCase() === label.toLowerCase());
@@ -147,7 +147,7 @@ function ListSettings({ attrs, onChange }: { attrs: ImageAttrs; onChange: (next:
         <div className="time-setting">
           <span className="small muted">Lists</span>
           <div className="segmented">
-            <button className={!node.from ? "on" : ""} onClick={() => onChange(writeListLine(withAttr(withAttr(attrs, "from", ""), "type", listed?.name ?? "")))}>
+            <button className={!node.from ? "on" : ""} onClick={() => onChange(writeListLine(withAttr(withAttr(attrs, "from", ""), "type", listedType?.name ?? "")))}>
               of a type
             </button>
             <button className={node.from ? "on" : ""} onClick={() => onChange(writeListLine(withAttr(withAttr(attrs, "type", ""), "from", picking[0].label)))}>
@@ -174,7 +174,7 @@ function ListSettings({ attrs, onChange }: { attrs: ImageAttrs; onChange: (next:
           <SearchPick
             single
             items={typeItems(templates)}
-            chosen={listed ? [listed.id] : []}
+            chosen={listedType ? [listedType.id] : []}
             placeholder="Find a type"
             none="all documents"
             onAdd={(id) => set("type", findType(templates, id)?.name ?? id)}
@@ -217,7 +217,7 @@ function ListSettings({ attrs, onChange }: { attrs: ImageAttrs; onChange: (next:
           <div className="list-filters">
             {filters.map(([field, value], i) => {
               const f = fields.find((x) => x.label.toLowerCase() === field.toLowerCase() || x.key === field);
-              const choices = f?.kind === "reference" ? articles.filter((a) => isA(templates, a.articleType, f.articleType)).map((a) => a.name).sort() : null;
+              const choices = f?.kind === "reference" ? documentsOf(articles, templates, f.articleType).map((a) => a.name) : null;
               const change = (next: [string, string]) => writeFilters(filters.map((x, j) => (j === i ? next : x)));
               return (
                 <div key={i} className="list-filter">
@@ -255,12 +255,12 @@ function ListSettings({ attrs, onChange }: { attrs: ImageAttrs; onChange: (next:
           </div>
         </div>
       )}
-      {!node.from && tree && listed && (
+      {!node.from && tree && listedType && (
         <div className="time-setting">
           <span className="small muted">Below</span>
           <SearchPick
             single
-            items={articles.filter((a) => isA(templates, a.articleType, listed.id)).map((a) => ({ id: a.id, name: a.name }))}
+            items={documentsOf(articles, templates, listedType.id).map((a) => ({ id: a.id, name: a.name }))}
             chosen={articles.filter((a) => a.id === node.below || a.name === node.below).map((a) => a.id)}
             placeholder="Find a document"
             none="the whole tree"
@@ -561,9 +561,15 @@ export function EmbedCard({ attrs, onChange }: { attrs: ImageAttrs; onChange: (n
   const fold = attr(attrs, "fold");
   const title = attr(attrs, "title");
   const set = (name: string, value: string) => onChange(writeTagLine("embed", withAttr(attrs, name, value)));
-  const items = articles
-    .map((a) => ({ id: a.id, name: a.name, icon: findType(data?.templates ?? [], a.articleType)?.icon }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Every page, once per list of documents — not on each draw of the editor it stands in.
+  const templates = data?.templates;
+  const items = useMemo(
+    () =>
+      articles
+        .map((a) => ({ id: a.id, name: a.name, icon: findType(templates ?? [], a.articleType)?.icon }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [articles, templates],
+  );
   return (
     <Surface
       label="Another page"
