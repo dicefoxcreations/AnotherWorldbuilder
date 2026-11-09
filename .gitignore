@@ -1,0 +1,55 @@
+# Generated while building: compiler output, frontend, caches
+/source/build/
+/source/.local/
+**/node_modules/
+**/dist/
+**/target/
+/source/apps/desktop/src-tauri/gen/*
+!/source/apps/desktop/src-tauri/gen/android/
+/source/apps/server-android/.gradle/
+/source/apps/server-android/local.properties
+.DS_Store
+*.log
+
+# Never commit by accident: local identity and world tokens
+identity.json
+*.key
+/worlds
+
+__pycache__/
+
+# Local browser QA artifacts
+/source/apps/desktop/tests/browser/private/
+
+# Test profiles, test worlds and their tools
+/testdata/
+
+# Local Claude Code settings
+/.claude/
+
+# The programs themselves go to GitHub Releases (too big for git);
+# programs/ keeps checksums, notices and the server's compose file.
+/programs/**/*.AppImage
+/programs/**/*.deb
+/programs/**/*.exe
+/programs/**/*.tar
+/programs/**/*.apk
+/programs/**/*.apk.idsig
+/programs/server-linux-x86_64/aw-server
+
+# Analyses written for the publisher (German, local paths): never public
+/source/docs/analysis/
+
+# Development only — tests, the test bench, developer docs. Kept in the
+# private development repository (`.dev.git`), not published here.
+source/**/*_tests.rs
+source/apps/desktop/tests/
+source/apps/desktop/src-tauri/gen/android/app/src/androidTest/
+source/tools/test/
+source/tools/testbench/
+source/crates/*/tests/
+source/docs/*
+!source/docs/server-setup.md
+!source/docs/screenshots/
+/.dev.git/
+/dev-git

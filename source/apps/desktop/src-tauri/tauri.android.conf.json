@@ -1,0 +1,19 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "AnotherWorldbuilder",
+        "width": 400,
+        "height": 800,
+        "minWidth": 320,
+        "minHeight": 320
+      }
+    ]
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "android": {
+      "minSdkVersion": 26
+    }
+  }
+}

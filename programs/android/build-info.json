@@ -1,0 +1,14 @@
+{
+  "version": "0.2.18",
+  "minAndroid": "8.0",
+  "targetSdk": 36,
+  "targets": [
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android"
+  ],
+  "commit": "ca939344c627da0e85fac1803b90927e85a5c5a4",
+  "apk": "AnotherWorldbuilder_0.2.18_android.apk",
+  "bytes": 59175006,
+  "sha256": "c6c98422bc23a11e7952fbe9352878c9b1ae6266c7c1f406c419cfe7b6797d9a"
+}

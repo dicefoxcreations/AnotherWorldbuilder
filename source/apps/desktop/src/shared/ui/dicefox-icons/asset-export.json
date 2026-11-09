@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "library_version": "1.10.0",
+  "snapshot_date": "2026-10-28",
+  "asset": {
+    "id": "aw-fine-dice",
+    "title": "Würfeln · Feine Kontur",
+    "category": "icons",
+    "family": "dicefox-fine",
+    "version": "v2",
+    "status": "draft",
+    "preview": "icons/another-worldbuilder/fine/v2/svg/mono/dice.svg",
+    "preview_style": "line-icon",
+    "variants": [
+      {
+        "id": "mono",
+        "label": "SVG · einfarbig · ab 24 px",
+        "path": "icons/another-worldbuilder/fine/v2/svg/mono/dice.svg",
+        "kind": "file"
+      },
+      {
+        "id": "profile",
+        "label": "Inline-SVG · App-Profilfarben · ab 24 px",
+        "path": "icons/another-worldbuilder/fine/v2/svg/profile/dice.svg",
+        "kind": "file"
+      },
+      {
+        "id": "compact-mono",
+        "label": "Einfarbig · optisch angepasst · 16–20 px",
+        "path": "icons/another-worldbuilder/fine/v2/compact/mono/dice.svg",
+        "kind": "file"
+      },
+      {
+        "id": "compact-profile",
+        "label": "Profilfarben · optisch angepasst · 16–20 px",
+        "path": "icons/another-worldbuilder/fine/v2/compact/profile/dice.svg",
+        "kind": "file"
+      },
+      {
+        "id": "preview",
+        "label": "77 Symbole & App-Profile ansehen",
+        "path": "icons/another-worldbuilder/fine/v2/preview.html",
+        "kind": "page"
+      },
+      {
+        "id": "runtime",
+        "label": "React-Komponente für alle 77 Symbole und 18 weitere Namen",
+        "path": "icons/another-worldbuilder/fine/v2/runtime",
+        "kind": "directory"
+      }
+    ],
+    "description": "Außenkontur 1,35, Flächenkanten 1,0 und kleinere, weiter von den Kanten abgesetzte Punkte. Die rechte Fläche ist nur noch leicht getönt.",
+    "tags": [
+      "dice",
+      "feine kontur",
+      "eigene konstruktion",
+      "svg",
+      "einfarbig",
+      "profilfarben",
+      "worldbuilder",
+      "ui"
+    ],
+    "used_in": [],
+    "notes": "Revision 02 vom 28.10.2026: bestätigt feine Richtung, Außenkontur 1,35 und optische kleine Varianten. Neue Motive sind Entwürfe; diese Ablage übernimmt sie nicht automatisch in Apps."
+  },
+  "selected_variants": [
+    "runtime"
+  ],
+  "files": {
+    "runtime/DiceFoxIcon.ts": {
+      "library_path": "icons/another-worldbuilder/fine/v2/runtime/DiceFoxIcon.ts",
+      "sha256": "72dbcf3f06c61cd262c3e31b3b46ba6ce2af482cca5af03a2c9240f0b5022a77",
+      "bytes": 1503,
+      "original_source": "DiceFoxAssets/icons/another-worldbuilder/fine/v1/runtime/DiceFoxIcon.ts"
+    },
+    "runtime/DiceFoxIcons.css": {
+      "library_path": "icons/another-worldbuilder/fine/v2/runtime/DiceFoxIcons.css",
+      "sha256": "666840b3ca8dadb55616d724002b71dd3e8ba8b2e68870e4182f0db6f774e626",
+      "bytes": 68,
+      "original_source": "DiceFoxAssets/icons/another-worldbuilder/fine/v1/runtime/DiceFoxIcons.css"
+    },
+    "runtime/icon-data.d.ts": {
+      "library_path": "icons/another-worldbuilder/fine/v2/runtime/icon-data.d.ts",
+      "sha256": "fc1a5ce9126c8eb54ce6efc7c362bc689e96752721d85680f1101a2f05ec5a5f",
+      "bytes": 1132,
+      "original_source": "DiceFoxAssets/icons/another-worldbuilder/fine/v2/runtime/icon-data.d.ts"
+    },
+    "runtime/icon-data.js": {
+      "library_path": "icons/another-worldbuilder/fine/v2/runtime/icon-data.js",
+      "sha256": "d4d7581478bd587ce605f3e0e435a8ea83f68c131cbf10dbce3c6d8e2eacdd63",
+      "bytes": 37623,
+      "original_source": "DiceFoxAssets/icons/another-worldbuilder/fine/v2/runtime/icon-data.js"
+    },
+    "runtime/icon-renderer.d.ts": {
+      "library_path": "icons/another-worldbuilder/fine/v2/runtime/icon-renderer.d.ts",
+      "sha256": "fa02349b446b40a38d0a562b276c115cf85eb27794b089069b74e85f8f638b6a",
+      "bytes": 719,
+      "original_source": "DiceFoxAssets/icons/another-worldbuilder/fine/v2/runtime/icon-renderer.d.ts"
+    },
+    "runtime/icon-renderer.js": {
+      "library_path": "icons/another-worldbuilder/fine/v2/runtime/icon-renderer.js",
+      "sha256": "0c97c6fe8a88fd74fd564701073b9cedcc9f77364acc5cbb40084f65fc817719",
+      "bytes": 2980,
+      "original_source": "DiceFoxAssets/icons/another-worldbuilder/fine/v2/runtime/icon-renderer.js"
+    },
+    "runtime/package.json": {
+      "library_path": "icons/another-worldbuilder/fine/v2/runtime/package.json",
+      "sha256": "1239d4d885dcad42201a27ed9324f8f0f760b78700d8db9ced39a511cffe7eae",
+      "bytes": 18,
+      "original_source": "DiceFoxAssets/icons/another-worldbuilder/fine/v1/runtime/package.json"
+    }
+  }
+}

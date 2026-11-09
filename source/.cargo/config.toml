@@ -1,0 +1,3 @@
+[build]
+# Keep generated compiler output separate from source and distributable packages.
+target-dir = "build/cargo"

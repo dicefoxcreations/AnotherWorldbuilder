@@ -1,0 +1,21 @@
+{
+  "version": "0.2.18",
+  "target": "x86_64-unknown-linux-gnu",
+  "portable": false,
+  "buildHost": "linux",
+  "commit": "ca939344c627da0e85fac1803b90927e85a5c5a4",
+  "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "node": "v26.12.1",
+  "packages": [
+    {
+      "name": "AnotherWorldbuilder_0.2.18_amd64.AppImage",
+      "bytes": 148552184,
+      "sha256": "ffa39f09cea346ccbc068cfc16ea76b57a836a29cd3bb5c63e636ae7fe5ab7e3"
+    },
+    {
+      "name": "AnotherWorldbuilder_0.2.18_amd64.deb",
+      "bytes": 26752354,
+      "sha256": "1e719668f867f41371b344a6fe0b536d88a53f9739e9f5aa51dd1a943f99fe22"
+    }
+  ]
+}

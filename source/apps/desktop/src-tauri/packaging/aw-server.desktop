@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=AW Server
+Comment=AnotherWorldbuilder's server for your group
+Exec=aw-desktop --server
+Icon=aw-server
+Categories=Network;
+Terminal=false

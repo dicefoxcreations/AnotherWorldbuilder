@@ -1,0 +1,5 @@
+<!-- DiceFox fine/v2/svg/mono/refresh.svg, unchanged paths. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M4 10.5A8 8 0 0 1 18.5 6.8M18.5 2.8V7.5H14" android:fillColor="@android:color/transparent" android:strokeColor="#FFE5EEEE" android:strokeWidth="1.35" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M20 13.5A8 8 0 0 1 5.5 17.2M5.5 21.2V16.5H10" android:fillColor="@android:color/transparent" android:strokeColor="#FFE5EEEE" android:strokeWidth="1.35" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

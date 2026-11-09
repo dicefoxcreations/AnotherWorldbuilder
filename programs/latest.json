@@ -1,0 +1,15 @@
+{
+  "version": "0.2.18",
+  "notes": "**Players arrange what they may edit, a document changes its type, two may be more than one thing to each other.**\n\n- **Relations:** a graph sets, adds and removes one relation between two — the others between them stay. The side bar shows each with its own roles.\n- **Several parents:** a parent property may hold several documents (`multiple parent`). `parent` in an access rule lets in whoever is assigned to any of them, and follows when one is added or taken out.\n- **Another type:** in a document's side bar — an NPC becomes a backstory NPC, an item a homebrew one. Its text and the values both types have stay.\n- **Sections for editors:** whoever may edit a document sets its sections' title, heading, style, place, folding and order — for that document alone.\n- **The code:** sections in the order they are read, bracketed, moved with ▲▼; a section is no longer taken away by mistake.\n- **Access of a property:** a property with access of its own is changed by whom it lets in, from a list too — the template lets players write an item's owners and where it was found.\n- **Shutting oneself out** of who sees or changes something asks first.\n- **Making a document** happens once, however often one clicks; the new page says Loading until it is there.\n- The outline's search empties with ✕; the code's arrows are larger; the opening fox no longer starts over; the world open last is kept while another opens.\n- Update the server and every app: the server keeps the new looks, orders and types.",
+  "pub_date": "2026-11-09T08:15:40.167Z",
+  "platforms": {
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUVhkaXB6N0N4OXNLcFNMTUV1S2dWRXYwK0lCOHU0NmpWb3lGTkEwVmNhY3dTdUw5UkFKdnNaOXlTc2gwdUlmdkpscHg4OFF4dFJxNXE5ZllvcEwxWlFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjEwMDI3CWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjIuMThfYW1kNjQuQXBwSW1hZ2UKcm9NS3ZXRjJIWk1VZTh0TFhqNCtHUUVkSUJ6M05yQUxGYTZVSnhNY2hPMUZJeXY1V3VGd1JqcWpHdmo3MkFqQVRPbDZRb1pXNEM3WTJKdDR1amFCRFE9PQo=",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.2.18/AnotherWorldbuilder_0.2.18_amd64.AppImage"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUWQ2b3hGeWZQbjN6aE5NZ3p4S0VEd2ZVRXNVNm9nMHd3OXFyMTdTWU5wcE9qRlN3VFBYYklSUDFiOG5mKzY3OHE2cUJRWFo5N1hjVzdTN1ZMaEhCWndVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MjEyMTE5CWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjIuMThfeDY0LXNldHVwLmV4ZQovSkg3NHdZd0JOVVlXS0QvY3ptYUVyTlA1SlBPdENUSlpCTnNxSFVFTmltN0pRN1gvSlRjMzlMeW5ZdStQdDBoOUFkRkN2SzkycEdRTDdVaEJoWkhBdz09Cg==",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.2.18/AnotherWorldbuilder_0.2.18_x64-setup.exe"
+    }
+  }
+}
