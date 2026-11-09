@@ -154,12 +154,33 @@ impl Named {
 /// What this reader knows by name: the documents they can see, the types.
 pub(crate) struct Known {
     names: Vec<Named>,
+    /// Positions in `names` by id, and by name in lower case — looked up
+    /// for every link in a text, among thousands of documents.
+    by_id: std::collections::HashMap<String, usize>,
+    by_name: std::collections::HashMap<String, Vec<usize>>,
     templates: Vec<Template>,
     /// Document id → its alias, and who may open it (see `InPart`).
     aliases: BTreeMap<String, (String, String)>,
 }
 
 impl Known {
+    /// The document of this id this reader knows.
+    fn named_id(&self, id: &str) -> Option<&Named> {
+        self.by_id.get(id).map(|&i| &self.names[i])
+    }
+
+    /// The documents of this name, in any case.
+    fn named_as(&self, name: &str) -> impl Iterator<Item = &Named> {
+        self.by_name.get(&name.to_ascii_lowercase()).into_iter().flatten().map(|&i| &self.names[i])
+    }
+
+    /// The first document a link names — by its id, or by its name and type.
+    fn linked(&self, link: &link::Link) -> Option<&Named> {
+        let by_id = self.by_id.get(&link.name).copied();
+        let by_name = self.by_name.get(&link.name.to_ascii_lowercase()).and_then(|at| at.iter().copied().find(|&i| self.names[i].is(link)));
+        by_id.into_iter().chain(by_name).min().map(|i| &self.names[i])
+    }
+
     /// The catalog as text in a part seen by `view` is stored with.
     pub(crate) fn in_part<'a>(&'a self, view: &'a str) -> InPart<'a> {
         InPart { known: self, view }
@@ -198,7 +219,9 @@ impl Catalog for InPart<'_> {
     }
     fn document_alias(&self, id: &str) -> Option<String> {
         let (alias, opens) = self.known.aliases.get(id)?;
-        (self.view != opens && self.view != "gm").then(|| alias.clone())
+        // The same rule however it is written: `doc:a OR gm` is `gm OR doc:a`.
+        let same = |a: &str, b: &str| a == b || a.parse::<Policy>().ok().zip(b.parse::<Policy>().ok()).is_some_and(|(a, b)| a == b);
+        (!same(self.view, opens) && !same(self.view, "gm")).then(|| alias.clone())
     }
 }
 
@@ -230,7 +253,7 @@ pub(crate) fn known_shared(store: &Store, world: &str, reader: &Reader, template
 /// The same from id, name and type of each document — documents not stored
 /// yet among them, as a package brings them.
 pub(crate) fn known_of(documents: Vec<(String, String, String)>, templates: Vec<Template>) -> Known {
-    let names = documents
+    let names: Vec<Named> = documents
         .into_iter()
         .map(|(id, name, article_type)| Named {
             types: types::find(&templates, &article_type)
@@ -241,19 +264,24 @@ pub(crate) fn known_of(documents: Vec<(String, String, String)>, templates: Vec<
             article_type,
         })
         .collect();
-    Known { names, templates, aliases: BTreeMap::new() }
+    let mut by_id = std::collections::HashMap::new();
+    let mut by_name: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for (i, n) in names.iter().enumerate() {
+        by_id.entry(n.id.clone()).or_insert(i);
+        by_name.entry(n.name.to_ascii_lowercase()).or_default().push(i);
+    }
+    Known { names, by_id, by_name, templates, aliases: BTreeMap::new() }
 }
 
 impl Catalog for Known {
     fn document_id(&self, of: &str, name: &str) -> Option<String> {
-        let link = link::Link::to(of, name);
-        self.names.iter().find(|n| n.is(&link)).map(|n| n.id.clone())
+        self.linked(&link::Link::to(of, name)).map(|n| n.id.clone())
     }
     fn document_name(&self, id: &str) -> Option<(String, String)> {
-        self.names.iter().find(|n| n.id == id).map(|n| (n.types.first().cloned().unwrap_or_default(), n.name.clone()))
+        self.named_id(id).map(|n| (n.types.first().cloned().unwrap_or_default(), n.name.clone()))
     }
     fn document_type(&self, id: &str) -> Option<String> {
-        self.names.iter().find(|n| n.id == id).map(|n| n.article_type.clone())
+        self.named_id(id).map(|n| n.article_type.clone())
     }
     fn type_id(&self, name: &str) -> Option<String> {
         let name = name.trim();
@@ -304,8 +332,14 @@ pub struct DocumentCode {
     pub base: Bases,
 }
 
-/// The states handed out, by their hash — and their hashes, oldest first.
-type HandedOut = (std::collections::HashMap<String, Plain>, std::collections::VecDeque<String>);
+/// The states handed out, by their hash — their hashes, oldest first, and
+/// how many bytes of text they hold together.
+#[derive(Default)]
+struct HandedOut {
+    states: std::collections::HashMap<String, Plain>,
+    order: std::collections::VecDeque<String>,
+    bytes: usize,
+}
 
 /// The states of layers handed out to editors, by their hash — what a save
 /// is measured against. Kept in memory: after a restart an editor's state
@@ -315,8 +349,16 @@ fn handed_out() -> &'static std::sync::Mutex<HandedOut> {
     KEPT.get_or_init(Default::default)
 }
 
-/// How many states stay kept — enough for many editors on many documents.
+/// How many states stay kept — enough for many editors on many documents —
+/// and how much text they may hold: a server keeps them for every member,
+/// and a book's chapters are long.
 const KEPT_STATES: usize = 20_000;
+const KEPT_BYTES: usize = 64 * 1024 * 1024;
+
+/// What a kept state weighs.
+fn weight(plain: &Plain) -> usize {
+    plain.title.len() + plain.text.len() + plain.fields.values().map(|v| v.to_string().len()).sum::<usize>()
+}
 
 /// The hash a layer's state is known by.
 fn state_hash(layer: &str, plain: &Plain) -> String {
@@ -334,13 +376,17 @@ fn state_hash(layer: &str, plain: &Plain) -> String {
 /// Keeps a state under its hash, for the save to come.
 fn keep_state(hash: &str, plain: Plain) {
     if let Ok(mut kept) = handed_out().lock() {
-        let (states, order) = &mut *kept;
-        if states.insert(hash.to_string(), plain).is_none() {
-            order.push_back(hash.to_string());
-            while order.len() > KEPT_STATES {
-                if let Some(old) = order.pop_front() {
-                    states.remove(&old);
-                }
+        let kept = &mut *kept;
+        if kept.states.contains_key(hash) {
+            return;
+        }
+        kept.bytes += weight(&plain);
+        kept.states.insert(hash.to_string(), plain);
+        kept.order.push_back(hash.to_string());
+        while kept.order.len() > KEPT_STATES || (kept.bytes > KEPT_BYTES && kept.order.len() > 1) {
+            let Some(old) = kept.order.pop_front() else { break };
+            if let Some(gone) = kept.states.remove(&old) {
+                kept.bytes -= weight(&gone);
             }
         }
     }
@@ -383,7 +429,7 @@ pub(crate) fn take_states(base: &Bases, states: BTreeMap<String, Plain>) {
 /// here, or no longer kept.
 fn seen_state(base: &Bases, layer: &str) -> Option<Plain> {
     let hash = base.get(layer)?.heads.first()?;
-    handed_out().lock().ok()?.0.get(hash).cloned()
+    handed_out().lock().ok()?.states.get(hash).cloned()
 }
 
 fn open(store: &Store, world: &str, article: &str, reader: &Reader) -> Result<Opened, AppError> {
@@ -562,9 +608,7 @@ fn shown(opened: &Opened, kind: &FieldKind, value: &serde_json::Value) -> String
                 // would silently drop a reference nobody here can see.
                 let link = opened
                     .known
-                    .names
-                    .iter()
-                    .find(|named| named.id == id)
+                    .named_id(&id)
                     .map(Named::link)
                     .unwrap_or_else(|| link::write("", &id));
                 // A pick's own number stands after it: `@@Class:Fighter@@ 3`.
@@ -589,12 +633,12 @@ fn relations_written(opened: &Opened, value: &serde_json::Value) -> String {
             return String::new();
         }
         // A role nobody here can open keeps its id, so it is not lost.
-        opened.known.names.iter().find(|n| n.id == id).map(|n| n.name.clone()).unwrap_or_else(|| id.to_string())
+        opened.known.named_id(id).map(|n| n.name.clone()).unwrap_or_else(|| id.to_string())
     };
     relation::entries(value)
         .iter()
         .filter_map(|e| {
-            let target = opened.known.names.iter().find(|n| n.id == e.with)?;
+            let target = opened.known.named_id(&e.with)?;
             Some(relation::write(&target.link(), &role(&e.role), &role(&e.own_role)))
         })
         .collect::<Vec<_>>()
@@ -603,7 +647,7 @@ fn relations_written(opened: &Opened, value: &serde_json::Value) -> String {
 
 /// Whether this reader can open the document an entry names.
 fn knows(opened: &Opened, entry: &Entry) -> bool {
-    opened.known.names.iter().any(|n| n.id == entry.with)
+    opened.known.named_id(&entry.with).is_some()
 }
 
 /// The document a link names — by name, or by the id kept for one this
@@ -611,9 +655,7 @@ fn knows(opened: &Opened, entry: &Entry) -> bool {
 fn document_named(opened: &Opened, link: &link::Link, label: &str) -> Result<String, AppError> {
     opened
         .known
-        .names
-        .iter()
-        .find(|n| n.is(link))
+        .linked(link)
         .map(|n| n.id.clone())
         .or_else(|| link.name.starts_with("art:").then(|| link.name.clone()))
         .ok_or_else(|| {
@@ -637,9 +679,8 @@ fn relations_from(
         }
         opened
             .known
-            .names
-            .iter()
-            .find(|n| n.name.eq_ignore_ascii_case(name) && types::is_a(&opened.known.templates, &n.article_type, role_type))
+            .named_as(name)
+            .find(|n| types::is_a(&opened.known.templates, &n.article_type, role_type))
             .map(|n| n.id.clone())
             .ok_or_else(|| {
                 let of = types::find(&opened.known.templates, role_type).map(|t| t.name.clone()).unwrap_or_default();
@@ -1038,9 +1079,7 @@ fn fields_from(opened: &Opened, properties: &[Property]) -> Result<serde_json::V
                 for (i, link) in document::names_in(&property.value).into_iter().enumerate() {
                     let id = opened
                         .known
-                        .names
-                        .iter()
-                        .find(|n| n.is(&link))
+                        .linked(&link)
                         .map(|n| n.id.clone())
                         // An id kept from a document this reader cannot open.
                         .or_else(|| link.name.starts_with("art:").then(|| link.name.clone()))
@@ -1160,12 +1199,27 @@ pub fn document_read(app: tauri::AppHandle, world: String, article: String, text
 
 /// `document_read` for whom the store is given.
 pub(crate) fn document_read_in(store: &Store, world: String, article: String, text: String, base: DocumentText) -> Answer<DocumentRead> {
-    let opened = open(store, &world, &article, &store.reader(&world)?)?;
+    let shape = shape_of(store, &world, &article, &store.reader(&world)?)?;
     // The ids of the blocks come from the state before this keystroke — so a
     // section keeps its layer while its title is being retyped.
-    let mut read = document::from_code(&text, &base, &opened.shape);
+    let mut read = document::from_code(&text, &base, &shape);
     read.document = document::joined(&read.document);
     Ok(read)
+}
+
+/// What reading code needs of a document: its type's property names and
+/// its own access — not the document drawn whole, which every keystroke in
+/// the code would wait for. As `open_doc` makes it.
+fn shape_of(store: &Store, world: &str, article: &str, reader: &Reader) -> Result<Shape, AppError> {
+    let doc = store.db(world)?.document(article)?.ok_or_else(|| AppError("There is no such article.".into()))?;
+    let base = doc.layers.iter().find(|l| l.base).ok_or_else(|| AppError("This document has no base layer.".into()))?;
+    let base = layer_content(base, reader).map_err(|_| AppError("There is no such article.".into()))?;
+    let templates = store.templates_for(world, reader)?;
+    let template = types::find(&templates, &doc.doc_type).map(|t| types::effective(&templates, t));
+    Ok(Shape {
+        declared: template.iter().flat_map(|t| t.properties.iter().map(|p| p.label.clone())).collect(),
+        defaults: Access { view: base.own, edit: base.edit },
+    })
 }
 
 /// Writes a document as code — after a change on the visual side.
@@ -1657,7 +1711,7 @@ fn mirrored(opened: &Opened, fields: &serde_json::Value) -> Vec<(String, aw_mode
         for other in others {
             let about = |list: &[Entry]| list.iter().filter(|e| e.with == other).cloned().collect::<Vec<_>>();
             let (was, is) = (about(&old), about(&new));
-            if was == is || other == opened.id || !opened.known.names.iter().any(|n| n.id == other) {
+            if was == is || other == opened.id || opened.known.named_id(other).is_none() {
                 continue;
             }
             out.push((other.to_string(), field.clone(), is.iter().map(|e| e.mirrored(&opened.id)).collect()));
