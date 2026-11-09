@@ -7,7 +7,7 @@ import { ImagePicker } from "../../shared/ui/ImagePicker";
 import { DeleteButton, DeleteDialog } from "../../shared/ui/Delete";
 import { VisibilityPicker } from "../../shared/ui/Visibility";
 import { useWorldData } from "../worlds/WorldData";
-import { navigationPlaces, sortIntoFolders } from "./Sorting";
+import { imagesInside, navigationPlaces, sortIntoFolders } from "./Sorting";
 import { FolderTile } from "./FolderTile";
 
 /**
@@ -88,6 +88,8 @@ export function GalleryArea({ world, onOpen, onError }: { world: WorldInfo; onOp
   const known = useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
   // An image whose folder is gone lies in none.
   const folderOf = (i: GalleryImage) => (known.has(i.folder) ? i.folder : "");
+  // How many images each folder holds with those inside it — counted once.
+  const inside = useMemo(() => imagesInside(folders, images ?? [], (i) => (known.has(i.folder) ? i.folder : "")), [folders, images, known]);
 
   const saveFolders = (next: FolderNode[]) => {
     setFolders(next);
@@ -188,6 +190,7 @@ export function GalleryArea({ world, onOpen, onError }: { world: WorldInfo; onOp
             folders={folders}
             images={images ?? []}
             folderOf={folderOf}
+            inside={inside}
             shown={shown}
             onShow={setShown}
             onFolders={saveFolders}
@@ -212,7 +215,7 @@ export function GalleryArea({ world, onOpen, onError }: { world: WorldInfo; onOp
                 <FolderTile
                   key={f.id}
                   name={f.name}
-                  count={images.filter((i) => below(folders, f.id).has(folderOf(i))).length}
+                  count={inside(f.id)}
                   onOpen={() => setShown({ kind: "folder", id: f.id })}
                   onDropImage={(image) => void move(image, f.id)}
                 />
@@ -259,6 +262,7 @@ function FolderTree({
   folders,
   images,
   folderOf,
+  inside: count,
   shown,
   onShow,
   onFolders,
@@ -268,6 +272,8 @@ function FolderTree({
   folders: FolderNode[];
   images: GalleryImage[];
   folderOf: (i: GalleryImage) => string;
+  /** How many images lie in a folder and below it. */
+  inside: (id: string) => number;
   shown: Shown;
   onShow: (s: Shown) => void;
   onFolders: (f: FolderNode[]) => void;
@@ -278,11 +284,6 @@ function FolderTree({
   const [editing, setEditing] = useState<{ id: string; name: string; fresh: boolean } | null>(null);
   const [deleting, setDeleting] = useState<FolderNode | null>(null);
 
-  // How many images lie in a folder and below it.
-  const count = (id: string) => {
-    const set = below(folders, id);
-    return images.filter((i) => set.has(folderOf(i))).length;
-  };
   const children = (parent: string) => folders.filter((f) => f.parent === parent).sort((a, b) => a.name.localeCompare(b.name));
 
   const add = (parent: string) => {

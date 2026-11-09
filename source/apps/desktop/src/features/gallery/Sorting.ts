@@ -61,6 +61,31 @@ export function navigationPlaces(nav: NavEntry[], articles: ArticleView[], templ
   };
 }
 
+/**
+ * How many images lie in each folder and the folders inside it — counted
+ * in one pass, not every folder against every image. `folderOf` says where
+ * an image lies (empty: in none).
+ */
+export function imagesInside<I>(folders: FolderNode[], images: I[], folderOf: (i: I) => string): (id: string) => number {
+  const own = new Map<string, number>();
+  for (const i of images) {
+    const f = folderOf(i);
+    if (f) own.set(f, (own.get(f) ?? 0) + 1);
+  }
+  const children = new Map<string, string[]>();
+  for (const f of folders) children.set(f.parent, [...(children.get(f.parent) ?? []), f.id]);
+  const total = new Map<string, number>();
+  const count = (id: string, seen: Set<string>): number => {
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    let n = own.get(id) ?? 0;
+    for (const c of children.get(id) ?? []) n += total.get(c) ?? count(c, seen);
+    total.set(id, n);
+    return n;
+  };
+  return (id) => total.get(id) ?? count(id, new Set());
+}
+
 /** The folder at a path of names, if there is one. */
 export function folderAt(folders: FolderNode[], path: string[]): string | null {
   let parent = "";

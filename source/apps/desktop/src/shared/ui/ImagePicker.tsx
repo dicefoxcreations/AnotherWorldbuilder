@@ -4,7 +4,7 @@ import { api, type FolderNode, type GalleryImage } from "../../api/client";
 import { WorldImage } from "./WorldImage";
 import { CurrentDocument, useWorldData } from "../../features/worlds/WorldData";
 import { FolderTile } from "../../features/gallery/FolderTile";
-import { folderAt, navigationPlaces } from "../../features/gallery/Sorting";
+import { folderAt, imagesInside, navigationPlaces } from "../../features/gallery/Sorting";
 import { articleById } from "../types";
 
 /**
@@ -97,22 +97,10 @@ export function ImagePicker({
   const folderOf = (i: GalleryImage) => (known.has(i.folder) ? i.folder : "");
   // How many images each folder holds with those inside it — counted once,
   // not again for every folder on every key pressed.
-  const inside = useMemo(() => {
-    const own = new Map<string, number>();
-    for (const i of images ?? []) if (known.has(i.folder)) own.set(i.folder, (own.get(i.folder) ?? 0) + 1);
-    const children = new Map<string, string[]>();
-    for (const f of folders) children.set(f.parent, [...(children.get(f.parent) ?? []), f.id]);
-    const total = new Map<string, number>();
-    const count = (id: string, seen: Set<string>): number => {
-      if (seen.has(id)) return 0;
-      seen.add(id);
-      let n = own.get(id) ?? 0;
-      for (const c of children.get(id) ?? []) n += total.get(c) ?? count(c, seen);
-      total.set(id, n);
-      return n;
-    };
-    return (id: string) => total.get(id) ?? count(id, new Set());
-  }, [folders, images, known]);
+  const inside = useMemo(
+    () => imagesInside(folders, images ?? [], (i) => (known.has(i.folder) ? i.folder : "")),
+    [folders, images, known],
+  );
   // In folders only for whoever has them, and not while searching.
   const browsing = folders.length > 0 && !needle;
   const shown = (images ?? []).filter((i) => (needle ? i.name.toLowerCase().includes(needle) : !browsing || folderOf(i) === at));
