@@ -28,8 +28,6 @@ import { flat, trace } from "./editorTrace";
 
 type Status = "saved" | "saving" | "invalid" | "failed";
 
-
-
 export function DocumentEditor({
   world,
   article,
@@ -115,8 +113,10 @@ export function DocumentEditor({
   // The toolbar learns here which field one writes in.
   const toolbarTarget = useRef<((field: ToolbarField | null) => void) | null>(null);
 
-  /** Takes in the document as it now stands — keeping what was typed since. */
-  /** `sentDoc`: the reading of `sent` — what one's own changes are measured against. */
+  /**
+   * Takes in the document as it now stands — keeping what was typed since.
+   * `sentDoc`: the reading of `sent` — what one's own changes are measured against.
+   */
   const adopt = (code: string, document: DocumentText, base: Bases, sent: string, sentDoc: DocumentText | null) => {
     const now = textRef.current ?? sent;
     const before = sentDoc;
