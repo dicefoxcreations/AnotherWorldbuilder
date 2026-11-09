@@ -8,29 +8,29 @@ import { perLists } from "./Cache";
  *
  * A number says what it does by its operator:
  *
- * - `Strength: 15` — the document's own value, a score as rolled;
- * - `Strength: +1` — raises it: a feat;
- * - `Strength: -1` — lowers it: a curse;
- * - `Strength: =19` — sets it, whatever it was;
- * - `Strength: >=19` — sets it to at least 19: gauntlets of ogre power;
- * - `Strength: <=3` — to at most 3.
+ * - `Might: 15` — the document's own value, a score as rolled;
+ * - `Might: +1` — raises it: a talent;
+ * - `Might: -1` — lowers it: a curse;
+ * - `Might: =19` — sets it, whatever it was;
+ * - `Might: >=19` — sets it to at least 19: a ring of might;
+ * - `Might: <=3` — to at most 3.
  *
- * Operators act where a reference marked `adds` (`Feats: @@Feat@@ multiple
- * adds`) picks the document: on the character's Strength, wherever it shows —
- * the infobox, `%%Strength%%`, the ability row, every formula. Matched by
+ * Operators act where a reference marked `adds` (`Talents: @@Talent@@ multiple
+ * adds`) picks the document: on the character's Might, wherever it shows —
+ * the infobox, `%%Might%%`, the ability row, every formula. Matched by
  * name, as text names properties. The score is own + what raises and
  * lowers it — or what it is set to, by the last pick that sets it — then
  * held to the highest “at least” and the lowest “at most”. What a pick
- * picks in turn counts too: a belt that grants a feat. What a thing does is
- * the world's to say: the gauntlets are `>=19` because that is what they
- * do, not because the app knows them.
+ * picks in turn counts too: a belt that grants a talent. What a thing does is
+ * the world's to say: the ring is `>=19` because that is what it does,
+ * not because the app knows it.
  *
- * A number may be reckoned: a default in `[[…]]` — `Hit points: number =
- * [[Class.Hit die + (Level - 1) * (Class.Hit die / 2 + 1)]]` — is no value a
+ * A number may be reckoned: a default in `[[…]]` — `Health: number =
+ * [[Calling.Base + (Level - 1) * (Calling.Base / 2 + 1)]]` — is no value a
  * new document copies but a formula. A document without a value of its own
  * has what it comes to, from its own numbers and, over a dot, from what it
- * picks. Feats add to it as to any own value. A value of its own — rolled
- * hit points — stands instead.
+ * picks. Talents add to it as to any own value. A value of its own — rolled
+ * health — stands instead.
  */
 
 /** Where a share of a number comes from. */
@@ -92,12 +92,12 @@ export function formulaOf(field: TemplateField | undefined): string | undefined 
 /**
  * What a document's formula for a number comes to — `undefined` when it has
  * none, or a name in it has no number here. The formula is the document's
- * own value where that is one (`Base: [[Dexterity mod]]`), else its type's
+ * own value where that is one (`Base: [[Agility bonus]]`), else its type's
  * default. `busy` holds what is being reckoned already: a formula that needs
  * itself gives nothing.
  *
  * Inside a pick it reckons for whoever picked it: a skill's
- * `[[Dexterity mod]]` is the dexterity of the character that has the skill.
+ * `[[Agility bonus]]` is the agility of the character that has the skill.
  */
 function reckoned(templates: Template[], articles: ArticleView[], article: ArticleView, name: string, busy: Set<string>, inside?: Inside) {
   const field = propertyNamed(typeOf(templates, article.articleType), name);
@@ -150,7 +150,7 @@ export function sumOf(templates: Template[], articles: ArticleView[], article: A
   const formula = written === undefined ? reckoned(templates, articles, article, name, busy, inside) : undefined;
   const own = written ?? formula;
   const { shares, sets, floors, ceilings } = effects(templates, articles, article, name, new Set());
-  // Raising needs something to raise: an NPC without Strength does not get
+  // Raising needs something to raise: an NPC without Might does not get
   // one from being human. What sets it stands on its own.
   const added = own === undefined ? undefined : own + shares.reduce((s, x) => s + x.amount, 0);
   let total = sets.length ? sets[sets.length - 1].amount : added;
@@ -159,7 +159,7 @@ export function sumOf(templates: Template[], articles: ArticleView[], article: A
   return { own, reckoned: formula !== undefined, shares, sets, floors, ceilings, total };
 }
 
-/** `15 + 1 Athlete, at least 19 Gauntlets` — how a number came about, for a tooltip. */
+/** `15 + 1 Swift, at least 19 Ring` — how a number came about, for a tooltip. */
 export function explain(sum: Sum): string {
   const others = sum.sets.length + sum.floors.length + sum.ceilings.length;
   if (sum.shares.length === 0 && others === 0) return sum.reckoned ? `${sum.own} by formula` : "";
@@ -183,7 +183,7 @@ export function lookupFor(templates: Template[], articles: ArticleView[], articl
 /** Inside a pick: its own number, by its name, and the document that picked it. */
 type Inside = { count?: [string, number]; outer: Lookup };
 
-/** The first dot outside brackets: `Classes[Class].Level` → `Classes[Class]`, `Level`. */
+/** The first dot outside brackets: `Callings[Calling].Level` → `Callings[Calling]`, `Level`. */
 function splitPath(name: string): [string, string] | undefined {
   let depth = 0;
   for (let i = 0; i < name.length; i++) {
@@ -199,7 +199,7 @@ function splitPath(name: string): [string, string] | undefined {
  * pick's properties, and — what it does not know — the picker's, and so on
  * out. Its rules are its type's, then the picker's.
  *
- * A path may choose among the picks: `Classes[Class].Level` is the level in
+ * A path may choose among the picks: `Callings[Calling].Level` is the level in
  * the class that `Class` picks — a reference, here or further out — and
  * `Skills[Perception].Bonus` the bonus of the skill so named.
  */
@@ -215,7 +215,7 @@ function lookupIn(templates: Template[], articles: ArticleView[], article: Artic
   };
   const ids = (name: string): string[] | undefined => ownIds(name) ?? inside?.outer.ids?.(name);
   /**
-   * `[Class]` → `[=id]`: what a choice names is settled where the formula
+   * `[Calling]` → `[=id]`: what a choice names is settled where the formula
    * stands, before the path is followed outward.
    */
   const pin = (name: string) =>
@@ -241,7 +241,7 @@ function lookupIn(templates: Template[], articles: ArticleView[], article: Artic
       });
   };
   const scopes = (ref: string): Scope[] | undefined => ownScopes(ref) ?? inside?.outer.scopes?.(ref);
-  // `Class.Hit die`: through a reference, pick by pick.
+  // `Calling.Base`: through a reference, pick by pick.
   const each = (name: string): number[] | undefined => {
     const path = splitPath(name);
     if (!path) return undefined;
@@ -280,7 +280,7 @@ function lookupIn(templates: Template[], articles: ArticleView[], article: Artic
 }
 
 /**
- * What a document picks along a path — `Classes`, or `Classes.Features` —
+ * What a document picks along a path — `Callings`, or `Callings.Features` —
  * each with its lookup: inside it the pick's number and properties count,
  * then those of every pick on the way, then the document's.
  */
@@ -330,7 +330,7 @@ function summed(templates: Template[], articles: ArticleView[], article: Article
   if (!type || (!adding(type).length && !type.properties.some((f) => formulaOf(f) !== undefined))) return values;
   for (const f of type.properties) {
     if (f.kind !== "number") continue;
-    // What a value does to others stays as written: gauntlets set Strength
+    // What a value does to others stays as written: the ring sets Might
     // to at least 19 — they do not have 19.
     if (readNumber(values[f.key])?.op) continue;
     const total = sumOf(templates, articles, article, f.label).total;

@@ -185,7 +185,7 @@ export function TypesArea({
       )}
 
       {/* Property groups: properties several types take in — the abilities
-          of characters, monsters and feats alike. */}
+          of characters, monsters and talents alike. */}
       <div className="line between groups-head">
         <h3>Property groups</h3>
         <button onClick={() => create(true)}><Icon name="add" /> Group</button>

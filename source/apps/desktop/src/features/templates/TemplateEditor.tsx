@@ -329,7 +329,7 @@ export function TemplateEditor({
                   e.preventDefault();
                   setMenu({ x: e.clientX, y: e.clientY });
                 }}
-                placeholder={group ? "---\nStrength: number\nDexterity: number\n---\n\nA layout, if it has one: **Strength** %%Strength%%" : undefined}
+                placeholder={group ? "---\nMight: number\nAgility: number\n---\n\nA layout, if it has one: **Might** %%Might%%" : undefined}
                 spellCheck={false}
               />
               <MarkedField field={fieldRef} text={text ?? ""} ranges={[]} kind="added" found={found} />

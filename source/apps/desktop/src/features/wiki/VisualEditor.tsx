@@ -268,7 +268,7 @@ export function VisualEditor({
     },
   };
   // A group's layout while writing: its values are changed where they
-  // stand — the level in a class, a feat, a score — as in the properties.
+  // stand — the level in a calling, a talent, a score — as in the properties.
   const saved = useMemo(() => summedValues(templates, all, article), [templates, all, article]);
   const propertyAt = (field: TemplateField) => doc.properties.findIndex((p) => p.name.toLowerCase() === field.label.toLowerCase());
   const valueOf = (name: string): React.ReactNode => {

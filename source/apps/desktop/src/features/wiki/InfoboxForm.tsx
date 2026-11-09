@@ -14,7 +14,7 @@ import { useWorldData } from "../worlds/WorldData";
 import { readNumber } from "../../shared/Sheet";
 
 /**
- * How a number of the document shown came about — `15 + 1 Athlete` — by
+ * How a number of the document shown came about — `15 + 1 Swift` — by
  * property key; empty when it is just its own. See `shared/Sheet`.
  */
 export const NumberHow = createContext<((key: string) => string) | null>(null);

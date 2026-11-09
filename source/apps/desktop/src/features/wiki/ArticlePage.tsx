@@ -250,7 +250,7 @@ export function ArticlePage({
 
   // What `%%Name%%` and an element with `bind=` show: a declared property by
   // its kind, a free one as the text it is.
-  // Numbers with what feats and the like add to them — see `shared/Sheet`.
+  // Numbers with what talents and the like add to them — see `shared/Sheet`.
   const values = summedValues(templates, all, article);
   const numberHow = (key: string) => {
     const field = template?.properties.find((p) => p.key === key);

@@ -25,7 +25,7 @@ export type RollScope = {
   document: string;
   /** Its numbers, with what is added to them — see `shared/Sheet`. */
   lookup: Lookup;
-  /** How a number came about — `15 + 1 Athlete` — or empty. */
+  /** How a number came about — `15 + 1 Swift` — or empty. */
   explain: (name: string) => string;
   /** Its type's number properties, by name — what an ability row can show. */
   numbers: string[];

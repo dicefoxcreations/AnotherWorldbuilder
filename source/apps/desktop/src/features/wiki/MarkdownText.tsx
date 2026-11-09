@@ -232,7 +232,7 @@ function Element({
     case "mark":
       return <span className={`mark-${node.mark}`}>{deep(node.children)}</span>;
     case "paragraph":
-      // Each line names its own rolls: `**Hit Points** 7 (2d6)` under `**Armor Class** 15`.
+      // Each line names its own rolls: `**Health** 7 (2d6)` under `**Defence** 15`.
       return (
         <p>
           {byLine(node.children).map((line, i) => (
@@ -644,7 +644,7 @@ export function Abilities({
   });
   if (names.length === 0) return <code className="value-name">&lt;abilities&gt;</code>;
   const rules = scope?.lookup.rules ?? [];
-  /** What the tile rolls and shows below the score: `mod(Strength)`. */
+  /** What the tile rolls and shows below the score: `bonus(Might)`. */
   const of = (name: string) => (rule ? `${rule}(${name})` : name);
   const below = (name: string) => {
     if (!rule || !scope) return undefined;
@@ -654,7 +654,7 @@ export function Abilities({
       return undefined;
     }
   };
-  // `also="Saving throws.Bonus"`: the pick named like the score, its number.
+  // `also="Resistances.Bonus"`: the pick named like the score, its number.
   const dot = also?.indexOf(".") ?? -1;
   const ref = also && dot > 0 ? also.slice(0, dot).trim() : "";
   const prop = also && dot > 0 ? also.slice(dot + 1).trim() : "";
@@ -752,7 +752,7 @@ export function Abilities({
           </div>
         );
       })}
-      {/* The line of what `also` shows — the saving throws, under their scores. */}
+      {/* The line of what `also` shows — the resistances, under their scores. */}
       {ref && alsoHeading && <div className="ability-caption also">{alsoHeading}</div>}
       {ref &&
         names.map((name) => (

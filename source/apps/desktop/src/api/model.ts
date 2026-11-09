@@ -505,9 +505,9 @@ export type Node =
   | { kind: "value"; name: string }
   /** `<select bind=Species>` — an element showing a property. */
   | { kind: "bound"; element: string; property: string; label: string }
-  /** `[[1d20 + Strength mod]]`, or dice as they stand in text — `text` then holds them. See `shared/Dice`. */
+  /** `[[1d20 + Might bonus]]`, or dice as they stand in text — `text` then holds them. See `shared/Dice`. */
   | { kind: "roll"; formula: string; text: string }
-  /** `<abilities show="Strength, …">` — the ability row of a stat block. */
+  /** `<abilities show="Might, …">` — the ability row of a stat block. */
   | { kind: "abilities"; show: string[]; with?: string; short?: string[]; also?: string; heading?: string; also_heading?: string }
   /** `<view of=Stats>` — a property group's layout, drawn with this document's values. */
   | { kind: "view"; of: string }
