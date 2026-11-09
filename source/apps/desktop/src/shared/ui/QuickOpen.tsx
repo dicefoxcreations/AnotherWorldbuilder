@@ -66,6 +66,18 @@ export function QuickOpen({
   useEffect(() => setAt(0), [words, mode]);
 
   const names = useMemo(() => new Map(articles.map((a) => [a.id, a.name])), [articles]);
+  // Each document's readable text, worked out the first time it is searched
+  // and kept while the documents stay — not again for every key pressed.
+  const texts = useMemo(() => new Map<string, { text: string; lower: string }>(), [articles]);
+  const textOf = (a: ArticleView) => {
+    let found = texts.get(a.id);
+    if (!found) {
+      const text = readable(a.layers.filter((l) => !isProperties(l.section)).map((l) => l.text).join(" "), names);
+      found = { text, lower: text.toLowerCase() };
+      texts.set(a.id, found);
+    }
+    return found;
+  };
   const q = words.trim().toLowerCase();
   const hits = useMemo((): { article: ArticleView; snippet?: string }[] => {
     if (mode === "open") {
@@ -81,8 +93,8 @@ export function QuickOpen({
       if (q.length < 2) return [];
       const out: { article: ArticleView; snippet?: string }[] = [];
       for (const a of articles) {
-        const text = readable(a.layers.filter((l) => !isProperties(l.section)).map((l) => l.text).join(" "), names);
-        const i = text.toLowerCase().indexOf(q);
+        const { text, lower } = textOf(a);
+        const i = lower.indexOf(q);
         if (i < 0 && !a.name.toLowerCase().includes(q)) continue;
         out.push({ article: a, snippet: i < 0 ? "" : `${i > 40 ? "…" : ""}${text.slice(Math.max(0, i - 40), i + q.length + 60)}…` });
         if (out.length >= 60) break;
@@ -90,7 +102,8 @@ export function QuickOpen({
       return out;
     }
     return [];
-  }, [mode, q, articles, names]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, q, articles, texts]);
 
   if (!mode) return null;
   const close = () => setMode(null);
