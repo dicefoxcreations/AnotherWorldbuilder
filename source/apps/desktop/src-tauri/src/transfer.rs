@@ -300,7 +300,7 @@ pub fn export(store: &Store, world: &str, choice: &Choice, path: &Path, progress
     package.home = package.documents.iter().any(|d| d.id == home).then_some(home);
     let folder = folder_of(path);
     std::fs::create_dir_all(folder.join(IMAGES))?;
-    let gallery: HashMap<String, store::GalleryImage> = store.gallery(world)?.into_iter().map(|g| (g.id.clone(), g)).collect();
+    let gallery: HashMap<String, store::Image> = store.db(world)?.images()?.into_iter().map(|i| (i.id.clone(), i)).collect();
     let total = images.len();
     for (n, id) in images.into_iter().enumerate() {
         progress("images", n, total);
@@ -311,7 +311,7 @@ pub fn export(store: &Store, world: &str, choice: &Choice, path: &Path, progress
         let found = gallery.get(&id);
         package.images.push(PackedImage {
             name: found.map(|g| g.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| id.clone()),
-            defaults: found.map(|g| g.defaults.clone()).unwrap_or_default(),
+            defaults: found.and_then(|g| serde_json::from_value(g.defaults.clone()).ok()).unwrap_or_default(),
             id,
             file,
         });
@@ -332,7 +332,7 @@ pub fn export(store: &Store, world: &str, choice: &Choice, path: &Path, progress
 pub fn summary(store: &Store, world: &str, package: &Package) -> Answer<Summary> {
     let templates = store.load_templates(world)?;
     let known: BTreeSet<String> = store.db(world)?.document_ids()?.into_iter().collect();
-    let images: BTreeSet<String> = store.gallery(world)?.into_iter().map(|g| g.id).collect();
+    let images: BTreeSet<String> = store.db(world)?.images()?.into_iter().map(|i| i.id).collect();
     let me_id = store.actor()?;
     let mut out = Summary { name: package.name.clone(), ..Summary::default() };
     for t in &package.types {
@@ -347,17 +347,32 @@ pub fn summary(store: &Store, world: &str, package: &Package) -> Answer<Summary>
     Ok(out)
 }
 
-/// Writes image ids anew wherever they stand.
+/// Writes image ids anew wherever they stand — each id in the text looked
+/// up, not each id of the package searched for: a browser import brings
+/// thousands of pictures.
 fn renamed(text: &str, ids: &BTreeMap<String, String>) -> String {
     if !text.contains("img:") {
         return text.to_string();
     }
-    let mut out = text.to_string();
-    for (old, new) in ids {
-        if old != new {
+    // An id not of this app's shape could stand anywhere: searched for.
+    if !ids.keys().all(|old| store_media::is_id(old)) {
+        let mut out = text.to_string();
+        for (old, new) in ids.iter().filter(|(old, new)| old != new) {
             out = out.replace(old.as_str(), new);
         }
+        return out;
     }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("img:") {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        let end = tail[4..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).map_or(tail.len(), |e| e + 4);
+        let id = &tail[..end];
+        out.push_str(ids.get(id).map_or(id, String::as_str));
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
     out
 }
 
@@ -424,12 +439,14 @@ pub fn import(store: &Store, world: &str, folder: &Path, package: &Package, prog
     }
 
     // The images.
-    let here: BTreeSet<String> = store.gallery(world)?.into_iter().map(|g| g.id).collect();
+    let here: BTreeSet<String> = store.db(world)?.images()?.into_iter().map(|i| i.id).collect();
     let mut skipped = Vec::new();
     for image in &package.images {
         let id = &ids[&image.id];
         if !here.contains(id) {
-            let raw = std::fs::read(folder.join(&image.file))?;
+            // A package from elsewhere names its own files — none of this
+            // computer's beside it.
+            let raw = std::fs::read(folder.join(inside(&image.file)?))?;
             // One picture the app cannot read does not stop the rest.
             if store.upload_image_as(world, id, &raw, &image.name, "").is_err() {
                 skipped.push(image.name.clone());
@@ -548,6 +565,15 @@ pub fn import(store: &Store, world: &str, folder: &Path, package: &Package, prog
     Ok(Summary { images_skipped: skipped, documents_updated: updated, ..before })
 }
 
+/// A file a package names, inside its folder — nowhere else.
+fn inside(name: &str) -> Answer<&Path> {
+    let path = Path::new(name);
+    if path.is_absolute() || path.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        return Err(AppError(format!("Not a file of the package: {name}")));
+    }
+    Ok(path)
+}
+
 /// The package's page becomes the world's — where the world's own is still
 /// empty, which then goes. A page with text stays the world's.
 fn take_home(store: &Store, world: &str, home: &str) -> Answer<()> {
@@ -611,11 +637,7 @@ pub(crate) fn take_in(store: &Store, world: &str, package: &serde_json::Value, f
         std::fs::create_dir_all(&folder)?;
         std::fs::write(folder.join(FILE), serde_json::to_vec(package)?)?;
         for (name, data) in files {
-            let path = Path::new(name);
-            // Inside the package's folder, nowhere else.
-            if path.is_absolute() || path.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
-                return Err(AppError(format!("Not a file of the package: {name}")));
-            }
+            let path = inside(name)?;
             let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| AppError(e.to_string()))?;
             let target = folder.join(path);
             std::fs::create_dir_all(target.parent().unwrap_or(&folder))?;
