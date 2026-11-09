@@ -649,6 +649,7 @@ export function DeleteDocument({
           title={`Delete ${article.name}`}
           name={article.name}
           warning="It goes to the trash, with every one of its parts. The GM can bring it back."
+          trash
           onCancel={() => setRemove(false)}
           onDelete={(confirmation) =>
             api

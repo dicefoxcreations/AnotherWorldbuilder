@@ -40,6 +40,7 @@ export function DeleteDialog({
   title,
   name,
   warning,
+  trash = false,
   onCancel,
   onDelete,
 }: {
@@ -49,6 +50,8 @@ export function DeleteDialog({
   name: string;
   /** What is irretrievably lost by this. */
   warning: string;
+  /** It goes into the trash, to be brought back — not for good. */
+  trash?: boolean;
   onCancel: () => void;
   /** Gets the typed name — it is the confirmation for Rust. */
   onDelete: (confirmation: string) => void;
@@ -81,7 +84,7 @@ export function DeleteDialog({
         </label>
         <div className="line">
           <button className="danger" disabled={!matches} onClick={() => onDelete(input.trim())}>
-            <Icon name="delete" /> Delete for good
+            <Icon name="delete" /> {trash ? "To the trash" : "Delete for good"}
           </button>
           <button onClick={onCancel}>Cancel</button>
         </div>

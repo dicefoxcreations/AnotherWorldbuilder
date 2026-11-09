@@ -108,7 +108,8 @@ export function ValueList({
         <DeleteDialog
           title={`Delete ${remove.name}`}
           name={remove.name}
-          warning="The document is gone. Fields that picked it will sit empty."
+          warning="It goes to the trash; fields that picked it sit empty until the GM brings it back."
+          trash
           onCancel={() => setRemove(null)}
           onDelete={(confirmation) => {
             api
