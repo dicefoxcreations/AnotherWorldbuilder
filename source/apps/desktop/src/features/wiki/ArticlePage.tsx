@@ -545,7 +545,7 @@ export function BlockText({
     <>
       {layers.map((layer, i) =>
         texts[i] === "" || (folds && folds[i].length > 0 && folds[i].every((n) => n.hidden)) ? null : (
-          <PartDisplay key={layer.id} layer={{ ...layer, text: texts[i] }} nodes={trees?.[i]} folds={folds?.[i]} access={i > 0 ? access?.(layer) : null} {...shown} />
+          <PartDisplay key={layer.id} layer={{ ...layer, text: texts[i] }} nodes={trees?.[i]} folds={folds?.[i]} access={i > 0 ? access?.(layer) : null} first={i === 0} {...shown} />
         ),
       )}
     </>
@@ -557,7 +557,9 @@ export function BlockText({
  *
  * A part is exactly one layer, stored with its own rule of who sees it.
  * Changing it happens in the edit mode; here it is only shown, marked
- * when it is narrower than the default.
+ * when it is narrower than the default — after the section's first part:
+ * the first one's access stands at the section's title already, and a frame
+ * around it too would read as a section inside the section.
  */
 function PartDisplay({
   layer,
@@ -565,6 +567,7 @@ function PartDisplay({
   folds,
   access,
   base,
+  first = false,
   resolve,
   values,
   onPlace,
@@ -576,12 +579,14 @@ function PartDisplay({
   access?: ReactNode;
   /** Who sees the document as a whole — a part seen by exactly them is not set apart. */
   base: string;
+  /** The section's first part: its access is the section's, at its title. */
+  first?: boolean;
   resolve: Resolve;
   values?: ValueOf;
   onPlace: (o: Place) => void;
 }) {
   // Guarded means: narrower than the document itself — as the editor marks it.
-  const guarded = layer.policy !== base;
+  const guarded = !first && layer.policy !== base;
   // What is rolled in a part only the GM sees stays with the GM.
   const scope = useContext(RollScopeContext);
   const secret = layer.policy.trim().toLowerCase() === "gm";

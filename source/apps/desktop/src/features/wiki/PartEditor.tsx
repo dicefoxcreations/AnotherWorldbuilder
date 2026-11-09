@@ -68,7 +68,9 @@ export function PartEditor({
   /** Draws a graph standing in the text — the `i`-th piece of it. */
   graph: (g: GraphNode, i: number) => React.ReactNode;
 }) {
-  const guarded = !inherited;
+  // Framed where it is a region of its own; the first part's access stands
+  // at the section's title — framed too, it would read as a section inside one.
+  const guarded = !!region;
   // The part is one field: its text, with the images and graphs standing in
   // it — as surfaces, where the text runs past them as it does when read.
   const shown = graphPieces(part.text);
