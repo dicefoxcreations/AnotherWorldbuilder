@@ -69,8 +69,9 @@ export const api = {
   identityExport: (path: string) => invoke<string>("identity_export", { path }),
   /** Writes one's identity, locked with a passphrase. */
   keysBackup: (path: string, passphrase: string) => invoke<string>("keys_backup", { path, passphrase }),
-  /** Brings keys back from a backup: the identity where there is none, what is missing of each world. */
+  /** The same on a phone: into its Documents, as there is no path to choose. Answers where. */
   keysBackupPhone: (passphrase: string) => invoke<string>("keys_backup_phone", { passphrase }),
+  /** Brings one's identity back from a backup: the bytes of the file picked, or its path. */
   keysRestoreBytes: async (bytes: Uint8Array, passphrase: string) => toIdentity(await invoke<Raw>("keys_restore_bytes", { bytes: Array.from(bytes), passphrase })),
   keysRestore: async (path: string, passphrase: string) => toIdentity(await invoke<Raw>("keys_restore", { path, passphrase })),
   avatarSet: (path: string) => invoke<string>("avatar_set", { path }),
@@ -152,7 +153,7 @@ export const api = {
   /** Asks a server's admin to let this device bring worlds there. */
   serverHostWorlds: (server: string) => invoke<NetworkView>("server_host_worlds", { server }),
   networkWorlds: () => invoke<NetWorld[]>("network_worlds"),
-  /** Asks a found world's GM for it — or, with `join`, to become a member. */
+  /** Asks a found world's GM to become a member of it. */
   networkJoin: async (world: string): Promise<JoinOutcome> => {
     const r = await invoke<Raw>("network_join", { world });
     return { kind: r.kind, world: r.world ? toWorld(r.world) : null };
@@ -202,30 +203,23 @@ export const api = {
   /** Texts as they are written: the ids stored in them turned back into names. */
   textsWritten: (world: string, articleType: string, texts: string[]) =>
     invoke<string[]>("texts_written", { world, articleType, texts }),
-  /**
-   * Changes who may see a part. Leaving `layer` out means: the whole
-   * article.
-   *
-   * Rust decides who may. There is deliberately no check here — one in
-   * the frontend could be bypassed.
-   */
   /** A type's access for documents of it already there — and their sections that had theirs. How many changed. */
   typeAccessApply: (world: string, articleType: string, articles: string[], view: string | null, edit: string | null) =>
     invoke<number>("type_access_apply", { world, articleType, articles, view, edit }),
+  /**
+   * Changes who may see a part — with `layer` null, the whole document.
+   * Rust decides who may; a check here could be bypassed.
+   */
   visibilitySet: (world: string, article: string, layer: string | null, policy: string) =>
     invoke<void>("visibility_set", { world, article, layer, policy }),
 
-  /**
-   * Deletes an article for good.
-   *
-   * `confirmation` has to be the article's name — Rust checks that.
-   */
   /** What lies in the trash, newest first — the GM's. */
   trashList: async (world: string): Promise<TrashedView[]> =>
     (await invoke<Raw[]>("trash_list", { world })).map((r) => ({ id: r.id, name: r.name, articleType: r.article_type, at: r.at, by: r.by })),
   trashRestore: (world: string, article: string) => invoke<void>("trash_restore", { world, article }),
   /** Deletes for good what lies in the trash. */
   trashPurge: (world: string, article: string) => invoke<void>("trash_purge", { world, article }),
+  /** Puts a document into the trash. `confirmation` has to be its name — Rust checks that. */
   articleDelete: (world: string, article: string, confirmation: string) =>
     invoke<void>("article_delete", { world, article, confirmation }),
   /** How a type's section looks in this one document — what differs from the type is kept. */
@@ -276,7 +270,6 @@ export const api = {
   /** A place of a world in a window of its own; `part` scrolls to a part by its title. */
   windowOpen: (world: string, place: Place, title: string, part?: string) =>
     invoke<void>("window_open", { world, place: JSON.stringify(place), title, part: part ?? null }),
-  /** Whether the tools for developing show — see `DEV_TOOLS` in Rust. */
   /** Shows the window as a phone, or as it was — for layout checks in tests. */
   phoneView: (on: boolean) => invoke<void>("phone_view", { on }),
   /** Opens a document as code — only with what this reader may see. */
@@ -308,12 +301,11 @@ export const api = {
    */
   documentSave: async (world: string, article: string, text: string, base: Bases, session: string) =>
     toCode(await invoke<Raw>("document_save", { world, article, text, base, session })),
-  /** Ends an editing session: what it wrote becomes a version of each document it wrote in. */
   /**
-   * Sets what `article` says about `with` in a relation property — and the
-   * other side too, as far as this reader may. `null` removes it.
+   * Sets relations — several as one change: what `article` says about
+   * `with`, and the other side too, as far as this reader may. `roles: null`
+   * removes one.
    */
-  /** Sets relations — several as one change. `roles: null` removes one. */
   relationsSet: (
     world: string,
     changes: { article: string; property: string; with: string; roles: [string, string] | null; was?: [string, string] }[],
@@ -427,9 +419,10 @@ export const api = {
       image,
       defaults: { view: d.view, edit: d.edit, hidden: d.hidden, hidden_caption: d.hiddenCaption },
     }),
-  /** An image as a `data:` URL — the original or its preview. */
+  /** Sets the documents a reference field of a document picks. */
   referencesSet: (world: string, article: string, field: string, ids: string[]) =>
     invoke<void>("references_set", { world, article, field, ids }),
+  /** An image as a `data:` URL — the original or its preview. */
   imageData: (world: string, image: string, preview: boolean) => invoke<string>("image_data", { world, image, preview }),
   /** Puts an image into an image field of a document, or takes it out. */
   imageFieldSet: (world: string, article: string, field: string, image: string | null) =>
@@ -437,8 +430,9 @@ export const api = {
   /** Deletes a version for good, on every device — the GM's. */
   versionDelete: (world: string, article: string, session: string) =>
     invoke<void>("version_delete", { world, article, session }),
-  /** Sets how many versions of each document stay — the GM's. */
+  /** How the world counts its days — the GM's. */
   calendarSet: async (world: string, calendar: WorldCalendar) => toWorld(await invoke<Raw>("calendar_set", { world, calendar })),
+  /** Sets how many versions of each document stay — the GM's. */
   worldVersionsSet: async (world: string, max: number) => toWorld(await invoke<Raw>("world_versions_set", { world, max })),
   worldListedSet: async (world: string, listed: boolean) => toWorld(await invoke<Raw>("world_listed_set", { world, listed })),
   /** The GM's: which players support the world. */
