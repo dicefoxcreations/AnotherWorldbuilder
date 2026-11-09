@@ -2315,7 +2315,14 @@ pub(crate) mod history {
         let changed = |id: &str| was.layers.iter().find(|l| l.id == id) != now.layers.iter().find(|l| l.id == id);
         let ids: Vec<String> = was.layers.iter().chain(&now.layers).map(|l| l.id.clone()).filter(|id| changed(id)).collect();
         let review = if waits(store, world, &author)? { "waiting" } else { "counted" };
-        let mut version = db.versions(&now.id)?.into_iter().find(|v| v.session == session).unwrap_or_else(|| Version {
+        // A session is its author's: one of someone else's of the same name —
+        // asked for on purpose or by chance — is never written into.
+        let found = db.versions(&now.id)?.into_iter().find(|v| v.session == session);
+        let (session, found) = match found {
+            Some(v) if v.author != author => (format!("change-{}", aw_model::template_text::new_id()), None),
+            found => (session, found),
+        };
+        let mut version = found.unwrap_or_else(|| Version {
             document: now.id.clone(),
             session: session.clone(),
             author: author.clone(),
