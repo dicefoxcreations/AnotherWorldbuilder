@@ -102,7 +102,7 @@ function markedViews(then: ArticleView, now: ArticleView, marks: VersionMarks | 
 
 /**
  * What came in that one should know of: versions written offline that
- * arrived since one last looked, and versions not in the text yet. Remembered
+ * arrived since one last looked, and versions waiting for review. Remembered
  * per document on this device.
  */
 export function useNews(world: string, article: string, revision: unknown) {

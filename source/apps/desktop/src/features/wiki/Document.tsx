@@ -229,7 +229,7 @@ export function DocumentPage({
         } else setChosen(null);
         setHistory(!history);
       }}
-      title={news.items.length > 0 ? "New versions came in — written offline, or not in the text yet" : "Versions of this document"}
+      title={news.items.length > 0 ? "New versions came in — written offline, or waiting for review" : "Versions of this document"}
     >
       <Icon name="history" />
       {news.items.length > 0 && <span className="badge">{news.items.length}</span>}
@@ -345,7 +345,7 @@ export function DocumentPage({
         <HeaderTools>
           {modeSwitch}
           {apartButton}
-        {historyButton}
+          {historyButton}
         </HeaderTools>
         {chosen ? (
           version.doc ? (

@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { DeleteDialog, DeleteButton } from "../shared/ui/Delete";
 import { Icon, NetworkIcon, ServerIcon } from "../shared/ui/Icons";
 import { api, type BackupFound, type NetWorld, type NetworkView, type ServerEntry, type StorageView, type WorldInfo } from "../api/client";
-import { nameOf, placeOf, PlaceIcon, Reach, serverName } from "../features/worlds/WorldPlace";
+import { nameOf, placeOf, PlaceIcon, Reach, serverAddress, serverName } from "../features/worlds/WorldPlace";
 import { HeaderTools } from "./HeaderTools";
 import { isMobile } from "../shared/platform";
 
@@ -134,7 +134,7 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   const editServer = (s: ServerEntry | null) => {
     setEditing(s?.code ?? null);
     // The address it was added by — the first in its code.
-    setCode(s ? s.code.split("@")[1]?.split(",")[0] ?? s.code : "");
+    setCode(s ? serverAddress(s.code) : "");
     setDialog("server");
   };
   const restoreBackup = async () => {

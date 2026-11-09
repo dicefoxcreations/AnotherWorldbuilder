@@ -4,7 +4,7 @@ import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
 import { api, type NetworkView, type HeldWorld, type Person, type ServerOrder, type ServerState } from "../../api/client";
 import { when } from "../wiki/Versions";
 import { isMobile } from "../../shared/platform";
-import { Reach, serverName } from "../worlds/WorldPlace";
+import { Reach, serverAddress, serverName } from "../worlds/WorldPlace";
 
 /** Whether this device is on the network at all, and which worlds it offers there. */
 export function NetworkArea({
@@ -105,7 +105,7 @@ function PortField({ port, busy, onSave }: { port: number; busy: boolean; onSave
   return (
     <label className="stun-servers">
       <span className="small muted">Port</span>
-      <input value={text} disabled={busy} onChange={(e) => setText(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && save()} />
+      <input value={text} disabled={busy} onChange={(e) => setText(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
     </label>
   );
 }
@@ -166,7 +166,7 @@ function Servers({ view, busy, onSave, onError }: { view: NetworkView; busy: boo
               ) : (
                 <>
                   {admin && <button onClick={() => setManaging(managing === s ? null : s)}>{managing === s ? "Done" : "Manage"}</button>}
-                  <button disabled={busy} onClick={() => setEditing({ code: s, text: s.split("@")[1]?.split(",")[0] ?? s })}>Edit</button>
+                  <button disabled={busy} onClick={() => setEditing({ code: s, text: serverAddress(s) })}>Edit</button>
                   <button disabled={busy} onClick={() => onSave(view.servers.filter((x) => x !== s))}>
                     Remove
                   </button>
@@ -408,7 +408,7 @@ function StunServers({ stun, busy, onSave }: { stun: string[]; busy: boolean; on
   return (
     <label className="stun-servers">
       <span className="small muted">STUN</span>
-      <input value={text} disabled={busy} placeholder="none — only the router" onChange={(e) => setText(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && save()} />
+      <input value={text} disabled={busy} placeholder="none — only the router" onChange={(e) => setText(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
     </label>
   );
 }
