@@ -76,9 +76,9 @@ export function folderAt(folders: FolderNode[], path: string[]): string | null {
 const words = (name: string) =>
   new Set(
     name
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")
       .toLowerCase()
-      .split(/[^a-z0-9äöüß]+/)
+      .split(/[^\p{L}\p{N}]+/u)
       .filter((w) => w.length > 2),
   );
 

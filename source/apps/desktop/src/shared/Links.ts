@@ -97,11 +97,9 @@ export function idOf(link: Pick<Link, "of" | "name">): string | null {
 
 /**
  * Finds what a link points at — among the documents this reader can open.
- *
  * `@@Place:Paris@@` finds Paris when it is a city too: the type may be one
- * above the document's own.
+ * above the document's own. One index per list of documents, see `shared/Cache`.
  */
-/** Finds what a link names — one index per list of documents, see `shared/Cache`. */
 export const linker = perLists(makeLinker);
 
 /**
