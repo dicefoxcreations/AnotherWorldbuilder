@@ -50,7 +50,7 @@ pub fn entries(value: &serde_json::Value) -> Vec<Entry> {
     match value {
         serde_json::Value::Array(items) => items
             .iter()
-            .filter_map(|v| serde_json::from_value::<Entry>(v.clone()).ok())
+            .filter_map(|v| Entry::deserialize(v).ok())
             .filter(|e| !e.with.is_empty())
             .collect(),
         _ => Vec::new(),

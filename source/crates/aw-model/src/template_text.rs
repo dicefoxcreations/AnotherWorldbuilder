@@ -466,9 +466,8 @@ fn split(text: &str) -> Vec<Piece> {
             // would swallow everything below and the skeleton would count as
             // deleted.
             if chars[i..].starts_with(&['<', '!', '-', '-']) {
-                let rest: String = chars[i..].iter().collect();
-                if let Some(p) = rest.find("-->") {
-                    let end = (i + rest[..p + 3].chars().count()).min(chars.len());
+                if let Some(p) = chars[i + 4..].windows(3).position(|w| w == ['-', '-', '>']) {
+                    let end = i + 4 + p + 3;
                     line += chars[i..end].iter().filter(|c| **c == '\n').count();
                     i = end;
                     continue;

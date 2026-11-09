@@ -43,8 +43,8 @@ pub enum TemplateError {
     #[error("“{0}” cannot be its own supertype, not even via others")]
     SupertypeCycle(String),
 
-    #[error("“{0}” has width {1} — it does not fit the template")]
-    BadSpan(String, u8),
+    #[error("nobody knows align={0}. There is: right, left, top, none.")]
+    BadAlign(String),
 
     #[error("“{0}” is nested too deep — three levels at most")]
     TooDeep(String),
@@ -777,7 +777,7 @@ impl Template {
             return Err(TemplateError::BadSlug(self.id.clone()));
         }
         if !ALIGNMENTS.contains(&self.infobox.align.as_str()) {
-            return Err(TemplateError::BadSpan(self.infobox.align.clone(), 0));
+            return Err(TemplateError::BadAlign(self.infobox.align.clone()));
         }
 
         let mut seen = std::collections::BTreeSet::new();

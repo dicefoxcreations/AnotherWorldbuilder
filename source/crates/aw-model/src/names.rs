@@ -319,21 +319,26 @@ fn list<C: Catalog>(tag: &mut crate::template_text::Tag, way: &Way<C>) {
             ),
             "where" => Some(
                 v.split(',')
-                    .filter_map(|c| c.split_once('='))
-                    .map(|(field, wanted)| {
-                        let (field, wanted) = (field.trim(), wanted.trim());
-                        // The value is a document where the property points at
-                        // documents — otherwise it is text and stays.
-                        let key = way.catalog.property_key(&listed, field);
-                        let points = key.as_deref().and_then(|k| way.catalog.property(k)).is_some_and(|(_, p)| p);
-                        let field = way.property(&listed, field).unwrap_or_else(|| field.to_string());
-                        let wanted = if points && !wanted.is_empty() {
-                            way.document(wanted).unwrap_or_else(|| wanted.to_string())
-                        } else {
-                            wanted.to_string()
-                        };
-                        format!("{field}={wanted}")
+                    .map(|c| match c.split_once('=') {
+                        // Not a condition — a typo, say: it stays as written,
+                        // not dropped from the text unseen.
+                        None => c.trim().to_string(),
+                        Some((field, wanted)) => {
+                            let (field, wanted) = (field.trim(), wanted.trim());
+                            // The value is a document where the property points at
+                            // documents — otherwise it is text and stays.
+                            let key = way.catalog.property_key(&listed, field);
+                            let points = key.as_deref().and_then(|k| way.catalog.property(k)).is_some_and(|(_, p)| p);
+                            let field = way.property(&listed, field).unwrap_or_else(|| field.to_string());
+                            let wanted = if points && !wanted.is_empty() {
+                                way.document(wanted).unwrap_or_else(|| wanted.to_string())
+                            } else {
+                                wanted.to_string()
+                            };
+                            format!("{field}={wanted}")
+                        }
                     })
+                    .filter(|c| !c.is_empty())
                     .collect::<Vec<_>>()
                     .join(", "),
             ),

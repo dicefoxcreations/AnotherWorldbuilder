@@ -149,12 +149,18 @@ impl Member {
 pub struct Reader {
     held: BTreeSet<Attribute>,
     gm: bool,
+    /// Each rule asked about, and the answer: reading a world asks the same
+    /// few rules for every document and part, tens of thousands of times.
+    asked: std::sync::Arc<Mutex<std::collections::HashMap<String, bool>>>,
 }
+
+/// More rules than this asked of one reader: they are asked afresh.
+const ASKED: usize = 20_000;
 
 impl Reader {
     /// The game master: everything.
     pub fn gm() -> Self {
-        Reader { held: [Attribute::All, Attribute::Players, Attribute::Gm].into_iter().collect(), gm: true }
+        Reader { held: [Attribute::All, Attribute::Players, Attribute::Gm].into_iter().collect(), gm: true, asked: Default::default() }
     }
 
     /// A member, with every role they hold.
@@ -167,14 +173,14 @@ impl Reader {
         if let Some(own) = member.own_attribute().and_then(|a| a.parse().ok()) {
             held.insert(own);
         }
-        Reader { held, gm: false }
+        Reader { held, gm: false, asked: Default::default() }
     }
 
     /// A reader holding exactly these roles — a preview of what a player sees.
     pub fn holding(attributes: &[String]) -> Self {
         let mut held: BTreeSet<Attribute> = [Attribute::All, Attribute::Players].into_iter().collect();
         held.extend(attributes.iter().filter_map(|a| a.parse().ok()));
-        Reader { held, gm: false }
+        Reader { held, gm: false, asked: Default::default() }
     }
 
     pub fn is_gm(&self) -> bool {
@@ -195,7 +201,16 @@ impl Reader {
         if self.gm {
             return true;
         }
-        rule.parse::<Policy>().map(|p| p.satisfied_by(&self.held)).unwrap_or(false)
+        let mut asked = self.asked.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(&known) = asked.get(rule) {
+            return known;
+        }
+        let answer = rule.parse::<Policy>().map(|p| p.satisfied_by(&self.held)).unwrap_or(false);
+        if asked.len() >= ASKED {
+            asked.clear();
+        }
+        asked.insert(rule.to_string(), answer);
+        answer
     }
 
     pub fn sees(&self, access: &Access) -> bool {

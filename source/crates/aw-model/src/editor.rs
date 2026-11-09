@@ -94,10 +94,9 @@ pub fn read(text: &str, base: Template, directory: &Directory, others: &[Templat
         });
     }
     // Every element binds a property that exists — its own or an inherited
-    // one — and can show it.
-    let with_this: Vec<Template> =
-        others.iter().filter(|t| t.id != template.id).cloned().chain(std::iter::once(template.clone())).collect();
-    let whole = crate::types::effective(&with_this, &template);
+    // one — and can show it. Its stored self among the others is passed
+    // over: the chain above it never comes back to it.
+    let whole = crate::types::effective(others, &template);
     // The infobox keeps what it shows by key: a property renamed later is
     // still the one it shows. The text says its name.
     for shown in &mut template.infobox.show {
