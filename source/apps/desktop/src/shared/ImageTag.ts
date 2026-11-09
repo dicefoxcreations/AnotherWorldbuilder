@@ -39,7 +39,7 @@ export const writeListLine = (a: ImageAttrs) => writeTagLine("list", a);
 
 /** An image as it goes into a text — with what the gallery says of it: its access and stand-in. */
 export function imageTag(id: string, image?: { defaults?: { view?: string; edit?: string; hidden?: string; hiddenCaption?: string } }): string {
-  const q = (v: string) => (/^[^\s"<>]+$/.test(v) ? v : `"${v.replace(/"/g, "'")}"`);
+  const q = quoted;
   const d = image?.defaults;
   let tag = `<image src=${id} align=right caption="«»"`;
   if (d?.view) tag += ` view=${q(d.view)} edit=${q(d.edit || "gm")}`;
