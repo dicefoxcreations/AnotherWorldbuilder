@@ -183,7 +183,7 @@ pub enum Node {
     /// `<select bind=Species>` — an element that shows a property. Reading,
     /// it shows the value; the editor makes a field of it.
     Bound { element: String, property: String, label: String },
-    /// A roll or a sum: `[[1d20 + Strength mod]]`, `[[+4]]` — or dice as
+    /// A roll or a sum: `[[1d20 + Might bonus]]`, `[[+4]]` — or dice as
     /// they stand in text, `2d6 + 3`, `1W20`.
     ///
     /// Only cut out here; the display reckons it, since only there are the
@@ -205,7 +205,7 @@ pub enum Node {
         with: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         short: Vec<String>,
-        /// `also="Saving throws.Bonus"`: a second line on each tile — that
+        /// `also="Resistances.Bonus"`: a second line on each tile — that
         /// number of the pick named like the score, rolled as a check.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         also: String,

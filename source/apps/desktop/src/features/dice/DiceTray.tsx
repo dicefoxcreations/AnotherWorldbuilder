@@ -35,7 +35,7 @@ export type RollScope = {
 
 export const RollScopeContext = createContext<RollScope | null>(null);
 
-/** The bold words a paragraph starts with — `Scimitar.` — name its rolls. */
+/** The bold words a paragraph starts with — `Spear.` — name its rolls. */
 export const RollLabel = createContext<string>("");
 
 type Dice = {

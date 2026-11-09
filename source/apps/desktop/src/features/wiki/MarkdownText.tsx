@@ -500,7 +500,7 @@ function plain(nodes: Drawn[]): string {
 
 /**
  * What a paragraph's rolls are for: the bold words it starts with, as a
- * stat block writes an action — `***Scimitar.*** Melee Weapon Attack …`.
+ * stat block writes an action — `***Spear.*** Thrust …`.
  */
 function leadingWords(children: Drawn[]): string {
   const first = children.find((c) => !(c.kind === "text" && !c.text.trim()));
