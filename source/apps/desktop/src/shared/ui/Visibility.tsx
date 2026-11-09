@@ -45,7 +45,6 @@ function tone(term: string, world: WorldInfo): string {
 export const typeAttribute = (id: string) =>
   `type:${id.replace(/[^A-Za-z0-9._-]/g, "-")}`;
 
-
 /**
  * What a term is called for humans.
  *
@@ -166,8 +165,9 @@ export function VisibilityPicker({
   };
 
   // The basics, always at hand. “Assigned” only in a document: whoever is
-  // assigned to it (Options → Players → Assign).
-  const basics: { value: string; text: string; hint: string }[] = [
+  // assigned to it (Options → Players → Assign). Gathered only while the
+  // menu is open — a page shows many pickers, most only to read.
+  const basics: { value: string; text: string; hint: string }[] = !open ? [] : [
     { value: "all", text: "Everyone", hint: "Everyone in the world" },
     { value: "gm", text: "GM only", hint: "Only the game master" },
     ...(self
@@ -185,7 +185,8 @@ export function VisibilityPicker({
       !(o.value === "self" && (parts.includes("self") || (own && parts.includes(own)))),
   );
   // The rest, found by name: players, types, documents, other attributes.
-  const rest: { value: string; text: string; kind: string }[] = [
+  const offered = new Set(parts);
+  const rest: { value: string; text: string; kind: string }[] = !open ? [] : [
     ...world.members
       .filter((m) => m.role !== "gm")
       .map((m) => ({
@@ -211,11 +212,7 @@ export function VisibilityPicker({
           ? { value: a, text: label(a, world, false, around), kind: "Document" }
           : { value: a, text: a, kind: "Attribute" },
       ),
-  ].filter(
-    (o, i, all) =>
-      !parts.includes(o.value) &&
-      all.findIndex((x) => x.value === o.value) === i,
-  );
+  ].filter((o) => !offered.has(o.value) && (offered.add(o.value), true));
   const q = query.trim().toLowerCase();
   const found = q
     ? rest
@@ -341,7 +338,6 @@ export function VisibilityPicker({
     </div>
   );
 }
-
 
 /**
  * Who views and who changes something — beside a document's or a section's
