@@ -13,10 +13,11 @@ export type Route = {
   samples: Point[];
 };
 
-/** `bottom 30` — the side, and how far along it, 0 to 1. */
+/** `bottom 30` — the side, and how far along it, 0 to 1. A share written wrong is the middle. */
 export function readSide(text: string): { side: string; along: number } {
   const [side, along] = text.split(" ");
-  return { side, along: along === undefined ? 0.5 : Number(along) / 100 };
+  const share = Number(along) / 100;
+  return { side, along: along !== undefined && Number.isFinite(share) ? Math.min(1, Math.max(0, share)) : 0.5 };
 }
 
 /** Where a line leaves a card: a side, and how far along it. */
