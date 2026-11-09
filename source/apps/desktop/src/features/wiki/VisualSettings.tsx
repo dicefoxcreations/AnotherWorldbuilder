@@ -64,7 +64,7 @@ export function OwnSectionSettings({
       <InspectorSection title="This document">
         <div className="inspector-access block-settings">
           <span className="small muted">Title</span>
-          <input value={title} placeholder="none" onChange={(e) => setTitle(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && commit()} />
+          <input value={title} placeholder="none" onChange={(e) => setTitle(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
           <ShapeRows block={block} onPatch={patch} part="look" />
           {/* Where it stands among the others, a new one, none: the GM's. */}
           {!world?.isGm && arrange && (() => {
@@ -157,6 +157,8 @@ export function InfoboxEdit({
   onChanged?: () => void;
 }) {
   const [picking, setPicking] = useState<string | null>(null);
+  // A picture that could not be set says so, as everything else does.
+  const failed = useWorldData()?.onError ?? (() => {});
   // Who sees and changes it: in the side bar, the GM's to set.
   const [inspecting, setInspecting] = useState(false);
   useSideBar(`infobox:${article.id}`, inspecting, () => setInspecting(false));
@@ -241,14 +243,14 @@ export function InfoboxEdit({
           onChosen={(image) => {
             const field = picking;
             setPicking(null);
-            api.imageFieldSet(world.id, article.id, field, image).then(onChanged).catch(() => {});
+            api.imageFieldSet(world.id, article.id, field, image).then(onChanged).catch(failed);
           }}
           onRemove={
             stored[picking]
               ? () => {
                   const field = picking;
                   setPicking(null);
-                  api.imageFieldSet(world.id, article.id, field, null).then(onChanged).catch(() => {});
+                  api.imageFieldSet(world.id, article.id, field, null).then(onChanged).catch(failed);
                 }
               : undefined
           }
@@ -296,7 +298,7 @@ export function useGraphEdit(
         return t ? [{ with: t.id, role: findRole(roles, w.role)?.id ?? "", ownRole: findRole(roles, w.ownRole)?.id ?? "" }] : [];
       });
       // What this reader cannot see is not in the text — but still there.
-      const locked = relationsOf(article, f.key).filter((e) => !!!articleById(all, e.with));
+      const locked = relationsOf(article, f.key).filter((e) => !articleById(all, e.with));
       mine.set(f.key, [...written, ...locked]);
     }
     return new Map([[article.id, mine]]);

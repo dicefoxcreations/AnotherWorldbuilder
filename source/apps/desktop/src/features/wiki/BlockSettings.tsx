@@ -119,8 +119,7 @@ const STYLES: [BlockStyle, string][] = [
  * folding and its create button — for a type's block and a document's own
  * section alike. Two halves, so the order can stand between them.
  */
-export function ShapeRows({ block, onPatch, part }: { block: TemplateBlock; onPatch: (p: Partial<TemplateBlock>) => void; part: "look" | "more" | "folds" }) {
-  const save = onPatch;
+export function ShapeRows({ block, onPatch: save, part }: { block: TemplateBlock; onPatch: (p: Partial<TemplateBlock>) => void; part: "look" | "more" | "folds" }) {
   if (part !== "look")
     return (
       <>
@@ -274,7 +273,7 @@ export function BlockSettings({
               placeholder="none"
               onChange={(e) => setTitle(e.target.value)}
               onBlur={commitTitle}
-              onKeyDown={(e) => e.key === "Enter" && commitTitle()}
+              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
             />
             <ShapeRows block={block} onPatch={save} part="look" />
             <span className="small muted">Order</span>
@@ -338,7 +337,7 @@ function DocumentLook({ arrange }: { arrange: Arranging }) {
     <InspectorSection title="This document">
       <div className="inspector-access block-settings">
         <span className="small muted">Title</span>
-        <input value={title} placeholder="none" onChange={(e) => setTitle(e.target.value)} onBlur={commitTitle} onKeyDown={(e) => e.key === "Enter" && commitTitle()} />
+        <input value={title} placeholder="none" onChange={(e) => setTitle(e.target.value)} onBlur={commitTitle} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
         <ShapeRows block={shown} onPatch={look} part="look" />
         <span className="small muted">Order</span>
         <div className="segmented">
