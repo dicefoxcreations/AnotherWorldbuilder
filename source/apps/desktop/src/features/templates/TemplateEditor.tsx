@@ -519,8 +519,8 @@ function BlockMenu({
  * A row of access settings to click.
  *
  * The same row at every spot that can say `view=` and `edit=` — the whole
- * article, a block, a piece of flowing text. Whoever has understood 👁 and ✎
- * once has understood them everywhere.
+ * article, a block, a piece of flowing text. Whoever has understood the eye
+ * and the pen once has understood them everywhere.
  */
 function AccessRow({
   world,
