@@ -342,6 +342,12 @@ fn own_ids() -> &'static Mutex<HashMap<PathBuf, String>> {
     OWN.get_or_init(Default::default)
 }
 
+/// Each profile's identity, by its file — see `Store::me`.
+fn identities() -> &'static Mutex<HashMap<PathBuf, Arc<Identity>>> {
+    static KEPT: OnceLock<Mutex<HashMap<PathBuf, Arc<Identity>>>> = OnceLock::new();
+    KEPT.get_or_init(Default::default)
+}
+
 /// The database in `dir`, opened once and kept.
 fn db_at(dir: PathBuf) -> Result<Arc<WorldDb>> {
     let mut open = open_worlds().lock().map_err(|_| err("a lock was poisoned"))?;
@@ -443,7 +449,24 @@ impl Store {
         if let Ok(mut known) = own_ids().lock() {
             known.insert(self.identity_path(), identity.id().to_string());
         }
+        if let Ok(mut kept) = identities().lock() {
+            kept.remove(&self.identity_path());
+        }
         Ok(())
+    }
+
+    /// This device's identity, to sign with — read from its file once, then
+    /// kept: every ask of a server signs.
+    pub fn me(&self) -> Result<Arc<Identity>> {
+        let path = self.identity_path();
+        if let Some(me) = identities().lock().ok().and_then(|kept| kept.get(&path).cloned()) {
+            return Ok(me);
+        }
+        let me = Arc::new(self.load_identity()?);
+        if let Ok(mut kept) = identities().lock() {
+            kept.insert(path, me.clone());
+        }
+        Ok(me)
     }
 
     /// This device's own id — read from its identity once, then kept: every

@@ -391,7 +391,7 @@ pub(crate) fn is_mailbox(store: &Store, world: &str) -> bool {
 
 /// Writes a change into the mailbox's `aus/`.
 fn send(store: &Store, world: &str, command: &str, args: serde_json::Value, states: BTreeMap<String, document::Plain>) -> Answer<()> {
-    let me = store.load_identity()?;
+    let me = store.me()?;
     let at = store::now();
     let change = Change { world: world.to_string(), card: me.public(), at, command: command.to_string(), args, states };
     let body = serde_json::to_string(&change)?;

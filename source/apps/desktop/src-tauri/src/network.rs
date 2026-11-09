@@ -241,7 +241,7 @@ async fn ask(store: &Store, code: &str, world: &str, what: Ask) -> Answer<Reply>
         let old: Vec<String> = server.addrs.into_iter().filter(|a| !here.addrs.contains(a)).collect();
         server.addrs = here.addrs.into_iter().chain(old).collect();
     }
-    let me = store.load_identity()?;
+    let me = store.me()?;
     let reply = net.ask_server(&server, world, &me, what).await.map_err(|e| {
         // Reached, but what was asked does not fit: no reason to pause the world.
         let e = e.to_string();
