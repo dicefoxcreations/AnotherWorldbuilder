@@ -82,10 +82,9 @@ export function Options({
   const due = world ? world.requests + (world.isGm ? world.waiting : 0) : 0;
   const update = useUpdates();
   const [area, setArea] = useState<AreaId>(world ? (due > 0 ? "players" : "world") : "network");
-  // Without a world only what belongs to the device as a whole.
-  // Outside a world only what belongs to this device.
-  // The world's basics are the GM's to set.
-  // Outside a world: what belongs to the device — the dice's look among it.
+  // In a world: transfer and trash are the GM's. Outside one: what belongs
+  // to this device — the dice's look among it. A phone has no browser to
+  // link and no keyboard to bind.
   const areas = (world
     ? AREAS.filter((b) => (b.id !== "transfer" && b.id !== "trash") || world.isGm)
     : AREAS.filter((b) => b.group !== "world" || b.id === "dice").filter((b) => b.id !== "keys"))
@@ -190,7 +189,6 @@ export function Options({
               onError={onError}
             />
           )}
-
         </div>
       </div>
     </div>

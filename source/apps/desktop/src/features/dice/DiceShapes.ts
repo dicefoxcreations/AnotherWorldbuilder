@@ -158,14 +158,13 @@ export function labels(faces: Face[], sides: number, tens: boolean): string[] {
     const i = left.shift()!;
     const j = left.findIndex((k) => faces[k].normal.dot(faces[i].normal) < -0.999);
     const opposite = j >= 0 ? left.splice(j, 1)[0] : -1;
-    const value = (v: number) => (sides === 10 ? (tens ? `${v}0`.replace(/^00$/, "00") : String(v)) : String(v + 1));
+    const value = (v: number) => (sides === 10 ? (tens ? `${v}0` : String(v)) : String(v + 1));
     out[i] = value(low);
     if (opposite >= 0) out[opposite] = value(n - 1 - low);
     low++;
   }
   return out;
 }
-
 
 /**
  * The turns that leave a shape as it is: every way to pick it up and put it

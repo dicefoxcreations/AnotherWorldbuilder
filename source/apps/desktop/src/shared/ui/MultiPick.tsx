@@ -49,6 +49,18 @@ export function MultiPick({
   );
 }
 
+/** Closes a menu when a click lands outside its box. */
+function useClickAway(box: React.RefObject<HTMLSpanElement | null>, shown: boolean, close: () => void) {
+  useEffect(() => {
+    if (!shown) return;
+    const away = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) close();
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown]);
+}
 
 /**
  * ＋ and what may be added: a search over the names, the matches below it —
@@ -67,14 +79,7 @@ export function AddPick({
   const [shown, setShown] = useState(false);
   const [text, setText] = useState("");
   const box = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!shown) return;
-    const away = (e: MouseEvent) => {
-      if (!box.current?.contains(e.target as Node)) setShown(false);
-    };
-    document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
-  }, [shown]);
+  useClickAway(box, shown, () => setShown(false));
   const needle = text.trim().toLowerCase();
   const matches = !shown ? [] : (typeof open === "function" ? open() : open).filter((c) => !needle || c.name.toLowerCase().includes(needle)).slice(0, 50);
   const take = (c: ArticleView) => {
@@ -120,14 +125,7 @@ export function TextPicks({ items, onItems }: { items: string[]; onItems: (items
   const [shown, setShown] = useState(false);
   const [text, setText] = useState("");
   const box = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!shown) return;
-    const away = (e: MouseEvent) => {
-      if (!box.current?.contains(e.target as Node)) setShown(false);
-    };
-    document.addEventListener("mousedown", away);
-    return () => document.removeEventListener("mousedown", away);
-  }, [shown]);
+  useClickAway(box, shown, () => setShown(false));
   // A comma divides them where they are written: none in one of them.
   const take = () => {
     const fresh = text.replace(/,/g, " ").trim();
