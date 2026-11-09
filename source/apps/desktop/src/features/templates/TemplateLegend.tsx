@@ -9,8 +9,8 @@ import { Icon } from "../../shared/ui/Icons";
  * insert.
  *
  * On the left the example, on the right one sentence about it. Whoever looks
- * something up wants a line to copy, not an essay — the previous version had
- * three paragraphs per brick, and nobody reads that while typing.
+ * something up wants a line to copy, not an essay — nobody reads paragraphs
+ * while typing.
  *
  * The bricks carry their placeholder in «guillemets». On insertion the
  * characters are removed and what stood between them is selected; in the
@@ -309,7 +309,7 @@ export const BRICKS: Group[] = [
       },
       {
         name: "Image in the text",
-        line: '<image size=«300x200» align=right caption="The shire">',
+        line: '<image size=«300x200» align=right caption="The old harbour">',
         what: "With align=left and align=right the text flows around it.",
       },
       {
@@ -349,7 +349,7 @@ export const BRICKS: Group[] = [
       },
       {
         name: "Group layout",
-        line: "<view of=«Charakterwerte»>",
+        line: "<view of=«Stats»>",
         what: "The layout a property group defines, drawn with this document's values — kept once, in the group, and the same wherever it is taken in. %%Name%% in it is the document's name; <abilities show=«Group»> shows a group's numbers.",
       },
       { name: "Note", line: "<!-- «Note to self» -->", what: "Skipped over." },
@@ -396,12 +396,12 @@ export const BRICKS: Group[] = [
       {
         name: "Timeline",
         line: '<timeline type="«Event, Session»">',
-        what: "Every date of these documents along the world's calendar — births, deaths, sessions, events. around=self: only what names this document. show=: only these date properties. until=End: that date ends a span instead of standing on its own — several by comma, one for each type. text=\"Summary, Course\": an entry shows the first of these parts — or text properties — its document has, else its first text; text=none: no text. A document without a date stands on the date of what it picks — a kill on its session's; on one day the first type named leads, with what belongs to it after it. ⚙ sets all of it by click.",
+        what: "Every date of these documents along the world's calendar — births, deaths, sessions, events. around=self: only what names this document. show=: only these date properties. until=End: that date ends a span instead of standing on its own — several by comma, one for each type. text=\"Summary, Course\": an entry shows the first of these parts — or text properties — its document has, else its first text; text=none: no text. A document without a date stands on the date of what it picks — an event on its session's; on one day the first type named leads, with what belongs to it after it. ⚙ sets all of it by click.",
       },
       {
         name: "Calendar",
         line: '<calendar type="«Session, Event»">',
-        what: "A month of the world's calendar with its moons, and what of these documents happened on its days. It opens at the latest; ‹ › turn the months.",
+        what: "A month of the world's calendar with its moons, and what of these documents happened on its days. It opens at the latest; the arrows turn the months.",
       },
       {
         name: "Relation tree",
@@ -451,7 +451,7 @@ export const BRICKS: Group[] = [
       },
       {
         name: "Count",
-        line: '<list type="Kill" count="«Killer»" by="«Kind»">',
+        line: '<list type="Event" count="«Place»" by="«Kind»">',
         what: "A row for each value and how many have it, most first. by: a column for each of its values too.",
       },
       {

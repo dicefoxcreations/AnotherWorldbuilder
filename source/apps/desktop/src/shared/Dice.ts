@@ -252,7 +252,7 @@ export function parse(formula: string, rules: Rule[] = [], inside: string[] = []
     if (!isSym(v)) throw new Error(`“${v}” is missing`);
     at++;
   };
-  /** A comparison, the loosest of all: `Ab Stufe <= Stufe`. */
+  /** A comparison, the loosest of all: `From level <= Level`. */
   const compare = (): Ast => {
     const left = sum();
     const t = peek();

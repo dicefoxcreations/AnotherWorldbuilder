@@ -85,7 +85,7 @@ export function ListCard({ list, onChange }: { list: ImageAttrs; onChange: (next
   );
 }
 
-/** Types to pick from, each with the type it belongs to — `NSC · in Charakter`. */
+/** Types to pick from, each with the type it belongs to — `NPC · in Character`. */
 function typeItems(templates: Template[], only?: (t: Template) => boolean): Pickable[] {
   return templates
     .filter((t) => !t.group && (!only || only(t)))

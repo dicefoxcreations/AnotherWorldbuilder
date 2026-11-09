@@ -3,7 +3,7 @@ import { ancestors, findType, isA, isProperties, parentIdOf, articleById } from 
 
 /**
  * Folders after the navigation: an image lies where its document stands in
- * the side bar on the left — `Welt › Charaktere › NPCs`. The type entry that
+ * the side bar on the left — `World › Characters › NPCs`. The type entry that
  * fits a document most closely holds it, as the side bar does: a homebrew
  * monster lies under `Monster › Homebrew`, not under `Monster`. A document
  * of a type the navigation has no place for stands below its parent, as the
