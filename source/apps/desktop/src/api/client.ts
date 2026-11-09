@@ -12,7 +12,7 @@ import { type Raw, fromDocument, fromTemplate, toArticle, toCode, toDocument, to
 
 export * from "./model";
 
-/** Documents being made or made just now, by world, type and slug — see `once`. */
+/** Documents being made or made just now, by world, type and name — see `once`. */
 const creating = new Map<string, Promise<string>>();
 /** How long one made stays the answer to making it again. */
 const MADE_MS = 15_000;
@@ -189,7 +189,7 @@ export const api = {
     visibility: string,
     layers: NewLayer[],
   ) => {
-    return once(`${world}\u0000${articleType}\u0000${slug}`, () =>
+    return once(`${world}\u0000${articleType}\u0000${name}`, () =>
       invoke<string>("article_create", { world, articleType, slug, name, visibility, layers }),
     );
   },
@@ -199,7 +199,7 @@ export const api = {
    * Resolves with its id.
    */
   articlePropose: (world: string, articleType: string, slug: string, name: string, layers: NewLayer[]) =>
-    once(`${world}\u0000${articleType}\u0000${slug}`, () => invoke<string>("article_propose", { world, articleType, slug, name, layers })),
+    once(`${world}\u0000${articleType}\u0000${name}`, () => invoke<string>("article_propose", { world, articleType, slug, name, layers })),
   /** Texts as they are written: the ids stored in them turned back into names. */
   textsWritten: (world: string, articleType: string, texts: string[]) =>
     invoke<string[]>("texts_written", { world, articleType, texts }),

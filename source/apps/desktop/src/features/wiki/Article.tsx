@@ -14,11 +14,12 @@ import { InfoboxForm } from "./InfoboxForm";
 import { ImagePicker } from "../../shared/ui/ImagePicker";
 import { linker } from "../../shared/Links";
 import { needsInput, nameFrom, nextNumber, fillCount } from "../templates/NamePattern";
-import { isA, typeOf } from "../../shared/types";
+import { documentsOf, isA, typeOf } from "../../shared/types";
 import { editOnOpen } from "./Document";
 
 type Values = Record<string, unknown>;
 
+/** A name as a slug: `Old Harbour` → `old-harbour` — letters of any script kept. */
 export const slugify = (text: string) =>
   text
     .toLowerCase()
@@ -26,7 +27,7 @@ export const slugify = (text: string) =>
     .replace(/ö/g, "oe")
     .replace(/ü/g, "ue")
     .replace(/ß/g, "ss")
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-|-$/g, "");
 
 export function ArticleArea(props: {
@@ -465,10 +466,7 @@ export function defaults(template: Template | undefined, articles: ArticleView[]
       if (Number.isFinite(n)) out[field.key] = n;
     } else if (field.kind === "reference" && written === "*") {
       // `= *`: every document of the type, by name — all skills, to start with.
-      const ids = articles
-        .filter((a) => isA(templates, a.articleType, field.articleType))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map((a) => a.id);
+      const ids = documentsOf(articles, templates, field.articleType).map((a) => a.id);
       if (ids.length > 0) out[field.key] = field.multiple ? ids : ids[0];
     } else if (field.kind === "reference" && written === "last") {
       // `= last`: the last document of the type by name — a new session's previous one.
