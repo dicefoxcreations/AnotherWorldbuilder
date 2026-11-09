@@ -232,7 +232,9 @@ export function TemplateEditor({
   return (
     <div className="template-editor">
       <div className="editor-head">
-        <button onClick={onBack}>← Overview</button>
+        <button onClick={onBack}>
+          <Icon name="left" /> Overview
+        </button>
         <IconPicker value={draft.icon} onChange={(icon) => onChange({ ...draft, icon })} />
         <input
           className={draft.name.trim() ? "type-name large" : "type-name large missing"}
@@ -283,7 +285,7 @@ export function TemplateEditor({
             onClick={() => api.legendOpen().catch(() => {})}
             title="Open the legend in its own window"
           >
-            ? Legend
+            <Icon name="question" /> Legend
           </button>
         )}
         <button
@@ -292,7 +294,13 @@ export function TemplateEditor({
           disabled={errors.length > 0 || !draft.name.trim()}
           title={draft.name.trim() ? "" : group ? "The group needs a name" : "The type needs a name"}
         >
-          {saved ? "Saved ✓" : "Save"}
+          {saved ? (
+            <>
+              <Icon name="check" /> Saved
+            </>
+          ) : (
+            "Save"
+          )}
         </button>
       </div>
 
@@ -353,7 +361,7 @@ export function TemplateEditor({
             // there and cannot be told from real text.
             <p className="empty-note small">
               Nothing in the <code>&lt;body&gt;</code> yet. <strong>{isMobile ? "Long-press" : "Right-click"}</strong> inserts
-              building blocks{!isMobile && <> — or <strong>? Legend</strong>, top right</>}.
+              building blocks{!isMobile && <> — or <strong>Legend</strong>, top right</>}.
             </p>
           ) : null}
           {repaired && (
