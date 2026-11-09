@@ -840,8 +840,20 @@ impl WorldDb {
         self.load("WHERE id > ?1 ORDER BY id LIMIT ?2", params![after, count as i64])
     }
 
+    /// The same without the texts of their parts — but those of the
+    /// section `kept` and its own sections (`kept:…`): an outline of the
+    /// world, read without what it says.
+    pub fn outlines_after(&self, after: &str, count: usize, kept: &str) -> Result<Vec<Document>> {
+        self.load_with("WHERE id > ?1 ORDER BY id LIMIT ?2", params![after, count as i64], Some(kept))
+    }
+
     /// Documents as `rest` picks them, each with its layers.
     fn load(&self, rest: &str, args: impl rusqlite::Params) -> Result<Vec<Document>> {
+        self.load_with(rest, args, None)
+    }
+
+    /// `load`, the texts left out but those of the section `kept` names.
+    fn load_with(&self, rest: &str, args: impl rusqlite::Params, kept: Option<&str>) -> Result<Vec<Document>> {
         let conn = self.conn();
         let mut q = conn.prepare(&format!("SELECT {DOCUMENT_COLUMNS} FROM documents {rest}"))?;
         let mut docs: Vec<Document> = q.query_map(args, document_from)?.collect::<std::result::Result<_, _>>()?;
@@ -849,10 +861,15 @@ impl WorldDb {
             return Ok(docs);
         };
         let at: std::collections::HashMap<String, usize> = docs.iter().enumerate().map(|(i, d)| (d.id.clone(), i)).collect();
+        let columns = match kept {
+            Some(_) => LAYER_COLUMNS.replace(", text,", ", CASE WHEN section = ?3 OR section LIKE ?3 || ':%' THEN text ELSE '' END,"),
+            None => LAYER_COLUMNS.to_string(),
+        };
         let mut q = conn.prepare(&format!(
-            "SELECT document, {LAYER_COLUMNS} FROM layers WHERE document BETWEEN ?1 AND ?2 ORDER BY document, base DESC, position"
+            "SELECT document, {columns} FROM layers WHERE document BETWEEN ?1 AND ?2 ORDER BY document, base DESC, position"
         ))?;
-        let rows = q.query_map([low, high], |r| Ok((r.get::<_, String>(0)?, layer_from(r, 1)?)))?;
+        let values = [low, high].into_iter().chain(kept.map(str::to_string));
+        let rows = q.query_map(rusqlite::params_from_iter(values), |r| Ok((r.get::<_, String>(0)?, layer_from(r, 1)?)))?;
         for row in rows {
             let (doc, layer) = row?;
             if let Some(&i) = at.get(&doc) {

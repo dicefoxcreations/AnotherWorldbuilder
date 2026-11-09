@@ -1067,7 +1067,6 @@ async fn put_file(store: &Store, code: &str, world: &str, file: &str, path: &Pat
     Ok(())
 }
 
-/// Fetches a world from its server into `dir` — its GM's.
 /// Fetches a world's files from its server into `dir` — its GM's. `taking`:
 /// to take it away, closed there meanwhile; otherwise a backup, and a
 /// picture `reuse` holds already is linked from there, not fetched again.

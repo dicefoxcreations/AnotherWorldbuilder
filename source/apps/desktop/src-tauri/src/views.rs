@@ -111,7 +111,9 @@ pub(crate) fn index_within(store: &Store, world: &str, preview: Option<Vec<Strin
     let (mut articles, mut size, mut last) = (Vec::new(), 0, after.to_string());
     let mut more = true;
     'reading: while more {
-        let docs = db.documents_after(&last, READ)?;
+        // Without the texts it leaves out anyway: a world's index is read
+        // in a fraction of the time.
+        let docs = db.outlines_after(&last, READ, document::INFOBOX_SECTION)?;
         more = docs.len() == READ;
         for doc in docs {
             let id = doc.id.clone();
