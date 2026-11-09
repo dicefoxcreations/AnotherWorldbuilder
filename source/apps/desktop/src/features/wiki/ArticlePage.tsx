@@ -17,7 +17,7 @@ import { DeleteButton, DeleteDialog } from "../../shared/ui/Delete";
 import { headingOf, MarkdownText, useMarkdowns, type TopFolds, type ValueOf } from "./MarkdownText";
 import { AccessLine, RegionAccess, samePolicy } from "../../shared/ui/Visibility";
 import { InfoboxForm, NumberHow, PropertyValue } from "./InfoboxForm";
-import { linker, linksIn, type Resolve } from "../../shared/Links";
+import { linker, type Resolve } from "../../shared/Links";
 import { findType, idsIn, propertyNamed, isProperties, pageOwner, permits, typeOf, articleById } from "../../shared/types";
 import { explain, lookupFor, sumOf, summedValues } from "../../shared/Sheet";
 import { RollScopeContext, type RollScope } from "../dice/DiceTray";
@@ -26,55 +26,8 @@ import { FoldBlock, SideColumn, useFoldedHeadings } from "../../shared/ui/BlockF
 import { blockRank, lookOf } from "../../shared/BlockOrder";
 import { sectioned } from "../../shared/Sections";
 import { joinPins } from "../../shared/GraphText";
+import { incoming } from "../../shared/Backlinks";
 import { linkIcon } from "./DocLink";
-
-/**
- * Everything that points at an article, grouped by the field it points with.
- *
- * Every reference field has a reverse direction: whoever names Chicago as
- * “Home” shows up at Chicago under “Home of” — a session naming Tim among
- * its characters under “Characters of”, not under “Characters”, which would
- * promise characters. The parent field is the tree, so its reverse is called
- * what it is — what lies below. Only what this reader may see takes part.
- */
-function incoming(
-  templates: Template[],
-  all: ArticleView[],
-  article: ArticleView,
-): { title: string; articles: ArticleView[] }[] {
-  const groups = new Map<string, ArticleView[]>();
-  const resolve = linker(all, templates);
-  const pointsHere = (text: string) => linksIn(text).some((l) => resolve(l)?.id === article.id);
-  const add = (title: string, a: ArticleView) => {
-    const list = groups.get(title) ?? [];
-    if (!list.some((x) => x.id === a.id)) groups.set(title, [...list, a]);
-  };
-
-  for (const a of all) {
-    if (a.id === article.id) continue;
-    const type = typeOf(templates, a.articleType);
-    for (const field of type?.properties ?? []) {
-      if (field.kind !== "reference") continue;
-      if (idsIn(a, field.key).includes(article.id))
-        add(field.parent ? "Below" : field.label ? `${field.label} of` : "Referenced by", a);
-    }
-    // Free properties name documents by `@@Type:Name@@`, like the text does.
-    const known = new Set((type?.properties ?? []).map((f) => f.key));
-    for (const layer of a.layers) {
-      for (const [name, value] of Object.entries(layer.fields ?? {})) {
-        if (!known.has(name) && typeof value === "string" && pointsHere(value)) add(`${name} of`, a);
-      }
-    }
-    if (a.layers.some((l) => pointsHere(l.text))) add("Mentioned in", a);
-  }
-
-  return [...groups.entries()]
-    .sort(([x], [y]) => (x === "Below" ? -1 : y === "Below" ? 1 : x.localeCompare(y)))
-    .map(([title, articles]) => ({
-      title,
-      articles: articles.sort((x, y) => x.name.localeCompare(y.name)),
-    }));
-}
 
 /** How many of one kind show before the rest are asked for. */
 const BACKLINKS_SHOWN = 24;
