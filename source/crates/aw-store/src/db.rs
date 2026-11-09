@@ -791,6 +791,31 @@ impl WorldDb {
         )
     }
 
+    /// The pictures named in the parts `reader` may see, each with the
+    /// documents naming it — asked of the parts that name any, not of whole
+    /// documents. A part counts where its document is there for the reader:
+    /// not in the trash, its base seen — a cover alone shows no picture.
+    pub fn image_uses_for(&self, reader: &Reader) -> Result<std::collections::BTreeMap<String, BTreeSet<String>>> {
+        let conn = self.conn();
+        let mut q = conn.prepare(
+            "SELECT l.document, l.view, l.images, b.view FROM layers l
+             JOIN layers b ON b.document = l.document AND b.base = 1
+             WHERE l.images != '[]' AND json_extract(b.fields, '$.trashed') IS NULL",
+        )?;
+        let mut uses: std::collections::BTreeMap<String, BTreeSet<String>> = Default::default();
+        let rows = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?;
+        for row in rows {
+            let (document, view, images, base) = row?;
+            if !reader.allows(&base) || !reader.allows(&view) {
+                continue;
+            }
+            for image in from_json::<Vec<String>>(&images) {
+                uses.entry(image).or_default().insert(document.clone());
+            }
+        }
+        Ok(uses)
+    }
+
     /// Every picture some version of a document holds — what was there once.
     pub fn images_in_versions(&self) -> Result<BTreeSet<String>> {
         let conn = self.conn();

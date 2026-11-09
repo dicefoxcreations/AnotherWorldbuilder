@@ -218,7 +218,7 @@ impl Store {
         if reader.is_gm() {
             return Ok(images.into_iter().map(|i| i.id).collect());
         }
-        let (uses, _) = self.image_uses(world_id, &reader)?;
+        let uses = self.db(world_id)?.image_uses_for(&reader)?;
         let mut seen: BTreeSet<String> = images.iter().filter(|i| i.uploaded_by == me || uses.contains_key(&i.id)).map(|i| i.id.clone()).collect();
         // A stand-in shows where the image it stands in for is used.
         for image in images.iter().filter(|i| uses.contains_key(&i.id)) {
@@ -230,18 +230,13 @@ impl Store {
     }
 
     /// Where the images are used, as `reader` sees the documents — and the
-    /// documents' names.
+    /// documents' names. From the parts that name pictures and the
+    /// documents' bases: no document is read whole.
     fn image_uses(&self, world_id: &str, reader: &Reader) -> Result<(BTreeMap<String, BTreeSet<String>>, BTreeMap<String, String>)> {
-        let mut uses: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        let mut names = BTreeMap::new();
-        for doc in self.db(world_id)?.documents_for(reader)? {
-            names.insert(doc.id.clone(), doc.name().to_string());
-            for layer in &doc.layers {
-                for image in &layer.images {
-                    uses.entry(image.clone()).or_default().insert(doc.id.clone());
-                }
-            }
-        }
+        let db = self.db(world_id)?;
+        let uses = db.image_uses_for(reader)?;
+        let named: BTreeSet<&String> = uses.values().flatten().collect();
+        let names = db.names_for(reader)?.into_iter().filter(|(id, ..)| named.contains(id)).map(|(id, name, _)| (id, name)).collect();
         Ok((uses, names))
     }
 

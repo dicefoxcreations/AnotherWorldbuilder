@@ -81,7 +81,7 @@ pub fn start(app: &tauri::AppHandle) {
 }
 
 fn open(app: &tauri::AppHandle) {
-    let mut door = DOOR.lock().unwrap();
+    let mut door = DOOR.lock().unwrap_or_else(|e| e.into_inner());
     if door.listening.is_some() {
         return;
     }
@@ -123,7 +123,7 @@ fn open(app: &tauri::AppHandle) {
 }
 
 fn close() {
-    let mut door = DOOR.lock().unwrap();
+    let mut door = DOOR.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(on) = door.listening.take() {
         on.store(false, Ordering::SeqCst);
         // The loop waits for a caller: one last knock lets it see it is closed.
@@ -417,7 +417,7 @@ pub struct View {
 
 fn view(store: &Store) -> View {
     let s = load(store);
-    let door = DOOR.lock().unwrap();
+    let door = DOOR.lock().unwrap_or_else(|e| e.into_inner());
     View {
         enabled: s.enabled,
         open: door.listening.is_some(),
