@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Icon } from "../../shared/ui/Icons";
-import type { ArticleView, BlockStyle, Place, Template, WorldInfo } from "../../api/client";
+import type { ArticleView, Template, WorldInfo } from "../../api/client";
 import { linker } from "../../shared/Links";
 import { MarkdownText } from "./MarkdownText";
 import { useMentions } from "../../shared/editor/Mentions";
@@ -9,7 +9,8 @@ import { ImagePicker } from "../../shared/ui/ImagePicker";
 import { imageTag } from "../../shared/ImageTag";
 
 /**
- * A text block while writing.
+ * A part of a text block while writing — inside the block, which draws its
+ * frame and title once.
  *
  * Markdown is the storage format, not the interface: above the field sits a
  * bar that inserts the characters. Whoever knows the syntax types it
@@ -21,8 +22,6 @@ import { imageTag } from "../../shared/ImageTag";
  */
 export function BlockEditor({
   world,
-  title,
-  style,
   text,
   policy,
   inherited,
@@ -30,11 +29,8 @@ export function BlockEditor({
   templates,
   onText,
   onPolicy,
-  onPlace,
 }: {
   world: WorldInfo;
-  title: string;
-  style: BlockStyle;
   text: string;
   policy: string;
   /** Whether the visibility is only the article's — then it steps back. */
@@ -44,7 +40,6 @@ export function BlockEditor({
   templates?: Template[];
   onText: (fresh: string) => void;
   onPolicy?: (fresh: string) => void;
-  onPlace?: (o: Place) => void;
 }) {
   const [preview, setPreview] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -83,11 +78,9 @@ export function BlockEditor({
   };
 
   return (
-    <section className={`block ${style}`}>
+    // Access of its own frames the part, as when it is read.
+    <div className={inherited ? "block-part" : "block-part guarded"}>
       <div className="block-mark">
-        {/* A part of a block has no title of its own — then none stands
-            there either. “untitled” was information about nothing. */}
-        {title && <span className="block-title">{title}</span>}
         <span className="block-tools">
           <button className="compact" onClick={() => insert("**", "**")} title="Bold">
             <strong>B</strong>
@@ -138,7 +131,7 @@ export function BlockEditor({
         <MarkdownText
           text={text}
           resolve={linker(articles ?? [], templates ?? [])}
-          onPlace={onPlace ?? (() => {})}
+          onPlace={() => {}}
         />
       ) : (
         <textarea
@@ -165,6 +158,6 @@ export function BlockEditor({
           onCancel={() => setPicking(false)}
         />
       )}
-    </section>
+    </div>
   );
 }

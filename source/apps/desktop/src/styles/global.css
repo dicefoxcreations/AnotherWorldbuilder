@@ -806,7 +806,7 @@ button.infobox-image.choosable { padding: 0; cursor: pointer; font: inherit; }
 .block.statblock:is(.at-top, .at-bottom) { max-width: none; }
 .block-view { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .block-tools { display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
-.block:hover .block-tools, .block:focus-within .block-tools { opacity: 1; }
+.block-part:hover .block-tools, .block-part:focus-within .block-tools { opacity: 1; }
 
 /* The field grows with its content and cannot be dragged larger. */
 .block-text, textarea.grows { width: 100%; resize: none; overflow: hidden; line-height: 1.55; font-family: inherit; }
@@ -1138,10 +1138,9 @@ button.ability-also:hover { border-color: var(--accent); background: var(--accen
 .value-list h3 small { margin-left: 6px; font-weight: 400; }
 
 .block-view.quiet { opacity: 0; transition: opacity .12s; }
-.block:hover .block-view.quiet, .block-view.quiet:focus-within { opacity: 1; }
+.block-part:hover .block-view.quiet, .block-view.quiet:focus-within { opacity: 1; }
 .block-part + .block-part { margin-top: 10px; }
 .block-part.guarded { padding: 14px 12px 8px; margin-top: 18px; border: 1px dashed var(--accent-line); border-radius: 8px; }
-.block-part .block-view { margin-left: 0; }
 
 /* Click access instead of typing it — the same choice as everywhere else. */
 .access-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 2px; }

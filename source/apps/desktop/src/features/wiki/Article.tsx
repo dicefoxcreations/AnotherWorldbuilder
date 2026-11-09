@@ -355,8 +355,6 @@ function NewArticle({
                 <BlockEditor
                   key={part.key}
                   world={world}
-                  title=""
-                  style={block.style}
                   text={texts[part.key] ?? ""}
                   policy={viewOf(part.key, part.view)}
                   inherited={viewOf(part.key, part.view) === visibility}
