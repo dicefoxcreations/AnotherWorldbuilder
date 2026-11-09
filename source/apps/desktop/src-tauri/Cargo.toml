@@ -45,7 +45,6 @@ hex = "0.4.3"
 serde.workspace = true
 serde_json.workspace = true
 # The dedicated server's own screen reads its worlds beside it (`dedicated::worlds`).
-rusqlite.workspace = true
 # A phone's backups as one file each (`backup::pack`).
 tar = "0.4.46"
 tauri = { version = "2", features = [], optional = true }
@@ -57,6 +56,7 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 
 [dev-dependencies]
 tempfile = "3"
+rusqlite.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(unix)'.dependencies]

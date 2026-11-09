@@ -304,11 +304,14 @@ pub struct DocumentCode {
     pub base: Bases,
 }
 
+/// The states handed out, by their hash — and their hashes, oldest first.
+type HandedOut = (std::collections::HashMap<String, Plain>, std::collections::VecDeque<String>);
+
 /// The states of layers handed out to editors, by their hash — what a save
 /// is measured against. Kept in memory: after a restart an editor's state
 /// is gone, and its save counts against the layer as it stands.
-fn handed_out() -> &'static std::sync::Mutex<(std::collections::HashMap<String, Plain>, std::collections::VecDeque<String>)> {
-    static KEPT: std::sync::OnceLock<std::sync::Mutex<(std::collections::HashMap<String, Plain>, std::collections::VecDeque<String>)>> = std::sync::OnceLock::new();
+fn handed_out() -> &'static std::sync::Mutex<HandedOut> {
+    static KEPT: std::sync::OnceLock<std::sync::Mutex<HandedOut>> = std::sync::OnceLock::new();
     KEPT.get_or_init(Default::default)
 }
 
@@ -2182,9 +2185,16 @@ pub struct CaretAt {
     pub code_end: usize,
 }
 
+/// A document as the one a command runs for sees it — opened once for
+/// what asks several things of it.
+pub(crate) struct Viewed(Opened);
+
+pub(crate) fn viewed(store: &Store, world: &str, article: &str) -> Answer<Viewed> {
+    Ok(Viewed(open(store, world, article, &store.reader(world)?)?))
+}
+
 /// The layer a caret stands in, and where in its stored text.
-pub(crate) fn caret_in(store: &Store, world: &str, article: &str, caret: Caret) -> Answer<Option<(String, usize, usize)>> {
-    let opened = open(store, world, article, &store.reader(world)?)?;
+pub(crate) fn caret_in(Viewed(opened): &Viewed, caret: Caret) -> Answer<Option<(String, usize, usize)>> {
     let (a, b) = (caret.start.min(caret.end), caret.start.max(caret.end));
     let found = match (caret.part, caret.code) {
         (Some(part), _) => opened.text.blocks.iter().flat_map(|b| b.parts.iter()).find(|p| p.key == part).map(|p| (part, a, b, p.text.clone())),
@@ -2211,8 +2221,7 @@ pub(crate) fn caret_in(store: &Store, world: &str, article: &str, caret: Caret) 
 }
 
 /// Where a place in a layer's stored text stands for this reader.
-pub(crate) fn caret_at(store: &Store, world: &str, article: &str, layer: &str, start: usize, end: usize) -> Answer<Option<CaretAt>> {
-    let opened = open(store, world, article, &store.reader(world)?)?;
+pub(crate) fn caret_at(Viewed(opened): &Viewed, layer: &str, start: usize, end: usize) -> Answer<Option<CaretAt>> {
     let Some((section, _, content)) = opened.readable.iter().find(|(s, i, _)| opened.layer_id(*i) == layer && !beside_text(s)) else {
         return Ok(None);
     };

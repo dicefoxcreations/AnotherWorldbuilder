@@ -644,7 +644,8 @@ fn split_markdown(markdown: &str) -> Vec<Node> {
     let mut stack: Vec<(Frame, Vec<Node>)> = vec![(Frame::Root, Vec::new())];
     let mut list_items: Vec<Vec<Vec<Node>>> = Vec::new();
     // Tables being read: alignment, head cells, rows, the row being read.
-    let mut tables: Vec<(Vec<String>, Vec<Vec<Node>>, Vec<Vec<Vec<Node>>>, Vec<Vec<Node>>)> = Vec::new();
+    type Cells = Vec<Vec<Node>>;
+    let mut tables: Vec<(Vec<String>, Cells, Vec<Cells>, Cells)> = Vec::new();
 
     for event in raw {
         match event {

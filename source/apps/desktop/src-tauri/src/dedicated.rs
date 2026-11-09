@@ -10,7 +10,6 @@
 //! starting; a later start waits until the last one has let go of everything.
 
 use crate::server::{run_until, ServerOptions};
-use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -155,28 +154,18 @@ pub fn worlds(data: &Path) -> Result<Vec<Kept>, String> {
         if !path.is_file() {
             continue;
         }
-        let read = || -> rusqlite::Result<Kept> {
-            let db = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
-            db.busy_timeout(Duration::from_millis(200))?;
-            db.query_row(
-                "SELECT (SELECT value FROM world WHERE key='id'), (SELECT value FROM world WHERE key='name'),
-                        (SELECT value FROM world WHERE key='icon'), (SELECT count(*) FROM documents), (SELECT count(*) FROM members)",
-                [],
-                |row| {
-                    let id: String = row.get(0)?;
-                    Ok(Kept {
-                        closed: book.get("closed").and_then(|c| c.get(&id)).is_some(),
-                        id,
-                        name: row.get::<_, Option<String>>(1)?.filter(|n| !n.is_empty()).unwrap_or_else(|| "Unnamed world".into()),
-                        icon: row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "🌍".into()),
-                        articles: row.get(3)?,
-                        members: row.get(4)?,
-                        error: String::new(),
-                    })
-                },
-            )
+        let read = || -> aw_store::db::Result<Kept> {
+            let world = aw_store::db::WorldDb::glance(&path)?;
+            Ok(Kept {
+                closed: book.get("closed").and_then(|c| c.get(&world.id)).is_some(),
+                name: Some(world.name).filter(|n| !n.is_empty()).unwrap_or_else(|| "Unnamed world".into()),
+                icon: Some(world.icon).filter(|i| !i.is_empty()).unwrap_or_else(|| "🌍".into()),
+                id: world.id,
+                articles: world.documents,
+                members: world.members,
+                error: String::new(),
+            })
         };
-        // One that cannot be read is listed as such, not left out.
         out.push(read().unwrap_or_else(|e| {
             let folder = entry.file_name().to_string_lossy().into_owned();
             Kept { id: folder.clone(), name: folder, icon: "🌍".into(), articles: 0, members: 0, closed: false, error: e.to_string() }

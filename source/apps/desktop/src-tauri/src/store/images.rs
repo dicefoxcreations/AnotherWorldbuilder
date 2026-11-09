@@ -13,9 +13,14 @@ use std::sync::{Mutex, OnceLock};
 /// worked out — by the folder, the reader's roles and who they are. Every
 /// picture a page shows asks; working it out reads every document.
 type SeenKey = (PathBuf, String, String);
-static SEEN: OnceLock<Mutex<HashMap<SeenKey, ((u64, u64), Arc<BTreeSet<String>>)>>> = OnceLock::new();
+/// The images seen, and the state of the world they were worked out at.
+type SeenAt = ((u64, u64), Arc<BTreeSet<String>>);
+static SEEN: OnceLock<Mutex<HashMap<SeenKey, SeenAt>>> = OnceLock::new();
 /// More readers than this at once: the oldest answers go.
 const SEEN_KEPT: usize = 64;
+
+/// The documents each image stands in, by the image.
+type Uses = BTreeMap<String, BTreeSet<String>>;
 
 /// A document an image stands in.
 #[derive(Clone, Debug, Serialize)]
@@ -232,7 +237,7 @@ impl Store {
     /// Where the images are used, as `reader` sees the documents — and the
     /// documents' names. From the parts that name pictures and the
     /// documents' bases: no document is read whole.
-    fn image_uses(&self, world_id: &str, reader: &Reader) -> Result<(BTreeMap<String, BTreeSet<String>>, BTreeMap<String, String>)> {
+    fn image_uses(&self, world_id: &str, reader: &Reader) -> Result<(Uses, BTreeMap<String, String>)> {
         let db = self.db(world_id)?;
         let uses = db.image_uses_for(reader)?;
         let named: BTreeSet<&String> = uses.values().flatten().collect();

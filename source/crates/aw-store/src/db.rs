@@ -467,6 +467,16 @@ fn from_json<T: for<'de> Deserialize<'de> + Default>(text: &str) -> T {
     serde_json::from_str(text).unwrap_or_default()
 }
 
+/// A world at a glance — see `WorldDb::glance`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Glance {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub documents: u64,
+    pub members: u64,
+}
+
 /// The columns of a document's own row, as `document_from` reads them.
 const DOCUMENT_COLUMNS: &str = "id, type, slug, created, created_by, changed, changed_by, proposed";
 /// The columns of a layer's row, as `layer_from` reads them.
@@ -603,6 +613,19 @@ impl WorldDb {
     pub fn id_in(file: &Path) -> Result<Option<String>> {
         let conn = Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         Ok(conn.query_row("SELECT value FROM world WHERE key = 'id'", [], |r| r.get(0)).optional()?)
+    }
+
+    /// What a database file says of its world at a glance — read without
+    /// opening it for writing, while another process may write it.
+    pub fn glance(file: &Path) -> Result<Glance> {
+        let conn = Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        conn.busy_timeout(std::time::Duration::from_millis(200))?;
+        Ok(conn.query_row(
+            "SELECT (SELECT value FROM world WHERE key = 'id'), (SELECT value FROM world WHERE key = 'name'),
+                    (SELECT value FROM world WHERE key = 'icon'), (SELECT count(*) FROM documents), (SELECT count(*) FROM members)",
+            [],
+            |r| Ok(Glance { id: r.get::<_, Option<String>>(0)?.unwrap_or_default(), name: r.get::<_, Option<String>>(1)?.unwrap_or_default(), icon: r.get::<_, Option<String>>(2)?.unwrap_or_default(), documents: r.get(3)?, members: r.get(4)? }),
+        )?)
     }
 
     pub fn dir(&self) -> &Path {

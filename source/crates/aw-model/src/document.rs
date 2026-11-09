@@ -407,8 +407,10 @@ pub(crate) fn secret_pins_in(text: &str) -> bool {
 /// parts of their own — one per access, at the end of their block. A part
 /// that held such pins before keeps its key where its access is the same.
 fn split_secret_pins(blocks: &mut [TemplateBlock], previous: &[TemplateBlock]) {
+    /// Per access: the maps of a block and the pins taken off each.
+    type Pins = Vec<(Access, Vec<(String, Vec<String>)>)>;
     for block in blocks.iter_mut() {
-        let mut groups: Vec<(Access, Vec<(String, Vec<String>)>)> = Vec::new();
+        let mut groups: Pins = Vec::new();
         for part in block.parts.iter_mut() {
             let own = access_of(part);
             let mut map: Option<String> = None;

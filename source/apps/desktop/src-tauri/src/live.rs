@@ -83,15 +83,24 @@ pub fn presence(app: tauri::AppHandle, world: String, article: String, caret: Op
 
 /// `presence` for whom the store is given.
 pub(crate) fn presence_in(store: &Store, world: String, article: String, caret: Option<document::Caret>) -> Answer<Vec<Seen>> {
+    // Opened once, when a caret is asked of it — this comes every second or so.
+    let viewed = std::cell::OnceCell::new();
+    let view = || -> Answer<&document::Viewed> {
+        if let Some(open) = viewed.get() {
+            return Ok(open);
+        }
+        let open = document::viewed(store, &world, &article)?;
+        Ok(viewed.get_or_init(|| open))
+    };
     let (layer, start, end) = match caret {
-        Some(caret) => document::caret_in(store, &world, &article, caret)?.unwrap_or_default(),
+        Some(caret) => document::caret_in(view()?, caret)?.unwrap_or_default(),
         None => Default::default(),
     };
     let (me, name) = who(store, &world)?;
     note_presence(&world, Presence { member: me.clone(), name, article: article.clone(), layer, start, end, editing: true });
     let mut out = Vec::new();
     for p in present(&world, &me).into_iter().filter(|p| p.article == article) {
-        let caret = if p.layer.is_empty() { None } else { document::caret_at(store, &world, &article, &p.layer, p.start, p.end)? };
+        let caret = if p.layer.is_empty() { None } else { document::caret_at(view()?, &p.layer, p.start, p.end)? };
         out.push(Seen { id: p.member, name: p.name, caret });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -295,9 +304,12 @@ pub(crate) fn dice_favorites_set_in(store: &Store, world: String, favorites: Vec
 const ROLLS_KEPT: std::time::Duration = std::time::Duration::from_secs(60);
 const ROLLS_MAX: usize = 30;
 
+/// One world's rolls, with when each arrived.
+type Rolled = Vec<(std::time::Instant, Roll)>;
+
 /// Per world: the dice rolled lately, by anyone, and when they arrived.
-fn rolls() -> &'static Mutex<HashMap<String, Vec<(std::time::Instant, Roll)>>> {
-    static ROLLS: OnceLock<Mutex<HashMap<String, Vec<(std::time::Instant, Roll)>>>> = OnceLock::new();
+fn rolls() -> &'static Mutex<HashMap<String, Rolled>> {
+    static ROLLS: OnceLock<Mutex<HashMap<String, Rolled>>> = OnceLock::new();
     ROLLS.get_or_init(Default::default)
 }
 
@@ -351,9 +363,30 @@ pub fn dice_rolls(app: tauri::AppHandle, world: String) -> Answer<Vec<Roll>> {
 
 /// `dice_rolls` for whom the store is given — a member of the world.
 pub(crate) fn dice_rolls_in(store: &Store, world: String) -> Answer<Vec<Roll>> {
-    store.reader(&world)?;
-    let Ok(mut all) = rolls().lock() else { return Ok(Vec::new()) };
-    let Some(here) = all.get_mut(&world) else { return Ok(Vec::new()) };
-    here.retain(|(at, _)| at.elapsed() < ROLLS_KEPT);
-    Ok(here.iter().map(|(_, r)| r.clone()).collect())
+    let reader = store.reader(&world)?;
+    let mut rolled: Vec<Roll> = {
+        let Ok(mut all) = rolls().lock() else { return Ok(Vec::new()) };
+        let Some(here) = all.get_mut(&world) else { return Ok(Vec::new()) };
+        here.retain(|(at, _)| at.elapsed() < ROLLS_KEPT);
+        here.iter().map(|(_, r)| r.clone()).collect()
+    };
+    // The document rolled from, only where this reader may see it.
+    if !reader.is_gm() {
+        let db = store.db(&world)?;
+        let mut seen: HashMap<String, bool> = HashMap::new();
+        for roll in rolled.iter_mut().filter(|r| !r.document.is_empty()) {
+            let shown = match seen.get(&roll.document) {
+                Some(&shown) => shown,
+                None => {
+                    let shown = db.document(&roll.document)?.is_some_and(|d| d.seen_by(&reader).is_some_and(|s| !s.is_cover()));
+                    seen.insert(roll.document.clone(), shown);
+                    shown
+                }
+            };
+            if !shown {
+                roll.document.clear();
+            }
+        }
+    }
+    Ok(rolled)
 }
