@@ -131,6 +131,9 @@ export function readGraph(tag: string, inside: string[]): GraphNode {
   return g;
 }
 
+/** The tags that stand on a line of their own, each a piece by its name. */
+const ONE_LINE = ["timeline", "calendar", "create", "abilities", "view", "embed", "list"] as const;
+
 /**
  * A part's text cut into text and graphs. Joined again, the pieces give the
  * text exactly as it was.
@@ -141,14 +144,14 @@ export function pieces(text: string): Piece[] {
   let plain = "";
   for (let i = 0; i < lines.length; ) {
     // An image is a surface of its own too, a line long.
-    const image = readImageLine(lines[i]);
+    const image = lines[i].trimStart().startsWith("<image") ? readImageLine(lines[i]) : null;
     if (image) {
       if (plain) out.push({ kind: "text", text: plain });
       plain = "";
       // Images on the lines right after it stand in one row with it.
       const row = [{ text: lines[i], image }];
       for (let next = i + 1; next < lines.length; next++) {
-        const beside = readImageLine(lines[next]);
+        const beside = lines[next].trimStart().startsWith("<image") ? readImageLine(lines[next]) : null;
         if (!beside) break;
         row.push({ text: lines[next], image: beside });
       }
@@ -156,66 +159,17 @@ export function pieces(text: string): Piece[] {
       i += row.length;
       continue;
     }
-    // A timeline, the same.
-    const timeline = readTagLine("timeline", lines[i]);
-    if (timeline) {
+    // A timeline, a calendar, a create button, an ability row, a group's
+    // layout, another document's text, a list: each a line, drawn as what it
+    // shows, not as its tag.
+    const tag = ONE_LINE.flatMap((kind) => {
+      const attrs = lines[i].trimStart().startsWith(`<${kind}`) ? readTagLine(kind, lines[i]) : null;
+      return attrs ? [{ kind, text: lines[i], [kind]: attrs } as Piece] : [];
+    })[0];
+    if (tag) {
       if (plain) out.push({ kind: "text", text: plain });
       plain = "";
-      out.push({ kind: "timeline", text: lines[i], timeline });
-      i++;
-      continue;
-    }
-    // And a calendar.
-    const calendar = readTagLine("calendar", lines[i]);
-    if (calendar) {
-      if (plain) out.push({ kind: "text", text: plain });
-      plain = "";
-      out.push({ kind: "calendar", text: lines[i], calendar });
-      i++;
-      continue;
-    }
-    // A create button.
-    const create = readTagLine("create", lines[i]);
-    if (create) {
-      if (plain) out.push({ kind: "text", text: plain });
-      plain = "";
-      out.push({ kind: "create", text: lines[i], create });
-      i++;
-      continue;
-    }
-    // An ability row.
-    const abilities = readTagLine("abilities", lines[i]);
-    if (abilities) {
-      if (plain) out.push({ kind: "text", text: plain });
-      plain = "";
-      out.push({ kind: "abilities", text: lines[i], abilities });
-      i++;
-      continue;
-    }
-    // A group's layout, drawn.
-    const view = readTagLine("view", lines[i]);
-    if (view) {
-      if (plain) out.push({ kind: "text", text: plain });
-      plain = "";
-      out.push({ kind: "view", text: lines[i], view });
-      i++;
-      continue;
-    }
-    // Another document's text.
-    const embed = readTagLine("embed", lines[i]);
-    if (embed) {
-      if (plain) out.push({ kind: "text", text: plain });
-      plain = "";
-      out.push({ kind: "embed", text: lines[i], embed });
-      i++;
-      continue;
-    }
-    // A list too: what it shows is drawn, not its tag.
-    const list = readTagLine("list", lines[i]);
-    if (list) {
-      if (plain) out.push({ kind: "text", text: plain });
-      plain = "";
-      out.push({ kind: "list", text: lines[i], list });
+      out.push(tag);
       i++;
       continue;
     }
@@ -271,7 +225,6 @@ function lineTag(l: GraphLine): string {
   return `<line ${parts.join(" ")}>`;
 }
 
-/** Whether a line says anything beyond the usual. */
 /** Whether a line is more than between two people, drawn as usual: it says how, or one of its ends is a line. */
 export const saysSomething = (l: GraphLine) =>
   !!(l.color || l.sides.some(Boolean) || l.shape || l.arrow || l.label || l.between.some((end) => end.includes("&")));

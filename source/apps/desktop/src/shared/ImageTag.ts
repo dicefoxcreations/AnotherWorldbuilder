@@ -7,10 +7,15 @@ export type ImageAttrs = [string, string][];
 
 /** The attributes of a line holding nothing but a `<name …>` tag, or `null` if the line is none. */
 export function readTagLine(name: string, line: string): ImageAttrs | null {
-  const m = new RegExp(`^\\s*<${name}(\\s[^<>]*)?>\\s*$`).exec(line);
+  let pattern = patterns.get(name);
+  if (!pattern) patterns.set(name, (pattern = new RegExp(`^\\s*<${name}(\\s[^<>]*)?>\\s*$`)));
+  const m = pattern.exec(line);
   if (!m) return null;
   return [...(m[1] ?? "").matchAll(/([\w-]+)(?:=(?:"([^"]*)"|([^\s>]+)))?/g)].map((a) => [a[1].toLowerCase(), a[2] ?? a[3] ?? ""]);
 }
+
+/** A tag's line pattern, made once per tag name. */
+const patterns = new Map<string, RegExp>();
 
 /** The attributes of an image line, or `null` if the line is none. */
 export const readImageLine = (line: string) => readTagLine("image", line);
