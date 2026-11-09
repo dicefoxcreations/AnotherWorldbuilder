@@ -116,7 +116,6 @@ impl From<Refused> for AppError {
     }
 }
 
-/// Canonical world root => one local lock, even with different profiles or aliases.
 /// Takes a profile and a worlds folder into use without the app's window —
 /// the server's. Refused while another copy uses them.
 pub(crate) fn use_folders(profile: &Path, worlds: &Path, locks: &Path) -> Answer<Store> {
@@ -136,6 +135,8 @@ pub(crate) fn release_folders(profile: &Path) {
     }
 }
 
+/// One local lock per world folder, by its canonical path — the same lock
+/// whichever profile or alias names it.
 fn world_lock_path(root: &Path, canonical_worlds: &Path) -> PathBuf {
     let id = aw_crypto::Id::derive("storage", &[canonical_worlds.as_os_str().as_encoded_bytes()]);
     root.join(format!("{}.lock", store::dir_name(id.as_str())))
@@ -327,7 +328,7 @@ fn holds(dir: &Path, profile: bool) -> bool {
         return dir.join("identity.json").exists() || dir.join("worlds").exists();
     }
     std::fs::read_dir(dir)
-        .map(|entries| entries.filter_map(|e| e.ok()).any(|e| e.path().join("world.json").exists()))
+        .map(|entries| entries.filter_map(|e| e.ok()).any(|e| e.path().join(aw_store::db::FILE).exists()))
         .unwrap_or(false)
 }
 
@@ -373,6 +374,11 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<usize> {
 #[cfg_attr(feature = "gui", tauri::command(async))]
 pub fn storage_move(app: tauri::AppHandle, choice: Choice, carry: bool) -> Answer<StorageView> {
     let old = store(&app)?;
+    // What the open worlds hold beside their files goes into them first:
+    // a copy taken now is whole.
+    if carry {
+        old.close_all()?;
+    }
     let old = Locations { profile: old.profile_dir().to_path_buf(), worlds: old.worlds_dir(), additional: old.local_roots().iter().skip(1).cloned().collect() };
     let at = choice.locations()?;
     for (from, to, profile, what) in
