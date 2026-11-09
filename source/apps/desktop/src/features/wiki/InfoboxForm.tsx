@@ -91,10 +91,8 @@ export function InfoboxForm({
   });
   if (fields.length === 0 || infobox.align === "none") return null;
 
-  // `auto` means: as wide as the content, capped by the stylesheet. A number
-  // is the width in pixels. A fixed width nobody can justify no longer
-  // exists — a box measuring 280 px around a 200 px image looked like an
-  // accident.
+  // `auto`: as wide as the content, capped by the stylesheet. A number: the
+  // width in pixels.
   const number = Number(infobox.width);
   const style = Number.isFinite(number) && number > 0 ? { width: number } : undefined;
   const widthClass = style ? "fixed" : infobox.width;
@@ -194,7 +192,6 @@ function Line({
     </div>
   );
 }
-
 
 /** An image field's image, inline — for `%%Name%%` in the text. */
 function ImageValue({ value }: { value: unknown }) {
@@ -310,7 +307,7 @@ function Display({
               // Unreadable target: it exists, but not for this reader.
               <span className="dead-link">{target?.name ?? "???"}</span>
             );
-          // A pick's own number stands after it: Fighter 3.
+          // A pick's own number stands after it: Sailing 3.
           return field.count && count !== undefined ? (
             <span key={id} className="counted">
               {link} {count}

@@ -77,7 +77,7 @@ export function PropertyInput({
     const target = targetOf(templates, articleType, field);
     const choices = target ? documentsOf(all, templates, target).filter((a) => a.id !== selfId) : [];
     const resolve = linker(all, templates);
-    // Each link with what stands after it — a pick's own number: `@@Class:Fighter@@ 3`.
+    // Each link with what stands after it — a pick's own number: `@@Skill:Sailing@@ 3`.
     const chosen: { link: Link; article: ArticleView | undefined; count: string }[] = [];
     for (const piece of scanLinks(value)) {
       if (typeof piece !== "string") chosen.push({ link: piece, article: resolve(piece), count: "" });
