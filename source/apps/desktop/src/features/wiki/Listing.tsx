@@ -752,7 +752,7 @@ function SortHead({
     <span className="sort-head">
       <button className={on ? "on" : ""} title={`Sort by ${label}`} onClick={() => sorting.onSort({ key: by, desc })}>
         {label}
-        {on && <span className="sort-way">{sorting.sorted!.desc ? " ▼" : " ▲"}</span>}
+        {on && <span className="sort-way"><Icon name={sorting.sorted!.desc ? "sort-down" : "sort-up"} size={14} /></span>}
       </button>
       {by === "name" && sorting.sorted && (
         <button className="sort-reset" title="Back to the list's order" onClick={() => sorting.onSort(null)}>

@@ -141,10 +141,10 @@ export function CodeEditor({
                 {b?.first && (movable(b.index, -1) || movable(b.index, 1)) && (
                   <b className="block-moves">
                     <button tabIndex={-1} title="Up" disabled={!movable(b.index, -1)} onClick={() => onMove(b.index, -1)}>
-                      ▲
+                      <Icon name="up" size={14} />
                     </button>
                     <button tabIndex={-1} title="Down" disabled={!movable(b.index, 1)} onClick={() => onMove(b.index, 1)}>
-                      ▼
+                      <Icon name="down" size={14} />
                     </button>
                   </b>
                 )}
@@ -154,42 +154,42 @@ export function CodeEditor({
           })}
         </div>
         <div className="caret-box">
-        <textarea
-          {...bricks.props}
-          {...caret}
-          onSelect={(e) => {
-            caret.onSelect();
-            report(e);
-          }}
-          onKeyUp={(e) => {
-            caret.onKeyUp();
-            report(e);
-          }}
-          className="template-text"
-          value={shown}
-          onChange={(e) => {
-            const field = e.currentTarget;
-            if (blocksIn(field.value) < blocksIn(shown)) {
-              const at = Math.min(field.selectionStart, shown.length);
-              setKept(true);
-              queueMicrotask(() => field.setSelectionRange(at, at));
-              return;
-            }
-            const closed = withClosingTag(shown, field.value, field.selectionStart);
-            onShown(closed?.text ?? field.value);
-            if (closed) queueMicrotask(() => field.setSelectionRange(closed.caret, closed.caret));
-          }}
-          onScroll={(e) => {
-            if (numbers.current) numbers.current.scrollTop = e.currentTarget.scrollTop;
-          }}
-          spellCheck={false}
-          placeholder="Write here. @@ links a document, right-click inserts lists, images …"
-        />
-        <MarkedField field={bricks.props.ref} text={shown} ranges={shownMarks} kind={marks.kind} found={found} />
-        <RemoteCarets field={bricks.props.ref} carets={theirs} />
+          <textarea
+            {...bricks.props}
+            {...caret}
+            onSelect={(e) => {
+              caret.onSelect();
+              report(e);
+            }}
+            onKeyUp={(e) => {
+              caret.onKeyUp();
+              report(e);
+            }}
+            className="template-text"
+            value={shown}
+            onChange={(e) => {
+              const field = e.currentTarget;
+              if (blocksIn(field.value) < blockLines.filter((b) => b?.last).length) {
+                const at = Math.min(field.selectionStart, shown.length);
+                setKept(true);
+                queueMicrotask(() => field.setSelectionRange(at, at));
+                return;
+              }
+              const closed = withClosingTag(shown, field.value, field.selectionStart);
+              onShown(closed?.text ?? field.value);
+              if (closed) queueMicrotask(() => field.setSelectionRange(closed.caret, closed.caret));
+            }}
+            onScroll={(e) => {
+              if (numbers.current) numbers.current.scrollTop = e.currentTarget.scrollTop;
+            }}
+            spellCheck={false}
+            placeholder="Write here. @@ links a document, right-click inserts lists, images …"
+          />
+          <MarkedField field={bricks.props.ref} text={shown} ranges={shownMarks} kind={marks.kind} found={found} />
+          <RemoteCarets field={bricks.props.ref} carets={theirs} />
         </div>
       </div>
-      {kept && <p className="small muted block-kept">Sections stay. ▲▼ move them.</p>}
+      {kept && <p className="small muted block-kept">Sections stay — move them with the arrows.</p>}
       {errors.length > 0 && (
         <ul className="error-list">
           {errors.map((e, i) => (

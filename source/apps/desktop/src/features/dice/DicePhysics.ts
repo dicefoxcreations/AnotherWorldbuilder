@@ -53,7 +53,7 @@ type Body = Thrown & {
 
 const cross = (a: THREE.Vector3, b: THREE.Vector3) => new THREE.Vector3().crossVectors(a, b);
 
-/** An impulse at a point of the die, along `n`. */
+/** An impulse `j` at the die's point `r` (from its middle). */
 function push(b: Body, r: THREE.Vector3, j: THREE.Vector3) {
   b.vel.add(j);
   b.spin.addScaledVector(cross(r, j), b.invInertia);

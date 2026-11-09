@@ -620,7 +620,7 @@ body:has(.frame.nav-over) .side-panel { z-index: 19; }
 
 /* ---------- Article page ---------- */
 /* As wide as the template's grid — header row and canvas line up. */
-.article-page { width: var(--page-width, 1152px); margin: 0 auto; }
+.article-page { width: min(var(--page-width, 1152px), 100%); margin: 0 auto; }
 main { overflow-x: auto; }
 .article-head h1 { margin: 0 0 14px; font-size: 28px; font-weight: 700; color: var(--heading); display: flex; gap: 12px; align-items: center; min-width: 0; }
 .article-head .type-icon { flex: 0 0 auto; display: inline-flex; align-items: center; }
@@ -1014,7 +1014,7 @@ button.ability-also:hover { border-color: var(--accent); background: var(--accen
 .line-numbers > span.block-last::after { bottom: 50%; width: 5px; border-bottom: 2px solid var(--accent-line); border-bottom-left-radius: 3px; }
 .line-numbers > span.block-first.block-last::after { top: 25%; bottom: 25%; border-bottom: 2px solid var(--accent-line); }
 .block-moves { position: absolute; left: 0; top: 0; bottom: 0; display: flex; align-items: center; font-weight: normal; }
-.block-moves button { padding: 0; width: 19px; min-height: 0; height: 22px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; }
+.block-moves button { display: inline-flex; align-items: center; justify-content: center; padding: 0; width: 19px; min-height: 0; height: 22px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); line-height: 1; }
 .block-moves button:hover:not(:disabled) { color: var(--accent); background: var(--raised); }
 .block-moves button:disabled { opacity: .25; cursor: default; }
 .block-kept { margin: 4px 0 0; }
@@ -1458,6 +1458,7 @@ svg.graph.fit { max-width: 100%; height: auto; }
 .listing-table tr:last-child td { border-bottom: none; }
 /* A head that sorts: the head's own look, a click away. */
 .sort-head { display: inline-flex; align-items: center; gap: 4px; }
+.sort-way { display: inline-flex; vertical-align: middle; margin-left: 2px; }
 .sort-head button { background: none; border: 0; padding: 0; height: auto; min-height: 0; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
 .sort-head button:hover, .sort-head button.on { color: var(--text); background: none; }
 .sort-head .sort-reset { font-size: 13px; text-transform: none; color: var(--accent); }
