@@ -167,7 +167,7 @@ export function AccessSection({ attrs, onAttrs }: { attrs?: ImageAttrs; onAttrs?
   }
   // An element has the access of the section it stands in — set there, so
   // nothing of it here; only “Own access”, where it can have its own.
-  if (at.alone || !attrs || !onAttrs) return null;
+  if (at.alone || !onAttrs) return null;
   return (
     <InspectorSection title="Access">
       <button

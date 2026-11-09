@@ -1,4 +1,4 @@
-import { useContext, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 import type { ArticleView, Node, Template } from "../../api/client";
 import { formatMoment, splitMoment, toYmd, yearText, moonsAt } from "../../shared/Calendar";
 import { shownName } from "../../shared/editor/FlowText";
@@ -130,9 +130,15 @@ export function datedEntries(data: WorldData, current: string | null, node: Date
     const i = wanted.findIndex((t) => isA(templates, a.articleType, t!.id));
     return i < 0 ? wanted.length : i;
   };
-  // The document of the leading type an entry belongs to: itself, or the first it picks.
-  const anchorOf = (a: ArticleView) =>
-    !lead ? undefined : isA(templates, a.articleType, lead.id) ? a : pickedIds(a).map((id) => byId.get(id)).find((o) => o && isA(templates, o.articleType, lead.id));
+  // The document of the leading type an entry belongs to: itself, or the
+  // first it picks — found once per document, not in every comparison.
+  const anchors = new Map<string, ArticleView | undefined>();
+  const anchorOf = (a: ArticleView) => {
+    if (!lead) return undefined;
+    if (!anchors.has(a.id))
+      anchors.set(a.id, isA(templates, a.articleType, lead.id) ? a : pickedIds(a).map((id) => byId.get(id)).find((o) => o && isA(templates, o.articleType, lead.id)));
+    return anchors.get(a.id);
+  };
 
   return articles
     .filter((a) => a.articleType && (wanted.length === 0 || wanted.some((t) => isA(templates, a.articleType, t!.id))))
@@ -169,19 +175,26 @@ export function datedEntries(data: WorldData, current: string | null, node: Date
  * `<timeline …>` — what happened when, along the world's calendar.
  *
  * Every date a document has is a moment on it: a birth, a death, a session,
- * an event. The years stand on the axis, and each new day under them, each entry beside it — with its
- * date, its type's colour, a picture and its first words; where the world
- * has moons, how they stood. A new era is named where it begins. A click on
+ * an event. The years stand on the axis, and each new day under them, each
+ * entry beside it — with its date, its type's colour, a picture and its
+ * first words; where the world has moons, how they stood. A new era is named where it begins. A click on
  * a type above shows or hides its entries.
  */
 export function Timeline({ node }: { node: TimelineNode }) {
   const data = useWorldData();
   const current = useContext(CurrentDocument);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
-  if (!data) return <p className="listing-placeholder small">Timeline{node.of.length ? ` of ${node.of.join(", ")}` : ""}</p>;
+  // Worked out when the world or the question changes — not when a type is shown or hidden.
+  const found = useMemo(
+    () => data && datedEntries(data, current, node),
+    // It reads only the documents and the types.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data?.articles, data?.templates, current, node],
+  );
+  if (!data || !found) return <p className="listing-placeholder small">Timeline{node.of.length ? ` of ${node.of.join(", ")}` : ""}</p>;
   const { templates, world, onPlace } = data;
   const calendar = world.calendar;
-  const entries = datedEntries(data, current, node);
+  const entries = found;
   if (typeof entries === "string") return <p className="dead-link">{entries}</p>;
 
   const types = [...new Map(entries.map((e) => [e.type?.id ?? "", e.type])).values()];
