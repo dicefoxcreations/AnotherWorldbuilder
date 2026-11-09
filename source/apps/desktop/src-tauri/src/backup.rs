@@ -112,8 +112,15 @@ fn folder(store: &Store, world: &str, plan: &Plan) -> Answer<PathBuf> {
     } else {
         PathBuf::from(plan.folder.trim())
     };
+    // The world's folder there already, by its id: renamed since, its
+    // backups stay its own.
+    let id = format!(" – {}", store::dir_name(world));
+    let there = std::fs::read_dir(&root).into_iter().flatten().flatten().map(|e| e.path()).find(|p| p.is_dir() && p.file_name().is_some_and(|n| n.to_string_lossy().ends_with(&id)));
+    if let Some(there) = there {
+        return Ok(there);
+    }
     let name: String = world_name(store, world)?.chars().map(|c| if c.is_alphanumeric() || " -_.".contains(c) { c } else { '_' }).collect();
-    Ok(root.join(format!("{} – {}", name.trim(), store::dir_name(world))))
+    Ok(root.join(format!("{}{id}", name.trim())))
 }
 
 /// A world's name — here, or as known of its server.
