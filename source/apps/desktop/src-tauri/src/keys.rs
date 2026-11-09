@@ -93,11 +93,7 @@ pub(crate) fn restore(store: &Store, locked: &[u8], passphrase: &str) -> Answer<
         return Err(AppError("Not a key backup this version knows.".into()));
     }
     // Checked before anything is kept: keys that do not make their id are no identity.
-    let probe = store.profile_dir().join(".identity-restore.json");
-    aw_store::durable::write(&probe, backup.identity.as_bytes())?;
-    let theirs = Identity::load(&probe);
-    let _ = std::fs::remove_file(&probe);
-    let theirs = theirs?;
+    let theirs = Identity::from_json(backup.identity.as_bytes())?;
     if store.has_identity() {
         let mine = store.load_identity()?;
         if mine.id() != theirs.id() {

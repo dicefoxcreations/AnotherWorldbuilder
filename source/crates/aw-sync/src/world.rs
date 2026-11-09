@@ -280,6 +280,13 @@ pub trait Host: Send + Sync + 'static {
     fn serves(&self, world: &str) -> bool {
         self.offers().iter().any(|o| o.world == world)
     }
+    /// Whether someone may send a large ask — a world's member, say, or one
+    /// who may bring worlds. Anyone else is heard out in a few kilobytes:
+    /// asking to join or to bring takes no more, and a stranger cannot fill
+    /// the host's memory with asks it will turn down.
+    fn trusts(&self, _world: &str, _who: &IdentityPublic) -> bool {
+        true
+    }
     /// Answers someone whose identity is proven.
     fn answer(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Reply;
 }
@@ -388,7 +395,11 @@ pub fn bind_code(port: u16) -> Result<tokio::net::TcpListener> {
 pub async fn tell_code_on(listener: tokio::net::TcpListener, code: String) -> Result<()> {
     let page = format!("HTTP/1.0 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{code}\n", code.len() + 1);
     loop {
-        let Ok((mut stream, _)) = listener.accept().await else { continue };
+        let Ok((mut stream, _)) = listener.accept().await else {
+            // Out of file handles, say: a moment, not a spin at full speed.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        };
         let page = page.clone();
         tokio::spawn(async move {
             // What was asked does not matter; a little of it is read so the
@@ -461,22 +472,7 @@ pub struct WorldNet {
 
 impl Drop for WorldNet {
     fn drop(&mut self) {
-        self.task.abort();
-        if let Some(m) = &self.mapping {
-            m.abort();
-        }
-        if let Some(mdns) = &self.mdns {
-            if let Ok(names) = self.announced.lock() {
-                for name in names.iter() {
-                    let _ = mdns.unregister(name);
-                }
-            }
-            let _ = mdns.shutdown();
-        }
-        // Connections kept open would hold the port: the endpoint goes with them.
-        if let Ok(mut links) = self.links.lock() {
-            links.clear();
-        }
+        self.stop();
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             let endpoint = self.endpoint.clone();
             runtime.spawn(async move { endpoint.close().await });
@@ -513,6 +509,13 @@ impl WorldNet {
     /// tray): its port and announcements are free again when this returns.
     /// Dropping does the same for one that ends with its program.
     pub async fn shutdown(&self) {
+        self.stop();
+        self.endpoint.close().await;
+    }
+
+    /// Everything but the endpoint: listening, the router's port, the
+    /// announcements, the connections kept.
+    fn stop(&self) {
         self.task.abort();
         if let Some(mapping) = &self.mapping {
             mapping.abort();
@@ -525,10 +528,10 @@ impl WorldNet {
             }
             let _ = mdns.shutdown();
         }
+        // Connections kept open would hold the port: the endpoint goes with them.
         if let Ok(mut links) = self.links.lock() {
             links.clear();
         }
-        self.endpoint.close().await;
     }
 
     /// Starts listening — and, as `reach` says, announcing and looking
@@ -617,7 +620,7 @@ impl WorldNet {
         let task = tokio::spawn(async move {
             // Connections stay open between asks now — one per device.
             let slots = Arc::new(Semaphore::new(if cfg!(target_os = "android") { 8 } else { 64 }));
-            let per_address: Arc<Mutex<HashMap<std::net::IpAddr, usize>>> = Default::default();
+            let per_address: Seats = Default::default();
             let mut tick = tokio::time::interval(Duration::from_millis(250));
             loop {
                 tokio::select! {
@@ -1092,7 +1095,7 @@ fn stun_answer(msg: &[u8], id: &[u8; 12]) -> Option<SocketAddr> {
 
 fn short(world: &str) -> &str {
     let body = world.split_once(':').map(|(_, b)| b).unwrap_or(world);
-    &body[..body.len().min(12)]
+    body.char_indices().nth(12).map_or(body, |(at, _)| &body[..at])
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1137,13 +1140,16 @@ const PER_ADDRESS: usize = 8;
 const RATE: f64 = 200.0;
 const BURST: f64 = 400.0;
 
+/// How many connections each address has open.
+type Seats = Arc<Mutex<HashMap<std::net::IpAddr, usize>>>;
+
 /// A connection's place among those of its address — given back when it ends.
 struct Seat {
-    of: Option<(Arc<Mutex<HashMap<std::net::IpAddr, usize>>>, std::net::IpAddr)>,
+    of: Option<(Seats, std::net::IpAddr)>,
 }
 
 impl Seat {
-    fn take(all: &Arc<Mutex<HashMap<std::net::IpAddr, usize>>>, ip: std::net::IpAddr) -> Option<Self> {
+    fn take(all: &Seats, ip: std::net::IpAddr) -> Option<Self> {
         let mut map = all.lock().ok()?;
         let n = map.entry(ip).or_default();
         if *n >= PER_ADDRESS {
@@ -1218,12 +1224,18 @@ async fn serve_stream(conn: &Connection, mut send: SendStream, mut recv: RecvStr
     hello
         .identity
         .verify(&proof_bytes(&hello.world, remote, local, &nonce)?, &signature)?;
-    let offered = {
-        let (host, world) = (host.clone(), hello.world.clone());
-        tokio::task::spawn_blocking(move || host.serves(&world)).await.unwrap_or(false)
+    let (offered, trusted) = {
+        let (host, world, who) = (host.clone(), hello.world.clone(), hello.identity.clone());
+        tokio::task::spawn_blocking(move || {
+            let offered = host.serves(&world);
+            (offered, offered && host.trusts(&world, &who))
+        })
+        .await
+        .unwrap_or((false, false))
     };
     let reply = if offered {
-        let ask: Ask = tokio::time::timeout(Duration::from_secs(120), read(&mut recv, MAX_ANSWER)).await??;
+        let most = if trusted { MAX_ANSWER } else { MAX_SMALL };
+        let ask: Ask = tokio::time::timeout(Duration::from_secs(120), read(&mut recv, most)).await??;
         let (world, who) = (hello.world.clone(), hello.identity.clone());
         // Answering reads and writes the world — off the network threads.
         tokio::task::spawn_blocking(move || host.answer(&world, &who, ask)).await?

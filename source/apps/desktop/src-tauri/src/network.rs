@@ -53,6 +53,9 @@ impl Host for DesktopHost {
     fn serves(&self, world: &str) -> bool {
         profile::store_now().and_then(|store| keeper::here(&store).ok()).is_some_and(|k| k.serves(world))
     }
+    fn trusts(&self, world: &str, who: &IdentityPublic) -> bool {
+        profile::store_now().and_then(|store| keeper::here(&store).ok()).is_some_and(|k| k.trusts(world, who))
+    }
     fn answer(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Reply {
         match profile::store_now().map(|store| keeper::here(&store)) {
             Some(Ok(keeper)) => keeper.answer(world, who, ask),

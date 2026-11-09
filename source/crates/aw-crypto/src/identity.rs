@@ -95,10 +95,8 @@ impl Identity {
         self.sign.sign(message).to_bytes()
     }
 
-    pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+    /// The identity file's bytes — private keys included.
+    pub fn to_json(&self) -> Result<Vec<u8>> {
         let file = IdentityFile {
             version: IDENTITY_VERSION,
             name: self.name.clone(),
@@ -106,14 +104,39 @@ impl Identity {
             sign_key: hex::encode(self.sign.to_bytes()),
             seal_key: hex::encode(self.seal.to_bytes()),
         };
-        std::fs::write(path, serde_json::to_vec_pretty(&file)?)?;
-        crate::restrict_permissions(path)?;
+        Ok(serde_json::to_vec_pretty(&file)?)
+    }
+
+    /// Written whole or not at all: a renaming cut short by a crash or an
+    /// empty battery leaves the old file, never half of one — the keys are
+    /// all one has. Private from the first byte on, where the OS knows that.
+    pub fn save(&self, path: &Path) -> Result<()> {
+        use std::io::Write;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut name = path.file_name().unwrap_or_default().to_os_string();
+        name.push(".tmp");
+        let fresh = path.with_file_name(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let mut file = options.open(&fresh)?;
+        file.write_all(&self.to_json()?)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&fresh, path)?;
         Ok(())
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        let raw = std::fs::read(path)?;
-        let file: IdentityFile = serde_json::from_slice(&raw)?;
+        Self::from_json(&std::fs::read(path)?)
+    }
+
+    /// An identity from the bytes of its file — checked like `load` does.
+    pub fn from_json(raw: &[u8]) -> Result<Self> {
+        let file: IdentityFile = serde_json::from_slice(raw)?;
         if file.version != IDENTITY_VERSION {
             return Err(CryptoError::UnknownVersion {
                 found: file.version,

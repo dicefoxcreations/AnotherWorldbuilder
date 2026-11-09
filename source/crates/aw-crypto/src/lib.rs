@@ -51,20 +51,3 @@ pub fn random_bytes<const N: usize>() -> Result<[u8; N]> {
     getrandom::fill(&mut buf)?;
     Ok(buf)
 }
-
-/// Restricts file permissions to "owner only", where the OS supports that.
-///
-/// The identity file and the world token are key material. They have no
-/// business in a world-readable file.
-pub(crate) fn restrict_permissions(path: &std::path::Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(path)?.permissions();
-        perms.set_mode(0o600);
-        std::fs::set_permissions(path, perms)?;
-    }
-    #[cfg(not(unix))]
-    let _ = path;
-    Ok(())
-}

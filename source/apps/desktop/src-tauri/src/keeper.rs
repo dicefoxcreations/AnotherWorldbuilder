@@ -653,6 +653,11 @@ impl Host for Keeper {
     fn serves(&self, world: &str) -> bool {
         !self.in_app || world.is_empty() || self.keeps(world) || self.gone_to(world).is_some()
     }
+    /// Its admins, who may bring worlds, and a world's members.
+    fn trusts(&self, world: &str, who: &IdentityPublic) -> bool {
+        let id = who.id.to_string();
+        self.is_admin(&id).unwrap_or(false) || self.may_bring(&id).unwrap_or(false) || (self.keeps(world) && self.is_member(world, &id).unwrap_or(false))
+    }
     fn answer(&self, world: &str, who: &IdentityPublic, ask: Ask) -> Reply {
         let what = format!("{ask:?}").chars().take(40).collect::<String>();
         self.reply(world, who, ask).unwrap_or_else(|e| {

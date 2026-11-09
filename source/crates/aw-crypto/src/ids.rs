@@ -47,7 +47,8 @@ impl Id {
     /// Short form for display next to a name.
     pub fn short(&self) -> &str {
         let body = self.0.split_once(':').map(|(_, b)| b).unwrap_or(&self.0);
-        &body[..body.len().min(8)]
+        // In letters: an id from elsewhere need not be hex.
+        body.char_indices().nth(8).map_or(body, |(at, _)| &body[..at])
     }
 }
 

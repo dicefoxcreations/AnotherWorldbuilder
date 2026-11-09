@@ -11,6 +11,7 @@
 
 use crate::{decrypt, encrypt, ContentKey, CryptoError};
 use argon2::{Algorithm, Argon2, Params, Version};
+use zeroize::Zeroize;
 
 const VERSION: u8 = 1;
 const SALT: usize = 16;
@@ -22,7 +23,9 @@ fn key_of(passphrase: &str, salt: &[u8]) -> Result<ContentKey, CryptoError> {
     Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
         .hash_password_into(passphrase.as_bytes(), salt, &mut key)
         .map_err(|e| CryptoError::BadKey(e.to_string()))?;
-    Ok(ContentKey::from_bytes(key))
+    let made = ContentKey::from_bytes(key);
+    key.zeroize();
+    Ok(made)
 }
 
 /// Locks `plaintext` with `passphrase`.
