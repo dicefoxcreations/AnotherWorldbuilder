@@ -234,7 +234,7 @@ pub(crate) async fn backup_remote(store: &Store, world: &str, tell: &(dyn Fn(u64
         let _ = std::fs::remove_dir_all(&partial);
         return Err(e);
     }
-    let about = About { format: FORMAT.into(), version: VERSION, world: world.into(), name: remote.name, at, gm: store.load_identity()?.id().to_string() };
+    let about = About { format: FORMAT.into(), version: VERSION, world: world.into(), name: remote.name, at, gm: store.own_id()? };
     aw_store::durable::write(&partial.join(FILE), &serde_json::to_vec_pretty(&about)?)?;
     std::fs::rename(&partial, into.join(stamp(at)))?;
     #[cfg(target_os = "android")]

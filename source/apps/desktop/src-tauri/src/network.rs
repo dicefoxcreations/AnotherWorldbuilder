@@ -502,7 +502,7 @@ static SEEN_HERE: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
 pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
     let store = store(&app)?;
     let mut out = SyncOutcome::default();
-    let me = store.load_identity()?.id().to_string();
+    let me = store.own_id()?;
     // Worlds without a server: what their players sent, and what they get.
     let settings = store.load_network()?;
     for world in settings.posts.keys().filter(|w| store.holds(w)) {

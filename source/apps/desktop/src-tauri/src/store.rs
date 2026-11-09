@@ -179,19 +179,10 @@ impl AvatarFile {
     }
 }
 
-/// A small Base64 encoder without an extra dependency.
+/// Bytes as Base64 — for `data:` URLs.
 pub fn base64(bytes: &[u8]) -> String {
-    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for block in bytes.chunks(3) {
-        let b = [block[0], *block.get(1).unwrap_or(&0), *block.get(2).unwrap_or(&0)];
-        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-        out.push(ABC[(n >> 18) as usize & 63] as char);
-        out.push(ABC[(n >> 12) as usize & 63] as char);
-        out.push(if block.len() > 1 { ABC[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if block.len() > 2 { ABC[n as usize & 63] as char } else { '=' });
-    }
-    out
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 /// A filesystem-safe name from an id: `world:c19d…` → `world-c19d…`.
@@ -345,6 +336,23 @@ fn open_worlds() -> &'static Mutex<HashMap<PathBuf, Arc<WorldDb>>> {
     OPEN.get_or_init(Default::default)
 }
 
+/// Each profile's own id, by its identity file — see `Store::own_id`.
+fn own_ids() -> &'static Mutex<HashMap<PathBuf, String>> {
+    static OWN: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
+    OWN.get_or_init(Default::default)
+}
+
+/// The database in `dir`, opened once and kept.
+fn db_at(dir: PathBuf) -> Result<Arc<WorldDb>> {
+    let mut open = open_worlds().lock().map_err(|_| err("a lock was poisoned"))?;
+    if let Some(db) = open.get(&dir) {
+        return Ok(db.clone());
+    }
+    let db = Arc::new(WorldDb::open(&dir)?);
+    open.insert(dir, db.clone());
+    Ok(db)
+}
+
 /// Where the data lies: the profile — identity, avatar, settings — and the
 /// worlds, in one or more folders.
 #[derive(Clone, Debug)]
@@ -432,7 +440,24 @@ impl Store {
 
     pub fn save_identity(&self, identity: &Identity) -> Result<()> {
         identity.save(&self.identity_path())?;
+        if let Ok(mut known) = own_ids().lock() {
+            known.insert(self.identity_path(), identity.id().to_string());
+        }
         Ok(())
+    }
+
+    /// This device's own id — read from its identity once, then kept: every
+    /// command asks for it, most of them many times.
+    pub fn own_id(&self) -> Result<String> {
+        let path = self.identity_path();
+        if let Some(id) = own_ids().lock().ok().and_then(|known| known.get(&path).cloned()) {
+            return Ok(id);
+        }
+        let id = self.load_identity()?.id().to_string();
+        if let Ok(mut known) = own_ids().lock() {
+            known.insert(path, id.clone());
+        }
+        Ok(id)
     }
 
     fn avatar_path(&self) -> PathBuf {
@@ -490,13 +515,7 @@ impl Store {
         if !dir.join(aw_store::db::FILE).exists() {
             return Err(StoreError::NoSuchWorld(world_id.to_string()));
         }
-        let mut open = open_worlds().lock().map_err(|_| err("a lock was poisoned"))?;
-        if let Some(db) = open.get(&dir) {
-            return Ok(db.clone());
-        }
-        let db = Arc::new(WorldDb::open(&dir)?);
-        open.insert(dir, db.clone());
-        Ok(db)
+        db_at(dir)
     }
 
     /// Lets go of an open world — it is gone or moves.
@@ -531,7 +550,9 @@ impl Store {
                 if !dir.join(aw_store::db::FILE).exists() {
                     continue;
                 }
-                let Ok(db) = WorldDb::open(&dir) else { continue };
+                // The open one where there is one: a world is asked for its
+                // id on every list, and opening costs more than asking.
+                let Ok(db) = db_at(dir.clone()) else { continue };
                 let Some(id) = db.get("id")? else { continue };
                 if dir.file_name().and_then(|n| n.to_str()) != Some(dir_name(&id).as_str()) {
                     continue;
@@ -598,7 +619,7 @@ impl Store {
     pub fn actor(&self) -> Result<String> {
         match acting() {
             Some(id) => Ok(id),
-            None => Ok(self.load_identity()?.id().to_string()),
+            None => self.own_id(),
         }
     }
 

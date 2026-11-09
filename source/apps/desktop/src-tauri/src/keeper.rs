@@ -639,7 +639,7 @@ pub(crate) fn here(store: &Store) -> Answer<Arc<Keeper>> {
     if let Some(keeper) = all.get(store.profile_dir()) {
         return Ok(keeper.clone());
     }
-    let admin = store.load_identity()?.id().to_string();
+    let admin = store.own_id()?;
     let mut keeper = Keeper::open(store.clone(), &store.profile_dir().join("host"), admin)?;
     keeper.in_app = true;
     let keeper = Arc::new(keeper);
