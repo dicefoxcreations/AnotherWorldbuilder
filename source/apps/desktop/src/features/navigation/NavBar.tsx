@@ -615,7 +615,7 @@ function EntrySettings({
           maxLength={80}
           onChange={(e) => setLabel(e.target.value)}
           onBlur={keep}
-          onKeyDown={(e) => e.key === "Enter" && keep()}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
       </InspectorSection>
       <button className="danger inspector-remove" onClick={onRemove}>

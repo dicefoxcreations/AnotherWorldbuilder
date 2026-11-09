@@ -326,9 +326,11 @@ export function pageOwner(
   article: ArticleView,
 ): { kind: "world" } | { kind: "type"; type: Template } | null {
   if (article.id === home) return { kind: "world" };
-  const type = templates.find((t) => t.page === article.id);
+  const type = typesByPage(templates).get(article.id);
   return type ? { kind: "type", type } : null;
 }
+/** The types by their page — made once per list of types. */
+const typesByPage = perList((all: Template[]) => new Map(all.filter((t) => t.page).map((t) => [t.page, t])));
 
 /** The ids a field holds in an article — whichever readable section carries it. */
 export function idsIn(article: ArticleView, key: string): string[] {
