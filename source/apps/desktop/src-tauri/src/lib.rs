@@ -1576,15 +1576,12 @@ fn names_stored(store: &Store, world: &str, article_type: &str, mut layers: Vec<
 fn article_propose(
     app: tauri::AppHandle,
     world: String,
-    article: Option<String>,
     article_type: String,
     slug: String,
     name: String,
     layers: Vec<NewLayer>,
 ) -> Answer<String> {
-    let store = store(&app)?;
-    let _ = article;
-    propose_document(&store, &world, article_type, slug, name, layers)
+    propose_document(&store(&app)?, &world, article_type, slug, name, layers)
 }
 
 /// What `article_propose` does — without Tauri, for the tests too.

@@ -30,8 +30,6 @@ export type WorldData = {
   onTemplates?: (all: Template[]) => void;
   /** Starts a new document of this type — where the app can (`<create>`). */
   onNew?: (articleType: string) => void;
-  /** Changes a document this player waits on — in the form it was asked with. */
-  onEditPending?: (article: ArticleView) => void;
   /** The game master looks as a player would: reading only, nothing more. */
   previewing?: boolean;
 };

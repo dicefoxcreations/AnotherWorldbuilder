@@ -127,8 +127,6 @@ export function LinkPreview() {
                   templates={data.templates}
                   all={data.articles}
                   onPlace={data.onPlace}
-                  onChanged={data.onChanged}
-                  onError={() => {}}
                   glance
                 />
               );

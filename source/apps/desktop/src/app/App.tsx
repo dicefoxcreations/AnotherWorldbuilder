@@ -126,8 +126,6 @@ export default function App() {
   const [network, setNetwork] = useState<NetworkView | null>(null);
   const [where, setPlace] = useState<Place>({ kind: "types" });
   const [newType, setNewType] = useState<string | null>(null);
-  // A document this player waits on, changed in the form it was asked with.
-  const [editing, setEditing] = useState<ArticleView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
   /** How far opening a world is, 0 to 1. */
@@ -659,7 +657,7 @@ export default function App() {
         />
       ) : (
         <WorldDataContext.Provider
-          value={{ world, templates, articles, onPlace: go, onChanged: () => void loadView(), want: (id: string) => reading.current?.reader.want(id), loading: texting, onError: report, onApart: openApart, onTemplates: setTemplates, onNew: (t: string) => { setOptions(false); setEditing(null); setNewType(t); }, onEditPending: (a: ArticleView) => { setEditing(a); setNewType(a.articleType); }, previewing: preview !== null }}
+          value={{ world, templates, articles, onPlace: go, onChanged: () => void loadView(), want: (id: string) => reading.current?.reader.want(id), loading: texting, onError: report, onApart: openApart, onTemplates: setTemplates, onNew: (t: string) => { setOptions(false); setNewType(t); }, previewing: preview !== null }}
         >
         <LinkPreview />
         <FindBar />
@@ -688,19 +686,14 @@ export default function App() {
               templates={templates}
               articles={articles}
               articleType={newType}
-              pending={editing ?? undefined}
-              key={editing?.id ?? newType}
+              key={newType}
               onDone={(id) => {
                 setNewType(null);
-                setEditing(null);
                 if (id) setPlace({ kind: "article", id });
                 void loadView();
                 void loadWorlds();
               }}
-              onCancel={() => {
-                setNewType(null);
-                setEditing(null);
-              }}
+              onCancel={() => setNewType(null)}
               onError={report}
             />
           ) : (
@@ -728,7 +721,7 @@ export default function App() {
 
       {options && (
         // The world's documents for what options show of them — a calendar's preview.
-        <WorldDataContext.Provider value={world ? { world, templates, articles, onPlace: go, onChanged: () => void loadView(), want: (id: string) => reading.current?.reader.want(id), loading: texting, onError: report, onApart: openApart, onTemplates: setTemplates, onNew: (t: string) => { setOptions(false); setEditing(null); setNewType(t); }, onEditPending: (a: ArticleView) => { setEditing(a); setNewType(a.articleType); }, previewing: preview !== null } : null}>
+        <WorldDataContext.Provider value={world ? { world, templates, articles, onPlace: go, onChanged: () => void loadView(), want: (id: string) => reading.current?.reader.want(id), loading: texting, onError: report, onApart: openApart, onTemplates: setTemplates, onNew: (t: string) => { setOptions(false); setNewType(t); }, previewing: preview !== null } : null}>
         <Options
           world={world}
           me={me}

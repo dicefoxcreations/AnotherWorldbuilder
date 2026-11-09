@@ -198,12 +198,9 @@ export function DocumentPage({
   // The editor holds the whole document — a preview only reads, or it would
   // show what the preview hides.
   const previewing = !!useWorldData()?.previewing;
-  // Waiting on the GM's device: not stored yet — changed in its form, no versions.
-  const pending = !!article.pending;
-  const editPending = useWorldData()?.onEditPending;
-  const canEdit = !pending && !previewing && (world.isGm || article.layers.some((l) => l.mayEdit));
+  const canEdit = !previewing && (world.isGm || article.layers.some((l) => l.mayEdit));
   // Previewing: whether the one previewed could write here — shown, not pressed.
-  const theyMayEdit = previewing && !pending && article.layers.some((l) => l.mayEdit);
+  const theyMayEdit = previewing && article.layers.some((l) => l.mayEdit);
   // Just made: it opens for writing.
   const [justMade, setJustMade] = useState(() => freshlyMade.delete(article.id));
   const mode: Mode = canEdit ? (justMade ? "edit" : prefs.mode) : "view";
@@ -215,8 +212,6 @@ export function DocumentPage({
       templates={templates}
       all={all}
       onPlace={onPlace}
-      onChanged={onChanged}
-      onError={onError}
       actions={actions}
     />
   );
@@ -283,7 +278,7 @@ export function DocumentPage({
   };
   // Ctrl+E: editing and reading, as the ✎ button.
   const latestSwitch = useRef(switchMode);
-  latestSwitch.current = canEdit && !pending ? switchMode : () => {};
+  latestSwitch.current = canEdit ? switchMode : () => {};
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (comboOf(e) !== "ctrl+e") return;
@@ -294,13 +289,7 @@ export function DocumentPage({
     return () => document.removeEventListener("keydown", key);
   }, []);
 
-  const modeSwitch = pending ? (
-    editPending && (
-      <button className="ghost icon round" onClick={() => editPending(article)} title="Edit">
-        <Icon name="edit" />
-      </button>
-    )
-  ) : theyMayEdit ? (
+  const modeSwitch = theyMayEdit ? (
     <button className="ghost icon round" disabled title="They may edit this" data-label="They may edit">
       <Icon name="edit" />
     </button>
@@ -328,7 +317,7 @@ export function DocumentPage({
   });
   // What came in since one last looked is marked in the list while it is open.
   const [fresh, setFresh] = useState<string[]>([]);
-  const historyButton = !pending && (
+  const historyButton = (
     <button
       className={history ? "ghost icon round on" : "ghost icon round"}
       onClick={() => {
@@ -469,8 +458,6 @@ export function DocumentPage({
                   templates={templates}
                   all={all}
                   onPlace={onPlace}
-                  onChanged={onChanged}
-                  onError={onError}
                 />
               )}
             />

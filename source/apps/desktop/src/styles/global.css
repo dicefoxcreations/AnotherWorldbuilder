@@ -1868,7 +1868,6 @@ input.invalid { border-color: var(--danger-line); }
 .saved-roll-own { width: 170px; padding: 2px 8px; font-family: monospace; }
 .dice-favorite-name { padding: 2px 4px 2px 10px; }
 /* A document the player waits on the GM's app for. */
-.chip.waiting { border-style: dashed; color: var(--muted); cursor: default; }
 /* A choice beside its name, as wide as it needs. */
 .setting-row { display: grid; grid-template-columns: 110px auto; align-items: center; gap: 10px; }
 .setting-row .segmented { justify-self: start; }

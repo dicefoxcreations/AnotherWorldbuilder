@@ -157,9 +157,8 @@ function Backlinks({
  * An article, readable.
  *
  * The infobox at its position, below or beside it the blocks as flowing
- * text. A block this reader could not decrypt does not appear at all — the
- * text closes up. That is not a hidden display: the bytes cannot be opened on
- * this device.
+ * text. A block this reader may not see does not appear at all — the text
+ * closes up. That is not a hidden display: its holder never sent it here.
  */
 export function ArticlePage({
   world,
@@ -167,8 +166,6 @@ export function ArticlePage({
   templates,
   all,
   onPlace,
-  onChanged,
-  onError,
   actions,
   glance = false,
   headless = false,
@@ -179,8 +176,6 @@ export function ArticlePage({
   templates: Template[];
   all: ArticleView[];
   onPlace: (o: Place) => void;
-  onChanged: () => void;
-  onError: (e: unknown) => void;
   /** What the owner of a page adds to its head — a type's “New” button. */
   actions?: ReactNode;
   /**
@@ -424,11 +419,6 @@ export function ArticlePage({
                 >
                   {template.name}
                 </button>
-              )}
-              {article.pending && (
-                <span className="chip waiting" title="Yours until the GM's app has made it — then everyone's it may be.">
-                  Waits for the GM
-                </span>
               )}
               {missing > 0 && (
                 <span className="small">

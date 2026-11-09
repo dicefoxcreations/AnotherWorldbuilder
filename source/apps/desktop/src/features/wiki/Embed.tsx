@@ -58,7 +58,7 @@ export function Embed({ of, fold = "", title = "", section = "" }: { of: string;
           )}
           {!folded && (
             <div className="embedded-page">
-              <ArticlePage world={data.world} article={doc} templates={data.templates} all={data.articles} onPlace={data.onPlace} onChanged={data.onChanged} onError={() => {}} glance headless={section.trim() ? headless : true} section={section} />
+              <ArticlePage world={data.world} article={doc} templates={data.templates} all={data.articles} onPlace={data.onPlace} glance headless={section.trim() ? headless : true} section={section} />
             </div>
           )}
         </section>

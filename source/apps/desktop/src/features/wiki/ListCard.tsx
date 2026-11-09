@@ -562,7 +562,6 @@ export function EmbedCard({ attrs, onChange }: { attrs: ImageAttrs; onChange: (n
   const title = attr(attrs, "title");
   const set = (name: string, value: string) => onChange(writeTagLine("embed", withAttr(attrs, name, value)));
   const items = articles
-    .filter((a) => !a.pending)
     .map((a) => ({ id: a.id, name: a.name, icon: findType(data?.templates ?? [], a.articleType)?.icon }))
     .sort((a, b) => a.name.localeCompare(b.name));
   return (

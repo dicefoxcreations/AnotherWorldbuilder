@@ -386,7 +386,7 @@ export function TemplateEditor({
               world={world}
               template={draft}
               templates={others}
-              documents={articles.filter((a) => a.articleType === draft.id && !a.pending).map((a) => a.id)}
+              documents={articles.filter((a) => a.articleType === draft.id).map((a) => a.id)}
               saved={saved}
               onApplied={onArticlesChanged}
               onError={onError}

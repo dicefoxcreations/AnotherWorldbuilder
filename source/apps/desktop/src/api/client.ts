@@ -238,8 +238,6 @@ export type ArticleView = {
   order?: string[];
   /** How its type's sections look in it, where that differs from the type — by block key. */
   looks?: Record<string, BlockLook>;
-  /** Asked of the GM's device and not made yet — only on the device of the player who asked. */
-  pending?: boolean;
   /** Known only by its cover: links lead to it, nothing lists it — see `Links.ts`. */
   cover?: boolean;
   /** The type's sections with nothing in them yet that this player may start — never told the GM. */
@@ -575,7 +573,6 @@ const toArticle = (r: Raw): ArticleView => ({
   layers: ((r.layers as Raw[]) ?? []).map(toLayer),
   layerTotal: r.layer_total,
   order: r.order ?? [],
-  pending: !!r.pending,
   cover: !!r.cover,
   startable: (r.startable as string[] | undefined) ?? [],
   partial: !!r.partial,
@@ -1240,15 +1237,12 @@ export const api = {
     );
   },
   /**
-   * A new document, by a player — or one asked for again, changed (`article`).
-   * The GM's device makes it with the type's access; here it is the player's
-   * at once (`pending`). Resolves with its id.
+   * A new document, by a player: made with the type's access, where the
+   * type lets this player make its documents. Once, as `articleCreate`.
+   * Resolves with its id.
    */
-  articlePropose: (world: string, article: string | null, articleType: string, slug: string, name: string, layers: NewLayer[]) =>
-    // Asked again, changed: each time. New: once, as `articleCreate`.
-    article
-      ? invoke<string>("article_propose", { world, article, articleType, slug, name, layers })
-      : once(`${world}\u0000${articleType}\u0000${slug}`, () => invoke<string>("article_propose", { world, article, articleType, slug, name, layers })),
+  articlePropose: (world: string, articleType: string, slug: string, name: string, layers: NewLayer[]) =>
+    once(`${world}\u0000${articleType}\u0000${slug}`, () => invoke<string>("article_propose", { world, articleType, slug, name, layers })),
   /** Texts as they are written: the ids stored in them turned back into names. */
   textsWritten: (world: string, articleType: string, texts: string[]) =>
     invoke<string[]>("texts_written", { world, articleType, texts }),

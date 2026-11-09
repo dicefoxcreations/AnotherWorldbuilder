@@ -34,17 +34,14 @@ export function ArticleArea(props: {
   templates: Template[];
   articles: ArticleView[];
   articleType: string;
-  /** A document this player asked for and waits on — to change before the GM's device makes it. */
-  pending?: ArticleView;
   /** Done — with the new document's id where it is to be opened. */
   onDone: (id?: string) => void;
   onCancel: () => void;
   onError: (e: unknown) => void;
 }) {
   // Made here at once: then it is written in the editor every document has.
-  // A player's goes to the GM's device first — until it is made there, it
-  // is filled in its form.
-  return props.world.isGm && !props.pending ? <QuickArticle {...props} /> : <NewArticle {...props} />;
+  // A player's is made with the type's access — filled in its form first.
+  return props.world.isGm ? <QuickArticle {...props} /> : <NewArticle {...props} />;
 }
 
 /**
@@ -184,7 +181,6 @@ function NewArticle({
   templates,
   articles,
   articleType,
-  pending,
   onDone,
   onCancel,
   onError,
@@ -193,7 +189,6 @@ function NewArticle({
   templates: Template[];
   articles: ArticleView[];
   articleType: string;
-  pending?: ArticleView;
   onDone: (id?: string) => void;
   onCancel: () => void;
   onError: (e: unknown) => void;
@@ -204,9 +199,8 @@ function NewArticle({
 
   // What is typed is not necessarily the name: the template can prescribe a
   // pattern that puts something in front or counts up.
-  const [input, setInput] = useState(pending?.name ?? "");
-  // Asked for already: its name stands as it was asked.
-  const pattern = pending ? "%%input%%" : template?.namePattern || "%%input%%";
+  const [input, setInput] = useState("");
+  const pattern = template?.namePattern || "%%input%%";
   const count = useMemo(
     () =>
       nextNumber(
@@ -221,19 +215,12 @@ function NewArticle({
   // a word of its own that is `all`.
   const [visibility, setVisibility] = useState(() => template?.auth?.view ?? "all");
   // A new document starts with what its type gives as defaults.
-  const [values, setValues] = useState<Values>(() =>
-    pending
-      ? Object.assign({}, ...pending.layers.filter((l) => l.section === PROPERTIES || l.section.startsWith(`${PROPERTIES}:`)).map((l) => l.fields as Values))
-      : defaults(template, articles, templates),
-  );
+  const [values, setValues] = useState<Values>(() => defaults(template, articles, templates));
   // By part key, not by block: every part becomes a layer of its own.
   const [texts, setTexts] = useState<Record<string, string>>({});
   // The type's texts store ids; whoever writes sees names.
   useEffect(() => {
-    // Asked for already: its texts as asked; else what the type starts with.
-    const start = pending
-      ? Object.fromEntries(pending.layers.filter((l) => !l.section.startsWith(PROPERTIES)).map((l) => [l.section, l.text]))
-      : startTexts(template);
+    const start = startTexts(template);
     const keys = Object.keys(start);
     api
       .textsWritten(world.id, articleType, keys.map((k) => start[k]))
@@ -263,7 +250,7 @@ function NewArticle({
     // here it is theirs at once, under the id it will have.
     if (!world.isGm) {
       api
-        .articlePropose(world.id, pending?.id ?? null, articleType, slugify(name), name, layers)
+        .articlePropose(world.id, articleType, slugify(name), name, layers)
         .then((id) => onDone(id))
         .catch(failed);
       return;

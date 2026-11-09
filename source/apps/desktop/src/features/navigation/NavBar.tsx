@@ -167,7 +167,7 @@ export function NavBar({
     (type: string) =>
       listed(articles, templates, `docs ${world.home} ${type}`, () =>
         articles
-          .filter((a) => !a.pending && isA(templates, a.articleType, type) && !pageOwner(templates, world.home, a))
+          .filter((a) => isA(templates, a.articleType, type) && !pageOwner(templates, world.home, a))
           .sort(documentOrder(templates, type, articles)),
       ),
     [articles, templates, world.home],
@@ -184,7 +184,7 @@ export function NavBar({
       return listed(articles, templates, `hanging ${world.home} ${type} ${kinds.join(",")}`, () => {
         if (kinds.length === 0) return [];
         return articles
-          .filter((a) => !a.pending && kinds.some((k) => isA(templates, a.articleType, k)) && !pageOwner(templates, world.home, a))
+          .filter((a) => kinds.some((k) => isA(templates, a.articleType, k)) && !pageOwner(templates, world.home, a))
           .sort(documentOrder(templates, kinds[0], articles));
       });
     },
@@ -596,7 +596,7 @@ function EntrySettings({
         <InspectorSection title="Shows">
           <SearchPick
             single
-            items={articles.filter((a) => !a.pending).map((a) => ({ id: a.id, name: a.name, icon: findType(templates, a.articleType)?.icon }))}
+            items={articles.map((a) => ({ id: a.id, name: a.name, icon: findType(templates, a.articleType)?.icon }))}
             chosen={entry.target ? [entry.target] : []}
             onAdd={(id) => onChange({ ...entry, target: id })}
             onRemove={() => {}}
