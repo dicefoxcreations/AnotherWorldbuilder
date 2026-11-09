@@ -135,7 +135,13 @@ function Drawn({
   const type = query.of
     ? (findType(templates, query.of) ?? templates.find((t) => t.name.toLowerCase() === query.of.toLowerCase()))
     : undefined;
-  const byIdOrName = (v: string) => articles.find((a) => a.id === v || a.name.toLowerCase() === v.toLowerCase());
+  // People by id, or by name as written — looked up, not searched for each card and line end.
+  const byName = useMemo(() => {
+    const out = new Map<string, ArticleView>();
+    for (const a of articles) if (!out.has(a.name.toLowerCase())) out.set(a.name.toLowerCase(), a);
+    return out;
+  }, [articles]);
+  const byIdOrName = (v: string) => articleById(articles, v) ?? byName.get(v.toLowerCase());
   const around = query.around === "self" ? (current ?? "") : query.around ? (byIdOrName(query.around)?.id ?? "") : "";
 
   // Who was put on the graph, by id — where, and how their card looks.
@@ -239,7 +245,7 @@ function Drawn({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templates, type?.id, query.via]);
 
-  // `Entf` removes what is chosen: a line, and the relations it stands for.
+  // Delete removes what is chosen: a line, and the relations it stands for.
   const removeChosen = useRef<() => void>(() => {});
   useEffect(() => {
     if (!edit || !chosen || (!chosen.edges && !chosen.connector)) return;
