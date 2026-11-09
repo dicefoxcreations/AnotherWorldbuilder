@@ -2,7 +2,7 @@ import { FlowHandle } from "./FlowField";
 import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { ArticleView, Template, TemplateField } from "../../api/client";
 import { linker, linkIn, linkTo, MARK } from "../Links";
-import { isA, typeOf as effectiveType } from "../types";
+import { documentsOf, findType, typeOf as effectiveType } from "../types";
 
 /**
  * Suggestions after `@@` — the way to write a link without knowing its form.
@@ -77,31 +77,40 @@ function queryAt(text: string, caret: number): Query | null {
   };
 }
 
-/** Matches first that start with what was typed, then those that contain it. */
-function rank<T>(items: T[], name: (t: T) => string, typed: string): T[] {
+const collate = new Intl.Collator().compare;
+
+/**
+ * The first `count` matches: those that start with what was typed, then
+ * those that contain it — each by name. Only the matches are sorted.
+ */
+function rank<T>(items: T[], name: (t: T) => string, typed: string, count: number, skip?: (t: T) => boolean): T[] {
   const q = typed.trim().toLowerCase();
-  return items
-    .map((item) => ({ item, at: name(item).toLowerCase().indexOf(q) }))
-    .filter((x) => x.at >= 0)
-    .sort((x, y) => (x.at === 0) === (y.at === 0) ? name(x.item).localeCompare(name(y.item)) : x.at === 0 ? -1 : 1)
-    .map((x) => x.item);
+  const starts: T[] = [];
+  const inside: T[] = [];
+  for (const item of items) {
+    if (skip?.(item)) continue;
+    const at = name(item).toLowerCase().indexOf(q);
+    if (at === 0) starts.push(item);
+    else if (at > 0) inside.push(item);
+  }
+  const byName = (x: T, y: T) => collate(name(x), name(y));
+  const first = starts.sort(byName).slice(0, count);
+  return first.length < count ? [...first, ...inside.sort(byName).slice(0, count - first.length)] : first;
 }
 
 function choicesFor(query: Query, all: ArticleView[], templates: Template[], selfId?: string): Choice[] {
-  const documents = all.filter((a) => a.id !== selfId);
-  const typeOf = (a: ArticleView) => templates.find((t) => t.id === a.articleType);
+  const self = (a: ArticleView) => a.id === selfId;
+  const typeOf = (a: ArticleView) => findType(templates, a.articleType);
   // After `#`: the properties of the document named before it.
   if (query.property !== null) {
     const article = linker(all, templates)({ of: query.of ?? "", name: query.name });
     const type = article && effectiveType(templates, article.articleType);
     if (!article || !type) return [];
-    return rank(type.properties, (p) => p.label, query.property)
-      .slice(0, 12)
-      .map((field) => ({ kind: "property", article, field }));
+    return rank(type.properties, (p) => p.label, query.property, 12).map((field) => ({ kind: "property", article, field }));
   }
   if (query.of === null) {
-    const types = rank(templates.filter((t) => !t.group), (t) => t.name, query.name).slice(0, 5);
-    const docs = rank(documents, (a) => a.name, query.name).slice(0, 8);
+    const types = rank(templates, (t) => t.name, query.name, 5, (t) => t.group);
+    const docs = rank(all, (a) => a.name, query.name, 8, self);
     return [
       ...types.map((type): Choice => ({ kind: "type", type })),
       ...docs.map((article): Choice => ({ kind: "document", article, type: typeOf(article) })),
@@ -110,10 +119,9 @@ function choicesFor(query: Query, all: ArticleView[], templates: Template[], sel
   const of = query.of.trim().toLowerCase();
   const exact = templates.filter((t) => t.name.toLowerCase() === of);
   const types = exact.length > 0 ? exact : templates.filter((t) => t.name.toLowerCase().startsWith(of));
-  const inTypes = documents.filter((a) => types.some((t) => isA(templates, a.articleType, t.id)));
-  return rank(inTypes, (a) => a.name, query.name)
-    .slice(0, 12)
-    .map((article) => ({ kind: "document", article, type: typeOf(article) }));
+  // Of each type and those below it — a document under two of them once.
+  const inTypes = types.length === 1 ? documentsOf(all, templates, types[0].id) : [...new Set(types.flatMap((t) => documentsOf(all, templates, t.id)))];
+  return rank(inTypes, (a) => a.name, query.name, 12, self).map((article) => ({ kind: "document", article, type: typeOf(article) }));
 }
 
 /** Where the caret stands on screen — measured with an invisible copy of the field. */
