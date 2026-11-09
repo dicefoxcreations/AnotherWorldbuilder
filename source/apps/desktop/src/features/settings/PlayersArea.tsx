@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../shared/ui/Icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
@@ -9,7 +9,6 @@ import { typeAttribute } from "../../shared/ui/Visibility";
 
 /** The attributes every member has anyway — not worth a mention. */
 const PLAIN = ["gm", "players", "all"];
-
 
 /**
  * What a player is assigned to: documents (their character), whole types and
@@ -31,8 +30,10 @@ function Assigned({
   onAdd: (a: string) => void;
   onRemove: (a: string) => void;
 }) {
-  const types = new Map(templates.map((t) => [t.id, t]));
-  const items: Pickable[] = [
+  // Every document of the world, once per list — not again for each player on each draw.
+  const items = useMemo((): Pickable[] => {
+    const types = new Map(templates.map((t) => [t.id, t]));
+    return [
     ...articles
       .filter((a) => types.has(a.articleType))
       .map((a) => ({
@@ -45,7 +46,8 @@ function Assigned({
     ...world.roles
       .filter((a) => !PLAIN.includes(a) && !a.startsWith("doc:") && !a.startsWith("type:"))
       .map((a) => ({ id: a, name: a })),
-  ];
+    ];
+  }, [articles, templates, world.roles]);
   return (
     <div className="assigned">
       <SearchPick items={items} chosen={chosen} onAdd={onAdd} onRemove={onRemove} placeholder="Assign…" />
