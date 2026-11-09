@@ -279,7 +279,7 @@ export const api = {
   /** Whether the tools for developing show — see `DEV_TOOLS` in Rust. */
   /** Shows the window as a phone, or as it was — for layout checks in tests. */
   phoneView: (on: boolean) => invoke<void>("phone_view", { on }),
-  /** Opens a document as code — only with what this reader can decrypt. */
+  /** Opens a document as code — only with what this reader may see. */
   documentOpen: async (world: string, article: string) =>
     toCode(await invoke<Raw>("document_open", { world, article })),
   /** Reads code while it is typed. `base` is the state before the keystroke. */

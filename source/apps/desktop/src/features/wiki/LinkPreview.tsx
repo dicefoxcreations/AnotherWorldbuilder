@@ -8,7 +8,7 @@ import { articleById } from "../../shared/types";
 /**
  * A look at a document without opening it: resting the pointer on a link
  * shows the whole page as it would be read — smaller, to look at, not to
- * change. What this reader cannot decrypt is not there, as on the page; a
+ * change. What this reader may not see is not there, as on the page; a
  * document with nothing readable shows only its name.
  *
  * Any element with `data-preview=<id>` is such a link — in text, in the

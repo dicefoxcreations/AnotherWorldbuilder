@@ -13,7 +13,7 @@ import type { ArticleView, Place, Template, WorldInfo } from "../../api/client";
 export type WorldData = {
   world: WorldInfo;
   templates: Template[];
-  /** Only what this reader could decrypt. */
+  /** Only what this reader may see — the holder sent nothing else. */
   articles: ArticleView[];
   onPlace: (o: Place) => void;
   /** Loads what changed — after a change made from a graph. */

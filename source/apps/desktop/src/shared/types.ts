@@ -384,7 +384,7 @@ export function parentIdOf(all: Template[], article: ArticleView): string | unde
 /**
  * The chain above an article, the direct parent first.
  *
- * A parent this reader cannot decrypt ends the chain as `null`: it exists,
+ * A parent this reader may not see ends the chain as `null`: it exists,
  * but what lies above it cannot be known here.
  */
 export function parentChain(

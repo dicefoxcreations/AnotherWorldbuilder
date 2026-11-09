@@ -1,8 +1,9 @@
 //! The identity file: display name plus key pairs, stored locally.
 //!
 //! On first start everyone — GM and player alike — picks a display name.
-//! The app generates two key pairs for it: Ed25519 for signing, X25519 for
-//! unwrapping attribute keys. Neither ever leaves the device.
+//! The app generates two key pairs for it: Ed25519 for signing, and an
+//! X25519 one whose public half is part of what makes the id. Neither
+//! private key ever leaves the device.
 //!
 //! **The name is a label, the identity is the key.** The id is derived from
 //! the public keys, never from the name. Whoever renames themselves keeps all

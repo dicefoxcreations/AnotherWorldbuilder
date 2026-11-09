@@ -46,7 +46,7 @@ pub enum Node {
     /// `@@Type:Article@@` — the link to another article.
     ///
     /// It is only resolved when drawing: only there is it known which
-    /// articles this reader could decrypt at all.
+    /// articles this reader was given at all.
     Wikilink {
         target: String,
         text: String,
@@ -85,7 +85,7 @@ pub enum Node {
     /// `<list type=Place …>` — the documents of a type, drawn where it stands.
     ///
     /// Rust only reads what is asked for; which documents that is, the
-    /// display decides — only there is it known what this reader can decrypt.
+    /// display decides — only there is it known what this reader may see.
     /// The type goes by its name, like everywhere in text.
     Listing {
         /// Name of the type; its subtypes count too. Empty: every document.

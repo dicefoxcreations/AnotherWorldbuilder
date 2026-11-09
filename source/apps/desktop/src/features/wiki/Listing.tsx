@@ -63,8 +63,8 @@ export const ListEditing = createContext<{
  *
  * The page decides what it shows: a world page lists its continents as
  * cards, a type page its members alphabetically in three columns. Which
- * documents take part is only known here — Rust cannot know what this
- * reader could decrypt, so nothing unreadable can slip into a list.
+ * documents take part is known from what this reader was given — the
+ * holder sent nothing else, so nothing hidden can slip into a list.
  */
 export function Listing({ node }: { node: ListingNode }) {
   return node.choose ? <Filtered node={node} /> : <ListingOf node={node} />;

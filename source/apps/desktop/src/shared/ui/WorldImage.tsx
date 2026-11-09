@@ -3,11 +3,11 @@ import { Icon } from "./Icons";
 import { api } from "../../api/client";
 
 /**
- * An image of the world, drawn from its encrypted parts.
+ * An image of the world, as its holder gives it to this reader.
  *
  * An image never changes under its id, so what was opened once is kept for
  * the rest of the run. What could not be opened — not here yet, or not for
- * this reader — is asked again next time: the parts may have come by then.
+ * this reader — is asked again next time: it may be there by then.
  *
  * Opening takes the device's work: a gallery of hundreds asks for them a
  * few at a time, and only for those on screen. What is asked for and gone

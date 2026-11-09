@@ -35,7 +35,7 @@ import { linkIcon } from "./DocLink";
  * “Home” shows up at Chicago under “Home of” — a session naming Tim among
  * its characters under “Characters of”, not under “Characters”, which would
  * promise characters. The parent field is the tree, so its reverse is called
- * what it is — what lies below. Only what this reader can decrypt takes part.
+ * what it is — what lies below. Only what this reader may see takes part.
  */
 function incoming(
   templates: Template[],

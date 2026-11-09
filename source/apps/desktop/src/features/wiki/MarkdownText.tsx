@@ -394,7 +394,7 @@ function Element({
       return <Anchor id={node.id} />;
     case "wikilink": {
       // Resolved only here: only at this spot is it known which articles
-      // this reader could decrypt at all.
+      // this reader was given at all.
       const link = { of: node.of ?? "", name: node.target };
       const target = node.target ? resolve(link) : undefined;
       // Text of its own is shown as written; otherwise the current name.

@@ -1255,8 +1255,8 @@ async fn timed<T>(f: impl std::future::Future<Output = Result<T>>) -> Result<T> 
 
 /// A frame: its length, then the value as JSON — packed with zstd where
 /// both sides said they can (`Hello.packed`, `Challenge.packed`), marked by
-/// the length's top bit. Records carry their ciphertext as hex: packed, a
-/// world goes over the wire in about half the bytes.
+/// the length's top bit. Texts and the JSON around them pack well: a
+/// document goes over the wire in a part of its bytes.
 const PACKED: u32 = 0x8000_0000;
 
 /// An ask that went wrong — and whether it may be asked again: one the
