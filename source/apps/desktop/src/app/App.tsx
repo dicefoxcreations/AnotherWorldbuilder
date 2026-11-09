@@ -652,7 +652,6 @@ export default function App() {
           onOpen={(id) => void enter(id)}
           onChanged={loadWorlds}
           onNetwork={setNetwork}
-          onSettings={() => setOptions(true)}
           onError={report}
         />
       ) : (

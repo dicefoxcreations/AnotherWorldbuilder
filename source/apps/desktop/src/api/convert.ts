@@ -1,5 +1,5 @@
 // Between Rust's names and the interface's: snake_case ↔ camelCase, and
-// what an older answer leaves out filled in.
+// what Rust leaves out where it is empty filled in.
 
 import { DEFAULT_CALENDAR, type WorldCalendar } from "../shared/Calendar";
 import { type Access, type Alignment, type ArticleView, type Bases, type BlockLook, type Cover, type DocumentCode, type DocumentText, type IdentityInfo, type Infobox, type LayerView, type MemberInfo, type PackageSummary, type Shown, type Template, type TemplateBlock, type TemplateField, type WorldInfo } from "./model";

@@ -15,7 +15,6 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
   onOpen: (id: string) => void;
   onChanged: () => void;
   onNetwork: (n: NetworkView) => void;
-  onSettings: () => void;
   onError: (e: unknown) => void;
 }) {
   const [storage, setStorage] = useState<StorageView | null>(null);
@@ -273,12 +272,14 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
       <section className="dialog world-location-dialog" role="dialog" aria-modal="true" aria-labelledby="world-location-title" onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "Escape" && !busy) setDialog(null); }}>
         <div className="line between"><h2 id="world-location-title">{dialog === "new" ? "New world" : "Open world"}</h2><button disabled={!!busy} onClick={() => setDialog(null)}>Close</button></div>
         {dialog === "new" && <label className="world-name-field">World name<input autoFocus value={fresh} onChange={e => setFresh(e.target.value)} placeholder="Name of the world" /></label>}
-        <label className="world-name-field">{dialog === "new" ? "Create in" : "Import world files into"}
-          <select value={dialog === "new" ? chosen : localPath} onChange={e => setLocation(e.target.value)}>
+        {/* Where a new one goes. What is opened stays where it lies — a
+            restored backup goes to the default location. */}
+        {dialog === "new" && <label className="world-name-field">Create in
+          <select value={chosen} onChange={e => setLocation(e.target.value)}>
             {storage?.locations.map(l => <option key={l.path} value={l.path} disabled={!l.available}>{l.primary ? "This device" : `Folder · ${nameOf(l.path)}`}{l.available ? "" : " · unavailable"}</option>)}
-            {dialog === "new" && servers.filter(s => s.may_bring).map(s => <option key={s.code} value={`server:${s.code}`} disabled={!s.reached}>Server · {serverName(s)}{s.reached ? "" : " · not reached"}</option>)}
+            {servers.filter(s => s.may_bring).map(s => <option key={s.code} value={`server:${s.code}`} disabled={!s.reached}>Server · {serverName(s)}{s.reached ? "" : " · not reached"}</option>)}
           </select>
-        </label>
+        </label>}
         {toServer && dialog === "new"
           ? <p className="small">It lives on the server. Opening and saving require a server connection, for the GM too.</p>
           : !isMobile && <>

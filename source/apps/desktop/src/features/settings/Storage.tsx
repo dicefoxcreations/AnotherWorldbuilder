@@ -148,7 +148,7 @@ export function StorageSetup({
             Continue
           </button>
           {status.state !== "unset" && (
-            <button onClick={() => api.storageStatus().then(onDone)}>Try again</button>
+            <button onClick={() => api.storageStatus().then(onDone).catch((e) => setError(String(e)))}>Try again</button>
           )}
         </div>
       </div>
@@ -186,10 +186,12 @@ export function StorageArea({
       </div>
     );
 
+  // The world locations besides the default one.
+  const others = view.locations.filter((l) => !l.primary);
   const choiceFor = (p: Pending): StorageChoice => ({
     profile: p.part === "profile" ? p.path : view.profile,
     worlds: p.part === "worlds" ? p.path : view.worlds,
-    additional: view.locations.filter(l => !l.primary).map(l => l.path),
+    additional: others.map((l) => l.path),
   });
 
   const change = async (part: Pending["part"]) => {
@@ -219,16 +221,23 @@ export function StorageArea({
 
   const setLocations = async (paths: string[]) => {
     setBusy(true);
-    try { setView(await api.storageLocations(paths)); onMoved(); }
-    catch (e) { onError(e); }
-    finally { setBusy(false); }
+    try {
+      setView(await api.storageLocations(paths));
+      onMoved();
+    } catch (e) {
+      onError(e);
+    } finally {
+      setBusy(false);
+    }
   };
   const addLocations = async () => {
     try {
       const picked = await open({ directory: true, multiple: true });
       if (!picked) return;
-      await setLocations([...view.locations.filter(l => !l.primary).map(l => l.path), ...(Array.isArray(picked) ? picked : [picked])]);
-    } catch (e) { onError(e); }
+      await setLocations([...others.map((l) => l.path), ...(Array.isArray(picked) ? picked : [picked])]);
+    } catch (e) {
+      onError(e);
+    }
   };
 
   const rows: [Pending["part"], string, string][] = [
@@ -253,12 +262,18 @@ export function StorageArea({
 
       <h3>Additional world locations</h3>
       <p className="small">Folders with worlds. One your cloud app keeps in step is shared: the group meets there.</p>
-      {view.locations.filter(l => !l.primary).map(location => <div key={location.path} className="folder-box">
-        <PathRow label={location.available ? "Worlds" : "Unavailable"} value={location.path}>
-          <IconButton title="Open folder" disabled={!location.available} onClick={() => api.storageOpen(location.path).catch(onError)}><FolderIcon /></IconButton>
-          <button disabled={busy} onClick={() => setLocations(view.locations.filter(l => !l.primary && l.path !== location.path).map(l => l.path))}>Remove location</button>
-        </PathRow>
-      </div>)}
+      {others.map((location) => (
+        <div key={location.path} className="folder-box">
+          <PathRow label={location.available ? "Worlds" : "Unavailable"} value={location.path}>
+            <IconButton title="Open folder" disabled={!location.available} onClick={() => api.storageOpen(location.path).catch(onError)}>
+              <FolderIcon />
+            </IconButton>
+            <button disabled={busy} onClick={() => setLocations(others.filter((l) => l.path !== location.path).map((l) => l.path))}>
+              Remove location
+            </button>
+          </PathRow>
+        </div>
+      ))}
       <button disabled={busy} onClick={addLocations}>Add world locations …</button>
       <p className="small">Removing a location leaves its files and your profile in place.</p>
 
