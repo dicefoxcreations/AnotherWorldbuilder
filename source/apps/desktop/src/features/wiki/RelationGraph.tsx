@@ -298,7 +298,7 @@ function Drawn({
   const colour = (e: GraphEdge) => (veiled(e) ? "grey" : settings.get(e.id)?.line.color || pairColours.get(pair(e)) || "grey");
   const legend = [...pairColours.entries()].sort();
 
-  const known = (id: string) => articles.some((a) => a.id === id);
+  const known = (id: string) => !!articleById(articles, id);
   const run = (p: Promise<unknown>) => {
     setError("");
     p.catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));

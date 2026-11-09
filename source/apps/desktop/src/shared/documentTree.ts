@@ -15,7 +15,9 @@ export function asTree(templates: Template[], articles: ArticleView[]): { articl
   for (const a of articles) {
     const parent = parentIdOf(templates, a);
     if (parent && inList.has(parent) && parent !== a.id) {
-      children.set(parent, [...(children.get(parent) ?? []), a]);
+      const kids = children.get(parent);
+      if (kids) kids.push(a);
+      else children.set(parent, [a]);
     } else {
       roots.push(a);
     }

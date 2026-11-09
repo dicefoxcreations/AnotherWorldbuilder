@@ -485,7 +485,7 @@ export default function App() {
   const crumbs = useMemo(() => {
     if (!world) return [];
     const path: { label: string; icon?: string; onClick?: () => void }[] = [];
-    const shown = trail.filter((p) => p.kind !== "article" || articles.some((a) => a.id === p.id));
+    const shown = trail.filter((p) => p.kind !== "article" || !!articleById(articles, p.id));
     shown.forEach((p, i) => {
       const last = i === shown.length - 1 && !newType;
       const onClick = last ? undefined : () => setPlace(p);

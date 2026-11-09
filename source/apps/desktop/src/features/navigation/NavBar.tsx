@@ -330,9 +330,12 @@ export function NavBar({
     const outside = new Map<string, ArticleView[]>();
     for (const d of all) {
       const p = parentIdOf(templates, d);
-      if (p && p !== d.id && ids.has(p)) below.set(p, [...(below.get(p) ?? []), d]);
-      else if (p && p !== d.id && articles.some((a) => a.id === p)) outside.set(p, [...(outside.get(p) ?? []), d]);
-      else roots.push(d);
+      const into = p && p !== d.id ? (ids.has(p) ? below : articleById(articles, p) ? outside : null) : null;
+      if (into) {
+        const kids = into.get(p!);
+        if (kids) kids.push(d);
+        else into.set(p!, [d]);
+      } else roots.push(d);
     }
     const draw = (d: ArticleView, level: number, seen: Set<string>): ReactElement => {
       const kids = seen.has(d.id) ? [] : (below.get(d.id) ?? []);

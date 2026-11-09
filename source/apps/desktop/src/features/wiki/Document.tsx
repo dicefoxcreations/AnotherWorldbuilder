@@ -3213,7 +3213,7 @@ function useGraphEdit(
         return t ? [{ with: t.id, role: findRole(roles, w.role)?.id ?? "", ownRole: findRole(roles, w.ownRole)?.id ?? "" }] : [];
       });
       // What this reader cannot see is not in the text — but still there.
-      const locked = relationsOf(article, f.key).filter((e) => !all.some((a) => a.id === e.with));
+      const locked = relationsOf(article, f.key).filter((e) => !!!articleById(all, e.with));
       mine.set(f.key, [...written, ...locked]);
     }
     return new Map([[article.id, mine]]);
@@ -3494,7 +3494,7 @@ function RelationInput({
   const people = documentsOf(all, templates, field.articleType).filter((a) => a.id !== selfId);
   const roles = roleChoices(templates, all, field);
   const name = (id: string) => articleById(all, id)?.name ?? "???";
-  const locked = (stored ? relationsOf(stored, field.key) : []).filter((e) => !all.some((a) => a.id === e.with));
+  const locked = (stored ? relationsOf(stored, field.key) : []).filter((e) => !!!articleById(all, e.with));
   const saved = stored ? relationsOf(stored, field.key) : [];
   const write = (next: WrittenRelation[]) => onValue(writeRelations(next));
   const set = (i: number, part: Partial<WrittenRelation>) => write(rows.map((r, j) => (j === i ? { ...r, ...part } : r)));

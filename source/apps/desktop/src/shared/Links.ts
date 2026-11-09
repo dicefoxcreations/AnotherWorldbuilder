@@ -123,7 +123,9 @@ function makeLinker(all: ArticleView[], templates: Template[]) {
   const byName = new Map<string, ArticleView[]>();
   for (const a of all) {
     const key = a.name.toLowerCase();
-    byName.set(key, [...(byName.get(key) ?? []), a]);
+    const same = byName.get(key);
+    if (same) same.push(a);
+    else byName.set(key, [a]);
   }
   return (link: Pick<Link, "of" | "name">): ArticleView | undefined => {
     const id = idOf(link);
