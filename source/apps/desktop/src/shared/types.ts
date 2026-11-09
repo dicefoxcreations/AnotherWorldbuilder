@@ -18,7 +18,9 @@ const numeric = new Intl.Collator(undefined, { numeric: true }).compare;
  * on a cycle or a missing type: a damaged file must not hang the interface.
  */
 
-export const findType = (all: Template[], id: string) => all.find((t) => t.id === id);
+/** A type by its id — looked up in an index made once per list of types. */
+export const findType = (all: Template[], id: string): Template | undefined => typeIndex(all).get(id);
+const typeIndex = perList((all: Template[]) => new Map(all.map((t) => [t.id, t])));
 
 /** The documents by id — made once per list. */
 const byIdIn = perList((articles: ArticleView[]) => new Map(articles.map((a) => [a.id, a])));
@@ -216,8 +218,7 @@ export function orderBy(
 ): (a: ArticleView, b: ArticleView) => number {
   const byName = (a: ArticleView, b: ArticleView) => numeric(a.name, b.name);
   if (keys.length === 0 || depth > 2) return byName;
-  const byId = new Map(articles.map((a) => [a.id, a]));
-  const picked = (v: unknown) => (typeof v === "string" ? byId.get(v) : Array.isArray(v) && typeof v[0] === "string" ? byId.get(v[0]) : undefined);
+  const picked = (v: unknown) => (typeof v === "string" ? articleById(articles, v) : Array.isArray(v) && typeof v[0] === "string" ? articleById(articles, v[0]) : undefined);
   const valueOf = (a: ArticleView, key: string): unknown =>
     key === "name" ? a.name : key === "type" ? (findType(all, a.articleType)?.name ?? "") : propertyValues(a)[key];
   const has = (v: unknown) => typeof v === "number" || (typeof v === "string" && v !== "") || (Array.isArray(v) && v.length > 0);
@@ -369,10 +370,8 @@ export function picksIn(article: ArticleView, key: string): Pick[] {
 export function picksFor(all: Template[], articles: ArticleView[], article: ArticleView, field: TemplateField): Pick[] {
   const stored = picksIn(article, field.key);
   if (field.kind !== "reference" || !field.every) return stored;
-  return articles
-    .filter((a) => isA(all, a.articleType, field.articleType))
-    .sort((a, b) => plain(a.name, b.name))
-    .map((a) => ({ id: a.id, count: stored.find((p) => p.id === a.id)?.count ?? 0 }));
+  const counts = new Map(stored.map((p) => [p.id, p.count]));
+  return documentsOf(articles, all, field.articleType).map((a) => ({ id: a.id, count: counts.get(a.id) ?? 0 }));
 }
 
 /** The parent an article names — the id, whether readable or not. */
