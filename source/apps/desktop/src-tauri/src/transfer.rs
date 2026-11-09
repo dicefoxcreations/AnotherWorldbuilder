@@ -399,7 +399,7 @@ pub fn import(store: &Store, world: &str, folder: &Path, package: &Package, prog
     }
     // Written texts name what the world and the package hold.
     let catalog = if package.written {
-        let mut documents: Vec<(String, String, String)> = view_with(store, world, &Reader::gm())?.into_iter().map(|a| (a.id, a.name, a.article_type)).collect();
+        let mut documents: Vec<(String, String, String)> = store.db(world)?.names_for(&Reader::gm())?;
         documents.extend(package.documents.iter().map(|d| (d.id.clone(), d.name.clone(), d.article_type.clone())));
         let known = document::known_of(documents, templates.clone());
         for t in templates.iter_mut().filter(|t| incoming.contains(&t.id)) {

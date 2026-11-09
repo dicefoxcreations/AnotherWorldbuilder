@@ -1416,15 +1416,16 @@ fn save_template(store: &Store, world: &str, mut template: Template) -> Answer<V
     // its own properties as this very template now has them.
     let mut with_this: Vec<Template> = all.iter().filter(|t| t.id != template.id).cloned().collect();
     with_this.push(template.clone());
-    let known = document::known_from(view_with(store, world, &store.reader(world)?)?, with_this);
+    let known = document::known_shared(store, world, &store.reader(world)?, with_this)?;
+    let known = &*known;
     for part in template.blocks.iter_mut().flat_map(|b| b.parts.iter_mut()) {
-        part.text = names::stored(&part.text, &known, &template.id);
+        part.text = names::stored(&part.text, known, &template.id);
     }
     // A create button beside a title names types: by id, a rename breaks nothing.
     for block in &mut template.blocks {
-        block.new = document::types_as(&known, &block.new, true);
+        block.new = document::types_as(known, &block.new, true);
     }
-    default_documents(&mut template, &known, true);
+    default_documents(&mut template, known, true);
 
     // Supertype and inherited parent field can only be checked among the
     // others.
@@ -1548,12 +1549,13 @@ pub(crate) fn article_create_in(store: &Store, world: String, article_type: Stri
 /// document is saved.
 fn names_stored(store: &Store, world: &str, article_type: &str, mut layers: Vec<NewLayer>) -> Answer<Vec<NewLayer>> {
     let known = known_to_me(store, world)?;
+    let known = &*known;
     for layer in &mut layers {
-        layer.text = names::stored(&layer.text, &known, article_type);
+        layer.text = names::stored(&layer.text, known, article_type);
         if let Some(map) = layer.fields.as_object_mut() {
             for value in map.values_mut() {
                 if let serde_json::Value::String(s) = value {
-                    *s = names::stored(s, &known, article_type);
+                    *s = names::stored(s, known, article_type);
                 }
             }
         }
@@ -1618,10 +1620,10 @@ pub(crate) fn propose_document(store: &Store, world: &str, article_type: String,
 }
 
 /// What the one a command runs for knows by name in this world.
-fn known_to_me(store: &Store, world: &str) -> Answer<document::Known> {
-    let reader = store.reader(world)?;
-    let views = view_with(store, world, &reader)?;
-    Ok(document::known_from(views, store.load_templates(world)?))
+/// The names the one a command runs for knows — from the documents' bases,
+/// kept while the world stays as it is (`document::known_shared`).
+fn known_to_me(store: &Store, world: &str) -> Answer<std::sync::Arc<document::Known>> {
+    document::known_shared(store, world, &store.reader(world)?, store.load_templates(world)?)
 }
 
 #[cfg(feature = "gui")]
@@ -1636,7 +1638,8 @@ fn texts_written(app: tauri::AppHandle, world: String, article_type: String, tex
 /// `texts_written` for whom the store is given.
 pub(crate) fn texts_written_in(store: &Store, world: String, article_type: String, texts: Vec<String>) -> Answer<Vec<String>> {
     let known = known_to_me(store, &world)?;
-    Ok(texts.iter().map(|t| names::written(t, &known, &article_type)).collect())
+    let known = &*known;
+    Ok(texts.iter().map(|t| names::written(t, known, &article_type)).collect())
 }
 
 /// Stores a new document — for the commands and for the world's own page,
@@ -2105,6 +2108,7 @@ pub(crate) fn documents_known_in(store: &Store, world: &str, ids: Vec<String>) -
 }
 
 /// Every document `reader` sees, whole.
+#[cfg(test)]
 pub(crate) fn view_with(store: &Store, world: &str, reader: &Reader) -> Answer<Vec<ArticleView>> {
     views::whole(store, world, reader)
 }
@@ -2155,11 +2159,12 @@ fn template_write(
 /// `template_write` for whom the store is given.
 pub(crate) fn template_write_in(store: &Store, world: String, mut template: Template) -> Answer<String> {
     let known = known_to_me(store, &world)?;
+    let known = &*known;
     for part in template.blocks.iter_mut().flat_map(|b| b.parts.iter_mut()) {
-        part.text = names::written(&part.text, &known, &template.id);
+        part.text = names::written(&part.text, known, &template.id);
     }
     for block in &mut template.blocks {
-        block.new = document::types_as(&known, &block.new, false);
+        block.new = document::types_as(known, &block.new, false);
     }
     default_documents(&mut template, &known, false);
     // The infobox shows properties by key; the text names them.

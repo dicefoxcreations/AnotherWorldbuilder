@@ -61,7 +61,8 @@ impl Viewer {
     }
 }
 
-/// Every document `reader` sees, whole — for what works on all of them at once.
+/// Every document `reader` sees, whole — for the tests, which look at all of them at once.
+#[cfg(test)]
 pub(crate) fn whole(store: &Store, world: &str, reader: &Reader) -> Answer<Vec<ArticleView>> {
     let mut viewer = Viewer::new(store, world, reader.clone())?;
     let mut out = Vec::new();

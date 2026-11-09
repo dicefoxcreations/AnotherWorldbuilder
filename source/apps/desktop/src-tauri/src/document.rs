@@ -205,7 +205,7 @@ impl Catalog for InPart<'_> {
 /// The same, kept per world, reader and state of the world: every keystroke
 /// in an editor asks for it — with thousands of documents, that is what
 /// typing would wait for.
-fn known_shared(store: &Store, world: &str, reader: &Reader, templates: Vec<Template>) -> Result<std::sync::Arc<Known>, AppError> {
+pub(crate) fn known_shared(store: &Store, world: &str, reader: &Reader, templates: Vec<Template>) -> Result<std::sync::Arc<Known>, AppError> {
     type Kept = std::collections::HashMap<(PathBuf, String, String), (u64, std::sync::Arc<Known>)>;
     static KEPT: std::sync::OnceLock<std::sync::Mutex<Kept>> = std::sync::OnceLock::new();
     let db = store.db(world)?;
@@ -225,11 +225,6 @@ fn known_shared(store: &Store, world: &str, reader: &Reader, templates: Vec<Temp
         m.insert(at, (revision, fresh.clone()));
     }
     Ok(fresh)
-}
-
-/// The same, from documents as viewed.
-pub(crate) fn known_from(views: Vec<crate::ArticleView>, templates: Vec<Template>) -> Known {
-    known_of(views.into_iter().map(|a| (a.id, a.name, a.article_type)).collect(), templates)
 }
 
 /// The same from id, name and type of each document — documents not stored
