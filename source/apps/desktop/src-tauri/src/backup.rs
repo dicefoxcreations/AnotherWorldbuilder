@@ -300,16 +300,7 @@ pub(crate) fn copy_world(db: &store::WorldDb, into: &Path, world: &str, name: &s
 fn stamp(ms: u64) -> String {
     let secs = ms / 1000;
     let (h, m, s) = (secs / 3600 % 24, secs / 60 % 60, secs % 60);
-    // Days since 1970 to a date (H. Hinnant's `civil_from_days`).
-    let z = (secs / 86400) as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
+    let (year, month, day) = applog::civil((secs / 86400) as i64);
     format!("{year:04}-{month:02}-{day:02} {h:02}-{m:02}-{s:02} UTC")
 }
 
