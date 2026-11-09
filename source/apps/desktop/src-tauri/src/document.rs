@@ -2590,11 +2590,22 @@ pub(crate) mod history {
         pub document: DocumentText,
     }
 
+    /// Only a version the reader may see in the list is opened for them:
+    /// another player's that waits or was turned down is the GM's and theirs.
+    fn may_see(store: &Store, world: &str, article: &str, session: &str, reader: &Reader) -> Answer<()> {
+        let doc = store.db(world)?.document(article)?.ok_or_else(|| AppError("There is no such article.".into()))?;
+        if !visible(store, world, &doc, reader)?.iter().any(|v| v.session == session) {
+            return Err(AppError("There is no such version.".into()));
+        }
+        Ok(())
+    }
+
     pub(crate) fn version_document_in(store: &Store, world: String, article: String, session: String) -> Answer<VersionDocument> {
         let reader = store.reader(&world)?;
+        may_see(store, &world, &article, &session, &reader)?;
         let (then, _) = document_then(store, &world, &article, &session)?;
         let view = article_view(&then, &reader).ok_or_else(|| AppError("This document did not stand like this for you then.".into()))?;
-        let opened = open_doc(store, &world, then, &reader, store.load_templates(&world)?, store.load_world_meta(&world)?.calendar)?;
+        let opened = open_doc(store, &world, then, &reader, store.templates_for(&world, &reader)?, store.load_world_meta(&world)?.calendar)?;
         Ok(VersionDocument { view, code: document::to_code(&opened.text), document: opened.text })
     }
 
@@ -2730,9 +2741,10 @@ pub(crate) mod history {
 
     pub(crate) fn version_marks_in(store: &Store, world: String, article: String, session: String) -> Answer<VersionMarks> {
         let reader = store.reader(&world)?;
+        may_see(store, &world, &article, &session, &reader)?;
         let now = open(store, &world, &article, &reader)?;
         let (then_doc, version) = document_then(store, &world, &article, &session)?;
-        let then = open_doc(store, &world, then_doc, &reader, store.load_templates(&world)?, store.load_world_meta(&world)?.calendar)?;
+        let then = open_doc(store, &world, then_doc, &reader, store.templates_for(&world, &reader)?, store.load_world_meta(&world)?.calendar)?;
         let texts = |o: &Opened| -> BTreeMap<String, String> {
             o.readable.iter().filter(|(s, _, _)| !beside_text(s)).map(|(_, i, c)| (o.layer_id(*i).to_string(), c.text.clone())).collect()
         };
