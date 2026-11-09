@@ -24,3 +24,21 @@ export function blockRank(type: Template | undefined, article: ArticleView | und
     return i < 0 ? Infinity : i;
   };
 }
+
+/**
+ * A document's blocks as they are read — its type's looking as they do in
+ * it, all of them by place and in its order. As `document::blocks_of`.
+ */
+export function asRead(blocks: TemplateBlock[], type: Template | undefined, article: ArticleView): TemplateBlock[] {
+  const rank = blockRank(type, article);
+  return blocks
+    .map((written) => {
+      const typedBlock = type?.blocks.find((x) => x.key === written.key);
+      if (!typedBlock) return written;
+      const { title, style, place, fold, heading, width } = lookOf(typedBlock, article);
+      return { ...written, title, style, place, fold, heading, width };
+    })
+    .map((block, b) => ({ block, b }))
+    .sort((x, y) => PLACE_RANK[x.block.place ?? "flow"] - PLACE_RANK[y.block.place ?? "flow"] || rank(x.block.key) - rank(y.block.key) || x.b - y.b)
+    .map(({ block }) => block);
+}
