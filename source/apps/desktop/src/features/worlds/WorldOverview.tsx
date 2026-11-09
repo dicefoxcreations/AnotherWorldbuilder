@@ -3,7 +3,7 @@ import { Icon } from "../../shared/ui/Icons";
 import { DocumentPage } from "../wiki/Document";
 import { ArticleHead } from "../wiki/ArticleHead";
 import { coverOf } from "../../shared/Links";
-import { findType, isA, pageOwner, subtypes, mayCreate, articleById } from "../../shared/types";
+import { findType, documentsOf, pageOwner, subtypes, mayCreate, articleById } from "../../shared/types";
 
 export type { Place };
 
@@ -109,7 +109,7 @@ function TypeActions({
       {subtypes(templates, type.id).map((b) => (
         <button key={b.id} className="chip" onClick={() => onPlace({ kind: "list", articleType: b.id })}>
           {b.icon} {b.name}
-          <small className="small">{articles.filter((a) => isA(templates, a.articleType, b.id)).length}</small>
+          <small className="small">{documentsOf(articles, templates, b.id).length}</small>
         </button>
       ))}
       {mayCreate(world, type) && (

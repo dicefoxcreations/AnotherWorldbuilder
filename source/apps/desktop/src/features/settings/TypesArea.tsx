@@ -3,7 +3,7 @@ import { Icon } from "../../shared/ui/Icons";
 import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
 import { api, type ArticleView, type Template, type WorldInfo } from "../../api/client";
 import { TemplateEditor } from "../templates/TemplateEditor";
-import { findType, isA, realTypes, subtypes, usersOf } from "../../shared/types";
+import { documentsOf, findType, realTypes, subtypes, usersOf } from "../../shared/types";
 
 export function TypesArea({
   world,
@@ -36,14 +36,7 @@ export function TypesArea({
     }
   }, [open, templates]);
 
-  /**
-   * A new type comes into being as a draft, not as a file.
-   *
-   * It used to be saved immediately on creation, and the name was then asked
-   * for again in a second field — two fields for the same thing, and the upper
-   * one without effect. Now there is only the field in the editor, and it is
-   * saved only at the press of a button.
-   */
+  /** A new type is a draft until saved — named in the editor's one field. */
   const create = (group: boolean) => {
     setDraft({
       id: "",
@@ -146,7 +139,7 @@ export function TypesArea({
     const inner = new Set(seen).add(t.id);
     const children = byName(subtypes(templates, t.id));
     const isUnfolded = unfolded.has(t.id);
-    const count = articles.filter((a) => isA(templates, a.articleType, t.id)).length;
+    const count = documentsOf(articles, templates, t.id).length;
     return (
       <li key={t.id}>
         <div className="type-row">
@@ -244,7 +237,6 @@ export function TypesArea({
           }}
         />
       )}
-
     </div>
   );
 }
