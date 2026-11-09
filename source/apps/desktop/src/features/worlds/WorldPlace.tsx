@@ -5,6 +5,7 @@ import { api, type NetworkView, type ServerEntry, type StorageView, type WorldIn
 import { setMoving } from "../../api/changes";
 import { CloudIcon, FolderIcon, NetworkIcon, ServerIcon } from "../../shared/ui/Icons";
 import { isMobile } from "../../shared/platform";
+import { bytes } from "../../shared/Bytes";
 
 /** The folder a path lies in. */
 export const parentOf = (path: string) => path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
@@ -169,11 +170,6 @@ const STEPS: Record<string, string> = {
   moving: "moving files",
 };
 
-/** Bytes as one reads them. */
-function size(n: number): string {
-  return n < 1024 * 1024 ? `${Math.ceil(n / 1024).toLocaleString()} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
 /**
  * Moving or copying a world: into a folder here — its own, a drive's, a
  * cloud folder — or onto a server. Moved, it is there and nowhere else;
@@ -334,7 +330,7 @@ function MoveDialog({
             <small className="small">
               {progress
                 ? progress[0] === "transfer"
-                  ? `${size(progress[1])} of ${size(progress[2])}`
+                  ? `${bytes(progress[1])} of ${bytes(progress[2])}`
                   : `${STEPS[progress[0]] ?? progress[0]} ${progress[1].toLocaleString()} of ${progress[2].toLocaleString()}`
                 : copy
                   ? "Copying …"

@@ -9,6 +9,7 @@ import { VisibilityPicker } from "../../shared/ui/Visibility";
 import { useWorldData } from "../worlds/WorldData";
 import { imagesInside, navigationPlaces, sortIntoFolders } from "./Sorting";
 import { FolderTile } from "./FolderTile";
+import { bytes } from "../../shared/Bytes";
 
 /**
  * The gallery of a world, in the options: a tree of folders on the left,
@@ -483,7 +484,7 @@ function Detail({
       <WorldImage world={world.id} id={image.id} className="detail-image" />
       {image.width > 0 && (
         <small className="small">
-          {image.width} × {image.height} · {size(image.size)} · {new Date(image.uploaded).toLocaleDateString()}
+          {image.width} × {image.height} · {bytes(image.size)} · {new Date(image.uploaded).toLocaleDateString()}
         </small>
       )}
       {!image.complete && <small className="muted">Still arriving</small>}
@@ -589,9 +590,4 @@ function Detail({
       )}
     </aside>
   );
-}
-
-function size(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }

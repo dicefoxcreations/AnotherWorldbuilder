@@ -5,6 +5,7 @@ import { api, type NetworkView, type HeldWorld, type Person, type ServerOrder, t
 import { when } from "../wiki/Versions";
 import { isMobile } from "../../shared/platform";
 import { Reach, serverAddress, serverName } from "../worlds/WorldPlace";
+import { bytes } from "../../shared/Bytes";
 
 /** Whether this device is on the network at all, and which worlds it offers there. */
 export function NetworkArea({
@@ -185,12 +186,6 @@ function Servers({ view, busy, onSave, onError }: { view: NetworkView; busy: boo
       </div>
     </div>
   );
-}
-
-function bytes(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(n / 1e3))} kB`;
 }
 
 /** A server, as its admin manages it: worlds, GMs, everyone who came. */
