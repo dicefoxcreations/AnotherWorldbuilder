@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
 import { isMainWindow } from "../api/changes";
@@ -20,11 +20,11 @@ export type UpdateState =
 const KEY = "aw:updates";
 let state: UpdateState = { kind: "idle" };
 let found: Update | null = null;
-const listeners = new Set<(s: UpdateState) => void>();
+const listeners = new Set<() => void>();
 
 function set(next: UpdateState) {
   state = next;
-  for (const l of listeners) l(state);
+  for (const l of listeners) l();
 }
 
 /** Whether this device looks for updates at the start. */
@@ -58,7 +58,8 @@ export async function lookForUpdate() {
 
 /** Downloads, installs and starts the new version. */
 export async function installUpdate() {
-  if (!found) return;
+  // A second click while it loads starts nothing a second time.
+  if (!found || state.kind === "loading") return;
   const version = found.version;
   let done = 0;
   let total = 0;
@@ -75,16 +76,12 @@ export async function installUpdate() {
   }
 }
 
-export function useUpdates(): UpdateState {
-  const [now, setNow] = useState(state);
-  useEffect(() => {
-    listeners.add(setNow);
-    return () => {
-      listeners.delete(setNow);
-    };
-  }, []);
-  return now;
-}
+const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => void listeners.delete(l);
+};
+
+export const useUpdates = (): UpdateState => useSyncExternalStore(subscribe, () => state);
 
 let started = false;
 /** Once per start, in the main window, in a build that was released. */
