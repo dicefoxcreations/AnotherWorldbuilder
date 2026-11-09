@@ -369,7 +369,7 @@ fn world_info(store: &Store, meta: &WorldMeta) -> Result<WorldInfo, AppError> {
     let manages = is_gm || supporter;
     let db = store.db(&id)?;
     let network = store.load_network()?;
-    let waiting = document::waiting_in(store, &id)?.len();
+    let waiting = db.waiting_count((!is_gm).then_some(me.as_str()))?;
     Ok(WorldInfo {
         name: meta.name.clone(),
         icon: meta.icon.clone(),
@@ -392,7 +392,7 @@ fn world_info(store: &Store, meta: &WorldMeta) -> Result<WorldInfo, AppError> {
                 slot: m.slot.clone(),
             })
             .collect(),
-        article_count: db.document_ids()?.len(),
+        article_count: db.document_count()?,
         home: meta.home.clone(),
         requests: if manages { db.requests()?.len() } else { 0 },
         invited: if manages { meta.invited.clone() } else { Vec::new() },
@@ -2002,7 +2002,7 @@ pub(crate) fn trash_list_in(store: &Store, world: &str) -> Answer<Vec<TrashedVie
     let db = store.db(world)?;
     let members = db.members()?;
     let mut out: Vec<TrashedView> = db
-        .documents()?
+        .trashed_documents()?
         .into_iter()
         .filter_map(|d| {
             let t = d.trashed()?;

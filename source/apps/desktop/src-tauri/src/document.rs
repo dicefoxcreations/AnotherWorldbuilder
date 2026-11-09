@@ -2771,12 +2771,10 @@ pub(crate) mod history {
         let me = store.actor()?;
         let db = store.db(world)?;
         let mut out = Vec::new();
-        for doc in db.documents()? {
-            for v in db.versions(&doc.id)?.into_iter().filter(|v| v.review == "waiting" && (reader.is_gm() || v.author == me)) {
-                out.push(WaitingVersion { article: doc.id.clone(), name: doc.name().to_string(), session: v.session.clone(), author: author_name(store, world, &v.author), to: v.ended });
-            }
+        for v in db.waiting((!reader.is_gm()).then_some(me.as_str()))? {
+            let Some(doc) = db.document(&v.document)? else { continue };
+            out.push(WaitingVersion { article: doc.id.clone(), name: doc.name().to_string(), session: v.session, author: author_name(store, world, &v.author), to: v.ended });
         }
-        out.sort_by_key(|v| std::cmp::Reverse(v.to));
         Ok(out)
     }
 

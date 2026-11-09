@@ -253,19 +253,7 @@ impl Store {
         let db = self.db(world_id)?;
         let dir = db.dir().join(aw_store::db::MEDIA);
         let (uses, names) = self.image_uses(world_id, &reader)?;
-        let in_versions: BTreeSet<String> = if reader.is_gm() {
-            let mut all = BTreeSet::new();
-            for doc in db.document_ids()? {
-                for v in db.versions(&doc)? {
-                    for l in v.content.layers.iter().chain(&v.content.before) {
-                        all.extend(l.images.iter().cloned());
-                    }
-                }
-            }
-            all
-        } else {
-            BTreeSet::new()
-        };
+        let in_versions: BTreeSet<String> = if reader.is_gm() { db.images_in_versions()? } else { BTreeSet::new() };
         let mut out = Vec::new();
         for image in db.images()? {
             let used: Vec<UsedIn> = uses

@@ -502,6 +502,20 @@ fn layer_from(r: &rusqlite::Row, at: usize) -> rusqlite::Result<Layer> {
 }
 
 /// A member's row.
+fn version_from(r: &rusqlite::Row) -> rusqlite::Result<Version> {
+    Ok(Version {
+        document: r.get(0)?,
+        session: r.get(1)?,
+        author: r.get(2)?,
+        started: r.get(3)?,
+        ended: r.get(4)?,
+        arrived: r.get(5)?,
+        review: r.get(6)?,
+        content: from_json(&r.get::<_, String>(7)?),
+        signature: r.get(8)?,
+    })
+}
+
 fn member_from(r: &rusqlite::Row) -> rusqlite::Result<Member> {
     Ok(Member {
         id: r.get(0)?,
@@ -535,6 +549,9 @@ fn image_from(r: &rusqlite::Row) -> rusqlite::Result<Image> {
 }
 
 const MEMBER_COLUMNS: &str = "id, name, role, attributes, colour, trusted, verify_key, slot, joined";
+const VERSION_COLUMNS: &str = "document, session, author, started, ended, arrived, review, content, signature";
+/// The same, with nothing in its content.
+const VERSION_BARE: &str = "document, session, author, started, ended, arrived, review, '{}', signature";
 const IMAGE_COLUMNS: &str = "id, file, preview, name, folder, mime, width, height, size, uploaded, uploaded_by, defaults";
 
 impl WorldDb {
@@ -761,6 +778,33 @@ impl WorldDb {
     }
 
     /// Every document, whole — read in two queries, not one per document.
+    pub fn document_count(&self) -> Result<usize> {
+        let n: i64 = self.conn().query_row("SELECT COUNT(*) FROM documents", [], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
+    /// The documents in the trash, each with its layers.
+    pub fn trashed_documents(&self) -> Result<Vec<Document>> {
+        self.load(
+            "WHERE id IN (SELECT document FROM layers WHERE base = 1 AND json_extract(fields, '$.trashed') IS NOT NULL) ORDER BY created, id",
+            params![],
+        )
+    }
+
+    /// Every picture some version of a document holds — what was there once.
+    pub fn images_in_versions(&self) -> Result<BTreeSet<String>> {
+        let conn = self.conn();
+        let mut q = conn.prepare("SELECT content FROM versions")?;
+        let mut all = BTreeSet::new();
+        for content in q.query_map([], |r| r.get::<_, String>(0))? {
+            let content: VersionContent = from_json(&content?);
+            for layer in content.layers.iter().chain(&content.before) {
+                all.extend(layer.images.iter().cloned());
+            }
+        }
+        Ok(all)
+    }
+
     pub fn documents(&self) -> Result<Vec<Document>> {
         self.load("ORDER BY created, id", params![])
     }
@@ -1125,21 +1169,27 @@ impl WorldDb {
     /// A document's versions, newest last.
     pub fn versions(&self, document: &str) -> Result<Vec<Version>> {
         let conn = self.conn();
-        let mut q = conn.prepare("SELECT document, session, author, started, ended, arrived, review, content, signature FROM versions WHERE document = ?1 ORDER BY ended, id")?;
-        let rows = q.query_map([document], |r| {
-            Ok(Version {
-                document: r.get(0)?,
-                session: r.get(1)?,
-                author: r.get(2)?,
-                started: r.get(3)?,
-                ended: r.get(4)?,
-                arrived: r.get(5)?,
-                review: r.get(6)?,
-                content: from_json(&r.get::<_, String>(7)?),
-                signature: r.get(8)?,
-            })
-        })?;
+        let mut q = conn.prepare(&format!("SELECT {VERSION_COLUMNS} FROM versions WHERE document = ?1 ORDER BY ended, id"))?;
+        let rows = q.query_map([document], version_from)?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The versions waiting for the game master, in every document — those
+    /// of `author` alone, or everyone's. Without what they hold: asked for
+    /// a list and a count, not to be read.
+    pub fn waiting(&self, author: Option<&str>) -> Result<Vec<Version>> {
+        let conn = self.conn();
+        let mut q = conn.prepare(&format!(
+            "SELECT {VERSION_BARE} FROM versions WHERE review = 'waiting' AND (?1 IS NULL OR author = ?1) ORDER BY ended DESC, id"
+        ))?;
+        let rows = q.query_map([author], version_from)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// How many versions wait for the game master — `author`'s, or everyone's.
+    pub fn waiting_count(&self, author: Option<&str>) -> Result<usize> {
+        let n: i64 = self.conn().query_row("SELECT COUNT(*) FROM versions WHERE review = 'waiting' AND (?1 IS NULL OR author = ?1)", [author], |r| r.get(0))?;
+        Ok(n as usize)
     }
 
     /// One version goes.
