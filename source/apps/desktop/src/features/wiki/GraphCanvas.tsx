@@ -99,8 +99,8 @@ export function Canvas({
   const frame = useRef<HTMLDivElement>(null);
   useMiddleDrag(frame);
   useWheelZoom(frame, svg, onZoom);
-  const arrow = `arrow-${useId().replace(/:/g, "")}`;
-  const grid = `grid-${useId().replace(/:/g, "")}`;
+  const arrow = `arrow-${useId().replace(/[^\w-]/g, "")}`;
+  const grid = `grid-${useId().replace(/[^\w-]/g, "")}`;
   const [drag, setDrag] = useState<Drag | null>(null);
 
   // While a card is moved it stands where the pointer is, on the grid.
@@ -643,7 +643,8 @@ function Pill({ at, text, onGrab }: { at: Point; text: string; onGrab?: (e: Reac
  */
 function Portrait({ article, name }: { article: ArticleView | undefined; name: string }) {
   const data = useWorldData();
-  const clip = useId();
+  // As the canvas's own: React's ids hold signs a `url(#…)` need not take.
+  const clip = `portrait-${useId().replace(/[^\w-]/g, "")}`;
   const field = article && data ? typeOf(data.templates, article.articleType)?.properties.find((f) => f.kind === "image") : undefined;
   const value = article && field ? propertyValues(article)[field.key] : undefined;
   const id = typeof value === "string" && value.startsWith("img:") ? value : null;
@@ -684,7 +685,11 @@ const initials = (name: string) =>
         .split(/\s+/)
         .filter(Boolean)
         .slice(0, 2)
-        .map((w) => w[0]!.toUpperCase())
+        .map((w) => [...w][0]!.toUpperCase())
         .join("");
 
-export const short = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+/** A name cut to `max` signs — whole ones, never half an emoji. */
+export const short = (text: string, max: number) => {
+  const signs = [...text];
+  return signs.length > max ? `${signs.slice(0, max - 1).join("")}…` : text;
+};
