@@ -1866,6 +1866,7 @@ input.invalid { border-color: var(--danger-line); }
 .dice-entry.mine { border-color: var(--accent-line); }
 .dice-what { display: flex; flex-direction: column; min-width: 0; }
 .dice-who { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dice-secret { display: inline-flex; vertical-align: -2px; margin-left: 4px; }
 .dice-label { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dice-detail { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .dice-total { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }

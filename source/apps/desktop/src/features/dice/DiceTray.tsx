@@ -235,7 +235,7 @@ export function DiceTray({ world, children }: { world: WorldInfo; children: Reac
           problem={problem}
           onEveryone={toggleEveryone}
           onRoll={(formula, label) => roll({ document: "", label, formula, lookup: plain, secret: false })}
-          onFavorites={(favorites) => api.diceFavoritesSet(world.id, favorites).then(setLog).catch(() => {})}
+          onFavorites={(favorites) => api.diceFavoritesSet(world.id, favorites).then(setLog).catch((e) => setProblem(String(e)))}
           onClear={() => api.diceLogClear(world.id).then(setLog).catch((e) => setProblem(String(e)))}
           onClose={() => setOpen(false)}
           mine={(r) => r.member === undefined || r.member === me.current}
@@ -402,7 +402,11 @@ function RollLine({ entry: e, mine }: { entry: SharedRoll; mine: boolean }) {
       <span className="dice-what">
         <span className="dice-who">
           {mine ? "You" : e.name || "?"}
-          {e.secret && " 🔒"}
+          {e.secret && (
+            <span className="dice-secret" title="Only you">
+              <Icon name="lock" size={12} />
+            </span>
+          )}
           {e.document && ` · ${e.document}`}
         </span>
         {e.label && <span className="dice-label">{e.label}</span>}
