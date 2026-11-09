@@ -103,7 +103,6 @@ export function VersionsPanel({
                       <Icon name="warning" /> overlaps
                     </small>
                   )}
-                  {v.stale && <small className="overlap">not in the text yet</small>}
                   {v.review === "waiting" && <small className="waiting">waits for review</small>}
                   {v.review === "rejected" && <small className="rejected">turned down</small>}
                 </button>
@@ -119,7 +118,7 @@ export function VersionsPanel({
                         </button>
                       </>
                     )}
-                    {mayRevert && !v.stale && v.review === "counted" && (
+                    {mayRevert && v.review === "counted" && (
                       <button
                         className="compact"
                         onClick={() => onRevert(v.session)}

@@ -689,8 +689,6 @@ export type Version = {
   parts: string[];
   /** Changed who sees or edits a part, added or removed one. */
   structure: boolean;
-  /** Written while the part's access changed and not carried over — in the history, not in the text. */
-  stale: boolean;
   /** Versions by others, written at the same time on the same lines. */
   overlaps: string[];
   /** In the text, waiting for the GM, or turned down. */

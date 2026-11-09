@@ -330,7 +330,6 @@ export const api = {
       arrived: v.arrived,
       parts: v.parts,
       structure: v.structure,
-      stale: v.stale,
       overlaps: v.overlaps,
       review: v.review,
       removable: !!v.removable,

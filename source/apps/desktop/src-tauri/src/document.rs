@@ -2458,7 +2458,6 @@ pub(crate) mod history {
         pub parts: Vec<String>,
         /// Changed who sees or edits a part, added or removed one.
         pub structure: bool,
-        pub stale: bool,
         /// Versions by others, written at the same time on the same parts.
         pub overlaps: Vec<String>,
         /// `counted`, `waiting` or `rejected`.
@@ -2551,7 +2550,6 @@ pub(crate) mod history {
                     arrived: v.arrived,
                     parts,
                     structure,
-                    stale: false,
                     overlaps,
                     review: v.review.clone(),
                     removable: reader.is_gm() && v.review == "counted" && newest.as_deref() != Some(v.session.as_str()),

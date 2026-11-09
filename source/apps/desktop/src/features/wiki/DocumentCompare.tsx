@@ -129,7 +129,7 @@ export function useNews(world: string, article: string, revision: unknown) {
       // Without storage the note simply comes again.
     }
   };
-  const items = versions.filter((v) => v.stale || v.review === "waiting" || (late(v) && v.arrived > seenUntil));
+  const items = versions.filter((v) => v.review === "waiting" || (late(v) && v.arrived > seenUntil));
   return {
     items,
     seen: (v: Version) => remember(Math.max(seenUntil, v.arrived)),
