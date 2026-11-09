@@ -1251,8 +1251,9 @@ fn world_icon_set(app: tauri::AppHandle, world: String, icon: String) -> Answer<
 pub(crate) fn world_icon_set_in(store: &Store, world: String, icon: String) -> Answer<WorldInfo> {
     must_be_gm(store, &world, "sets the world's icon")?;
     let mut meta = store.load_world_meta(&world)?;
-    // A few characters are enough for any emoji including variation selectors.
-    meta.icon = icon.chars().take(4).collect();
+    // One sign as one sees it may be several characters — 🧑‍🚀 is three, a
+    // family more: room for any, not for a text.
+    meta.icon = icon.chars().take(16).collect();
     store.save_world_meta(&meta)?;
     world_info(store, &meta)
 }

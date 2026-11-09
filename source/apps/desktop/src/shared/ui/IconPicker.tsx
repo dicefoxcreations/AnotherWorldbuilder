@@ -11,6 +11,15 @@ import { useEffect, useRef, useState } from "react";
 
 type Group = { name: string; chars: string[] };
 
+/**
+ * The first sign of a text as one sees it — an emoji made of several, a
+ * skin tone or 🧑‍🚀, whole.
+ */
+const firstSign = (text: string) => {
+  const first = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text.trim())[Symbol.iterator]().next();
+  return first.done ? "" : first.value.segment;
+};
+
 export const COLLECTION: Group[] = [
   {
     name: "Worlds",
@@ -106,7 +115,7 @@ export function IconPicker({
               Your own character
               <input
                 value={value}
-                onChange={(e) => onChange([...e.target.value].slice(0, 2).join(""))}
+                onChange={(e) => onChange(firstSign(e.target.value))}
                 placeholder="⚗️"
               />
             </label>

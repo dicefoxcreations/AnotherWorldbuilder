@@ -16,8 +16,8 @@ function monthStart(calendar: WorldCalendar, day: number): number {
 
 /**
  * One month of the world's calendar: its days under their weekdays, the
- * moons as they stand each day, and what happened on it. ‹ › go a month
- * back and on — across years and eras.
+ * moons as they stand each day, and what happened on it. The arrows go a
+ * month back and on — across years and eras.
  */
 export function MonthGrid({
   calendar,
