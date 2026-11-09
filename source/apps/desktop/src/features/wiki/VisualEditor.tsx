@@ -454,7 +454,7 @@ export function VisualEditor({
                 world={world}
                 part={part}
                 title={block.title}
-                inherited={part.view === base}
+                inherited={samePolicy(part.view, base)}
                 sections={sectionActions}
                 docAccess={doc.access}
                 region={
@@ -534,7 +534,7 @@ export function VisualEditor({
       {propsOpen && (
         <section className="properties">
           <button className="fold ghost compact" onClick={() => onPropsOpen(false)} aria-expanded>
-            ▾ Properties <small className="small">{doc.properties.length}</small>
+            <Icon name="chevron-down" /> Properties <small className="small">{doc.properties.length}</small>
           </button>
           {doc.properties.length === 0 && <p className="small muted">None yet.</p>}
           <dl>
