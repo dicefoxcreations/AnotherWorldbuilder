@@ -73,7 +73,8 @@ export function PartEditor({
   const guarded = !!region;
   // The part is one field: its text, with the images and graphs standing in
   // it — as surfaces, where the text runs past them as it does when read.
-  const shown = graphPieces(part.text);
+  // Cut once per text — not again when only someone's caret moved.
+  const shown = useMemo(() => graphPieces(part.text), [part.text]);
   const images = shown.filter((p) => p.kind === "image");
   // A part that holds nothing but one image, with access of its own: the
   // others see its stand-in.
@@ -89,8 +90,7 @@ export function PartEditor({
           ? p.text.split(/\n[ \t]*\n/).map((t) => ({ text: t.replace(/^\n+|\n+$/g, ""), piece: -1 })).filter((u) => u.text.trim())
           : [{ text: p.text.replace(/^\n+|\n+$/g, ""), piece: j }],
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [part.text],
+    [shown],
   );
   /** Element `i` past the paragraph or element above (-1) or below (1). */
   const moves = (i: number) => {
@@ -341,7 +341,6 @@ function PartFlow({
     </>
   );
 }
-
 
 /** Whether this reader may edit a part of the document — then, not being the GM, they say who sees it. */
 export function mayEditPart(article: ArticleView, key: string): boolean {

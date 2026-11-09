@@ -304,9 +304,21 @@ export function picksAlong(templates: Template[], articles: ArticleView[], artic
 
 /**
  * The property values of a document with every number summed up — what
- * reading shows. Keys as stored.
+ * reading shows. Keys as stored. Worked out once per document and list of
+ * documents: a table asks it for every cell. Read, never changed.
  */
-export function summedValues(templates: Template[], articles: ArticleView[], article: ArticleView): Record<string, unknown> {
+export function summedValues(templates: Template[], articles: ArticleView[], article: ArticleView): Readonly<Record<string, unknown>> {
+  const known = summedKnown(articles, templates);
+  let values = known.get(article);
+  if (!values) {
+    values = summed(templates, articles, article);
+    known.set(article, values);
+  }
+  return values;
+}
+const summedKnown = perLists((_a: ArticleView[], _t: Template[]) => new WeakMap<ArticleView, Record<string, unknown>>());
+
+function summed(templates: Template[], articles: ArticleView[], article: ArticleView): Record<string, unknown> {
   const values = { ...propertyValues(article) };
   const type = typeOf(templates, article.articleType);
   // `Next: @@Session log@@ from Previous` — what points here, never stored.
@@ -332,6 +344,7 @@ export function summedValues(templates: Template[], articles: ArticleView[], art
  * index made once per list: `(Session log, Previous)` gives each session the
  * one whose Previous it is.
  */
+const numeric = new Intl.Collator(undefined, { numeric: true }).compare;
 const pointingAt = perLists((articles: ArticleView[], templates: Template[]) => {
   const made = new Map<string, Map<string, string[]>>();
   return (of: string, property: string): Map<string, string[]> => {
@@ -339,7 +352,7 @@ const pointingAt = perLists((articles: ArticleView[], templates: Template[]) => 
     let index = made.get(key);
     if (index) return index;
     index = new Map();
-    for (const a of [...articles].sort((x, y) => x.name.localeCompare(y.name, undefined, { numeric: true }))) {
+    for (const a of [...articles].sort((x, y) => numeric(x.name, y.name))) {
       if (of && !isA(templates, a.articleType, of)) continue;
       const field = propertyNamed(typeOf(templates, a.articleType), property);
       if (!field) continue;

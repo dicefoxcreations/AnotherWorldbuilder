@@ -62,17 +62,17 @@ export function PlaceIcon({ place }: { place: WorldPlace }) {
 export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onChanged: () => void; onError: (e: unknown) => void }) {
   const [storage, setStorage] = useState<StorageView | null>(null);
   const [network, setNetwork] = useState<NetworkView | null>(null);
-  const [moving, setMoving] = useState(false);
+  // The move dialog open — not to be mistaken for `changes.setMoving`, which closes the world while it moves.
+  const [dialog, setDialog] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    const look = () =>
-      Promise.all([api.storageStatus(), api.networkSettings()])
-        .then(([s, n]) => {
-          setStorage(s);
-          setNetwork(n);
-        })
-        .catch(onError);
-    look();
+    Promise.all([api.storageStatus(), api.networkSettings()])
+      .then(([s, n]) => {
+        setStorage(s);
+        setNetwork(n);
+      })
+      .catch(onError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [world.id]);
   if (!network) return null;
   const servers = network.server_list;
@@ -105,7 +105,7 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
           </small>
         </span>
         {world.isGm && (
-          <button disabled={busy} onClick={() => setMoving(true)}>
+          <button disabled={busy} onClick={() => setDialog(true)}>
             Move or copy …
           </button>
         )}
@@ -125,8 +125,8 @@ export function PlaceArea({ world, onChanged, onError }: { world: WorldInfo; onC
       {world.isGm && (world.online || world.offered) && (
         <Listed world={world} where={world.online ? "on the server" : "on the network"} onChanged={onChanged} onError={onError} />
       )}
-      {moving && storage && (
-        <MoveDialog world={world} place={place} storage={storage} servers={servers} onStorage={setStorage} onDone={onChanged} onClose={() => setMoving(false)} onError={onError} />
+      {dialog && storage && (
+        <MoveDialog world={world} place={place} storage={storage} servers={servers} onStorage={setStorage} onDone={onChanged} onClose={() => setDialog(false)} onError={onError} />
       )}
     </div>
   );
