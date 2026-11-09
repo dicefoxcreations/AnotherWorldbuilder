@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, type FolderNode, type GalleryImage } from "../../api/client";
 import { WorldImage } from "./WorldImage";
@@ -93,22 +93,32 @@ export function ImagePicker({
   };
 
   const needle = search.trim().toLowerCase();
-  const known = new Set(folders.map((f) => f.id));
+  const known = useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
   const folderOf = (i: GalleryImage) => (known.has(i.folder) ? i.folder : "");
+  // How many images each folder holds with those inside it — counted once,
+  // not again for every folder on every key pressed.
+  const inside = useMemo(() => {
+    const own = new Map<string, number>();
+    for (const i of images ?? []) if (known.has(i.folder)) own.set(i.folder, (own.get(i.folder) ?? 0) + 1);
+    const children = new Map<string, string[]>();
+    for (const f of folders) children.set(f.parent, [...(children.get(f.parent) ?? []), f.id]);
+    const total = new Map<string, number>();
+    const count = (id: string, seen: Set<string>): number => {
+      if (seen.has(id)) return 0;
+      seen.add(id);
+      let n = own.get(id) ?? 0;
+      for (const c of children.get(id) ?? []) n += total.get(c) ?? count(c, seen);
+      total.set(id, n);
+      return n;
+    };
+    return (id: string) => total.get(id) ?? count(id, new Set());
+  }, [folders, images, known]);
   // In folders only for whoever has them, and not while searching.
   const browsing = folders.length > 0 && !needle;
   const shown = (images ?? []).filter((i) => (needle ? i.name.toLowerCase().includes(needle) : !browsing || folderOf(i) === at));
   const subfolders = browsing ? folders.filter((f) => f.parent === at).sort((a, b) => a.name.localeCompare(b.name)) : [];
   const trail: FolderNode[] = [];
   for (let f = folders.find((x) => x.id === at); f && trail.length < 32; f = folders.find((x) => x.id === f!.parent)) trail.unshift(f);
-  const inside = (id: string) => {
-    const set = new Set([id]);
-    for (let grew = true; grew; ) {
-      grew = false;
-      for (const f of folders) if (set.has(f.parent) && !set.has(f.id)) (set.add(f.id), (grew = true));
-    }
-    return (images ?? []).filter((i) => set.has(folderOf(i))).length;
-  };
 
   return (
     <div className="dialog-backdrop" onClick={onCancel}>
