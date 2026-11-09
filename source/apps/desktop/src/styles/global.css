@@ -1657,7 +1657,7 @@ fieldset.then textarea, fieldset.then input, fieldset.then select { opacity: 1; 
 .fold-head { display: flex; align-items: center; gap: 6px; }
 .fold-toggle { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; text-align: left; background: transparent; border: 0; border-radius: 10px; padding: 12px 14px; }
 .fold-toggle:hover:not(:disabled) { background: var(--hover); }
-.fold-chevron { display: inline-block; width: 12px; color: var(--muted); transition: transform .15s; flex: none; }
+.fold-chevron { display: inline-flex; width: 14px; color: var(--muted); transition: transform .15s; flex: none; }
 .foldout.open > .fold-head .fold-chevron { transform: rotate(90deg); }
 .fold-title { font-weight: 600; white-space: nowrap; }
 .foldout.level-1 > .fold-head .fold-title { font-size: 15px; }

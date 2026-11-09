@@ -8,8 +8,8 @@ import { useWorldData } from "../worlds/WorldData";
  * `<create type="Event, Session log" label="New event">`: a button that
  * makes a new document of its type — of several, a click asks which. Only
  * the types this member may make (`mayCreate`): the GM all, a player those
- * whose `create=` lets them — their documents the GM's device makes. Not
- * while previewing. While writing (`still`) it is shown, not pressed.
+ * whose `create=` lets them, made at once with the type's access. Not while
+ * previewing. While writing (`still`) it is shown, not pressed.
  */
 export function CreateButton({ of, label, still, small }: { of: string[]; label: string; still?: boolean; small?: boolean }) {
   const data = useWorldData();

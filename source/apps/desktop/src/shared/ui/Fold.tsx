@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Icon } from "./Icons";
 
 /**
  * A section that folds: its head always there — a title, and in one line
@@ -27,7 +28,7 @@ export function Fold({
       <div className="fold-head">
         <button className="fold-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
           <span className="fold-chevron" aria-hidden>
-            ›
+            <Icon name="chevron-right" size={14} />
           </span>
           <span className="fold-title">{title}</span>
           {summary && <span className="fold-summary">{summary}</span>}

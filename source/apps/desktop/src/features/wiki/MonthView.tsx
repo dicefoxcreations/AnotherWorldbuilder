@@ -4,6 +4,7 @@ import { formatMoment, monthDays, splitMoment, toDay, toYmd, weekdayOf, yearText
 import { MoonsOf } from "../../shared/ui/MoonPhase";
 import { CurrentDocument, useWorldData } from "../worlds/WorldData";
 import { datedEntries, hueOf, type Entry } from "./Timeline";
+import { Icon } from "../../shared/ui/Icons";
 
 type CalendarNode = Extract<Node, { kind: "calendar" }>;
 
@@ -48,13 +49,13 @@ export function MonthGrid({
     <div className="month-view">
       <div className="month-head">
         <button className="compact ghost" title="Month before" onClick={() => setShown(monthStart(calendar, first - 1))}>
-          ‹
+          <Icon name="left" />
         </button>
         <strong>
           {era.months[month - 1]?.name} {yearText(era, year)}
         </strong>
         <button className="compact ghost" title="Month after" onClick={() => setShown(first + length)}>
-          ›
+          <Icon name="right" />
         </button>
       </div>
       <div className="month-grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, weekdays.length || 7)}, minmax(0, 1fr))` }}>

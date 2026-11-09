@@ -312,7 +312,7 @@ function ServerUsers({ state, busy, order }: { state: ServerState; busy: boolean
           ) : (
             !isAdmin(p.id) && (
               <>
-                <button className="compact" disabled={busy} title="Give a role" onClick={() => setAdding(p.id)}>+</button>
+                <button className="compact" disabled={busy} title="Give a role" onClick={() => setAdding(p.id)}><Icon name="add" /></button>
                 <button className="compact" disabled={busy} onClick={() => setKicking(p.id)}>Kick</button>
               </>
             )

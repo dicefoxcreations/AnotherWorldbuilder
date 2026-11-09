@@ -113,7 +113,7 @@ export function SavedRolls({ world, onError }: { world: WorldInfo; onError: (e: 
         <span className="world-dice-add">
           <input className="saved-roll-own" value={line} placeholder="Fireball: 8d6" onChange={(e) => setLine(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
           <button className="compact" title="Save this roll" disabled={!formula || !!problem} onClick={add}>
-            +
+            <Icon name="add" />
           </button>
         </span>
       </div>

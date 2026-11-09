@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, type WorldInfo } from "../../api/client";
 import { USUAL_DICE } from "../dice/DiceTray";
+import { Icon } from "../../shared/ui/Icons";
 
 /** The dice that can be rolled here, one or more polyhedral, or pool systems' d6 alone. */
 const OFFERED = [2, 3, 4, 6, 8, 10, 12, 20, 100];
@@ -36,7 +37,7 @@ export function WorldDice({ world, onChanged, onError }: { world: WorldInfo; onC
         <span className="world-dice-add">
           <input className="world-dice-own" value={own} placeholder="d7" onChange={(e) => setOwn(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} />
           <button className="compact" title="Add this die" disabled={!sides} onClick={add}>
-            +
+            <Icon name="add" />
           </button>
         </span>
       </div>
