@@ -256,7 +256,9 @@ impl FromStr for Policy {
 
 /// Splits at a keyword, case-insensitively.
 fn split_keyword(text: &str, keyword: &str) -> Vec<String> {
-    let upper = text.to_uppercase();
+    // ASCII only: every position in `upper` is one in `text` — a letter that
+    // shrinks or grows in capitals (`ı` → `I`) would cut it mid-letter.
+    let upper = text.to_ascii_uppercase();
     let mut parts = Vec::new();
     let mut rest_start = 0usize;
     let mut search_from = 0usize;

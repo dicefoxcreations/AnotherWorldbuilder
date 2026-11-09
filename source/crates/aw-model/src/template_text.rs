@@ -1588,16 +1588,9 @@ fn dedented(body: &[String]) -> String {
             .map(|z| z.len() - z.trim_start().len())
             .min()
             .unwrap_or(0);
-        let text: Vec<String> = lines
-            .iter()
-            .map(|z| {
-                if z.len() >= depth {
-                    z[depth..].to_string()
-                } else {
-                    z.trim().to_string()
-                }
-            })
-            .collect();
+        // Counted in bytes: where the indent ends inside a wide space — a
+        // no-break space, say — that line loses its indent whole instead.
+        let text: Vec<String> = lines.iter().map(|z| z.get(depth..).unwrap_or_else(|| z.trim_start()).to_string()).collect();
         text.join("\n").trim().to_string()
     }
 }
