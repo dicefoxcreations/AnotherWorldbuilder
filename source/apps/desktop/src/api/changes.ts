@@ -13,7 +13,6 @@ import { emit, listen } from "@tauri-apps/api/event";
 /** Commands that only read — nothing to tell. */
 const READS = new Set([
   "article_versions",
-  "dev_tools",
   "document_open",
   "document_read",
   "gallery",
@@ -48,10 +47,8 @@ const READS = new Set([
   "view_texts",
   "waiting_versions",
   "window_open",
-  "world_open",
   "world_connect",
   "world_disconnect",
-  "world_token_check",
   "worlds_list",
 ]);
 
