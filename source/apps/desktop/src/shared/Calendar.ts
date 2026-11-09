@@ -194,14 +194,14 @@ export function parseMoment(c: WorldCalendar, text: string): number | null {
   return day === null ? null : momentOf(day, minutes);
 }
 
+/** The moons over a day: those of its era. */
+export const moonsAt = (c: WorldCalendar, day: number): Moon[] => c.eras[eraIndexAt(c, day)]?.moons ?? [];
+
 /**
  * How far a moon is through its round on a day: 0 new, ½ full. Its round
  * starts half a period before a day it stood full.
  */
-/** The moons over a day: those of its era. */
-export const moonsAt = (c: WorldCalendar, day: number): Moon[] => c.eras[eraIndexAt(c, day)]?.moons ?? [];
-
 export const moonAge = (moon: Moon, day: number) => mod((day - moon.full) / moon.period + 0.5, 1);
 
 /** The latest of these moments — where the story stands. */
-export const latest = (moments: number[]) => (moments.length ? Math.max(...moments) : null);
+export const latest = (moments: number[]) => (moments.length ? moments.reduce((a, b) => (b > a ? b : a)) : null);

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { api, type ArticleView, type PackageSummary, type Template, type WorldInfo } from "../../api/client";
-import { ancestors, isA, realTypes } from "../../shared/types";
+import { ancestors, findType, realTypes } from "../../shared/types";
 
 /**
  * Types and documents from one world into another — the GM's. A package is
@@ -58,8 +58,18 @@ function ExportPart({ world, templates, articles, onError }: { world: WorldInfo;
       if (!now.delete(id)) now.add(id);
       return now;
     });
-  const tree = inTree(templates);
-  const count = (id: string) => articles.filter((a) => isA(templates, a.articleType, id)).length;
+  const tree = useMemo(() => inTree(templates), [templates]);
+  // How many documents each type holds with its subtypes — counted once, not
+  // over every document for every type as the name is typed.
+  const counts = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const a of articles) {
+      const t = findType(templates, a.articleType);
+      for (const id of [a.articleType, ...(t ? ancestors(templates, t).map((x) => x.id) : [])]) out.set(id, (out.get(id) ?? 0) + 1);
+    }
+    return out;
+  }, [articles, templates]);
+  const count = (id: string) => counts.get(id) ?? 0;
 
   const run = async () => {
     const parent = await open({ directory: true, title: "Where the package goes" });
@@ -172,7 +182,7 @@ function ImportPart({ world, onImported, onError }: { world: WorldInfo; onImport
         <button onClick={() => void pick()} disabled={!!progress}>
           From package
         </button>
-        {seen && <strong>{seen.name || path?.split("/").pop()}</strong>}
+        {seen && <strong>{seen.name || path?.split(/[\\/]/).pop()}</strong>}
       </div>
       {seen && (
         <>
