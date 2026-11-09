@@ -18,7 +18,6 @@ export function anchoredPart(spot: Element): Element | null {
   return spot.closest(".markdown-table") ?? spot.closest("table") ?? spot.closest("li, p, h1, h2, h3, h4, h5, h6") ?? spot.parentElement;
 }
 
-
 /**
  * What an anchor stands for in `root`: its part — or, where the same anchor
  * closes two blocks, every block from the first to the last.
@@ -149,14 +148,19 @@ export function anchorsIn(text: string): { anchor: string; line: string }[] {
   return out;
 }
 
-/** Where a block of Markdown ends that holds line `i`: a table, a list item, a heading, a paragraph. */
+/** What a line of Markdown is part of: a table, a list item, a heading, a tag, a paragraph — or nothing. */
+const kindOf = (l: string) =>
+  /^\s*\|/.test(l) ? "table" : /^\s*([-*+]|\d{1,9}[.)])\s/.test(l) ? "item" : /^#{1,6}\s/.test(l) ? "heading" : l.trim() === "" ? "empty" : /^\s*</.test(l) ? "tag" : "text";
+
+/** A line that is a block by itself; a table's rows and a paragraph's lines run on. */
+const alone = (kind: string) => kind === "item" || kind === "heading" || kind === "tag" || kind === "empty";
+
+/** Where a block of Markdown ends that holds line `i`. */
 function blockEnd(lines: string[], i: number): number {
-  const kind = (l: string) =>
-    /^\s*\|/.test(l) ? "table" : /^\s*([-*+]|\d{1,9}[.)])\s/.test(l) ? "item" : /^#{1,6}\s/.test(l) ? "heading" : l.trim() === "" ? "empty" : /^\s*</.test(l) ? "tag" : "text";
-  const first = kind(lines[i]);
-  if (first === "item" || first === "heading" || first === "tag" || first === "empty") return i;
+  const first = kindOf(lines[i]);
+  if (alone(first)) return i;
   let j = i;
-  while (j + 1 < lines.length && kind(lines[j + 1]) === first) j++;
+  while (j + 1 < lines.length && kindOf(lines[j + 1]) === first) j++;
   return j;
 }
 
@@ -192,12 +196,10 @@ const escaped = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Where a block of Markdown begins that holds line `i` — see `blockEnd`. */
 function blockStart(lines: string[], i: number): number {
-  const kind = (l: string) =>
-    /^\s*\|/.test(l) ? "table" : /^\s*([-*+]|\d{1,9}[.)])\s/.test(l) ? "item" : /^#{1,6}\s/.test(l) ? "heading" : l.trim() === "" ? "empty" : /^\s*</.test(l) ? "tag" : "text";
-  const first = kind(lines[i]);
-  if (first === "item" || first === "heading" || first === "tag" || first === "empty") return i;
+  const first = kindOf(lines[i]);
+  if (alone(first)) return i;
   let j = i;
-  while (j > 0 && kind(lines[j - 1]) === first) j--;
+  while (j > 0 && kindOf(lines[j - 1]) === first) j--;
   return j;
 }
 
