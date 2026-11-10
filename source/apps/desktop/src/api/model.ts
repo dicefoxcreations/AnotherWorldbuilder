@@ -77,7 +77,6 @@ export type WorldInfo = {
   mailboxes: string;
 };
 
-/** What this device does on the local network. */
 /** The door for browser extensions (`browser.rs`). */
 export type BrowserView = {
   enabled: boolean;
@@ -86,6 +85,7 @@ export type BrowserView = {
   problem: string | null;
 };
 
+/** What this device does on the network. */
 export type NetworkView = {
   enabled: boolean;
   /** Direct over the internet, met through the shared folder. */
@@ -154,11 +154,12 @@ export type StorageView = {
 
 /** One folder for both, or each on its own. */
 export type StorageChoice = { base: string } | { profile: string; worlds: string; additional?: string[] };
-/** What a server holds of a GM's world, measured against this device. */
-/** How often a world backs itself up, how many backups stay, where (empty: beside the worlds). */
+/** Where a world's backups go — empty: beside the worlds. */
 export type BackupPlan = { folder: string };
-/** How the server a world lives on backs it up by itself. */
-/** `at`: minutes after midnight, `day`: 0 Monday … 6 Sunday (weekly) — both UTC, as the server keeps time. */
+/**
+ * How the server a world lives on backs it up by itself. `at`: minutes after
+ * midnight, `day`: 0 Monday … 6 Sunday (weekly) — both UTC, as the server keeps time.
+ */
 export type ServerBackupPlan = { every: "off" | "daily" | "weekly"; keep: number; at: number; day: number };
 /** `now`: the server's clock when it answered — 0 from a server that does not tell. */
 export type ServerBackups = { plan: ServerBackupPlan; count: number; last: number; now: number };
@@ -258,8 +259,6 @@ export type NewLayer = {
   section: string;
   /** Who may change this part. */
   edit: string;
-  /** Index of the enclosing part in the same list. */
-  parent: number | null;
 };
 
 // --- Templates ---------------------------------------------------------

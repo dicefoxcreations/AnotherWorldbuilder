@@ -203,33 +203,6 @@ impl Policy {
     pub fn satisfied_by(&self, held: &BTreeSet<Attribute>) -> bool {
         self.0.iter().any(|g| g.satisfied_by(held))
     }
-
-    /// Combines two policies with AND.
-    ///
-    /// Needed for nested sections: an inner box is only visible when the
-    /// outer one is visible too. Without this combination the inner one could
-    /// be opened while the outer stays shut.
-    ///
-    /// In disjunctive normal form that means: merge every group of one with
-    /// every group of the other.
-    pub fn and(&self, other: &Policy) -> Policy {
-        let mut groups = Vec::with_capacity(self.0.len() * other.0.len());
-        for left in &self.0 {
-            for right in &other.0 {
-                let merged = left
-                    .attributes()
-                    .iter()
-                    .chain(right.attributes())
-                    .cloned();
-                if let Ok(group) = Conjunction::new(merged) {
-                    groups.push(group);
-                }
-            }
-        }
-        Policy::new(groups).unwrap_or_else(|_| self.clone())
-    }
-
-
 }
 
 impl FromStr for Policy {

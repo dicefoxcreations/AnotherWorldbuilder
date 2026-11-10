@@ -416,7 +416,6 @@ export function layersFor(
       fields: common,
       section: PROPERTIES,
       edit: box?.edit ?? template.auth?.edit ?? "gm",
-      parent: null,
     });
   }
   for (const field of own) {
@@ -427,7 +426,6 @@ export function layersFor(
       fields: { [field.key]: values[field.key] },
       section: `${PROPERTIES}:${field.key}`,
       edit: field.access!.edit,
-      parent: null,
     });
   }
   for (const block of template.blocks) {
@@ -439,8 +437,7 @@ export function layersFor(
         fields: {},
         section: part.key,
         edit: part.edit,
-        parent: null,
-      });
+        });
     }
   }
   return layers;

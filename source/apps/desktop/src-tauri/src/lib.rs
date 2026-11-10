@@ -207,38 +207,12 @@ pub struct NewLayer {
     pub edit: String,
     #[serde(default)]
     pub fields: serde_json::Value,
-    /// Index of the enclosing section in the same list, if there is one.
-    /// Must be smaller than its own index.
-    #[serde(default)]
-    pub parent: Option<usize>,
 }
 
-/// Combines the visibility of every section with that of its parents.
-///
-/// A section inside a section is only visible when the outer one is visible
-/// too. Without this combination a player could open the inner box while the
-/// outer one stays shut for them — the nesting would then be mere looks and
-/// no boundary.
-///
-/// The computation lives here and not in the frontend: it decides who can
-/// read something.
+/// Who may see each new part, read — a rule that cannot be read is none to keep.
+/// Parts stand side by side: each says its own, nothing encloses another.
 fn effective_policies(inputs: &[NewLayer]) -> Result<Vec<Policy>, AppError> {
-    let mut effective: Vec<Policy> = Vec::with_capacity(inputs.len());
-
-    for (index, input) in inputs.iter().enumerate() {
-        let own: Policy = input.policy.parse().map_err(AppError::from)?;
-        let policy = match input.parent {
-            None => own,
-            Some(parent) if parent < index => own.and(&effective[parent]),
-            Some(parent) => {
-                return Err(AppError(format!(
-                    "Part {index} points at {parent} — the outer part has to come first."
-                )))
-            }
-        };
-        effective.push(policy);
-    }
-    Ok(effective)
+    inputs.iter().map(|input| input.policy.parse().map_err(AppError::from)).collect()
 }
 
 // --- Helpers ------------------------------------------------------------
@@ -807,7 +781,6 @@ fn create_page(store: &Store, world: &str, slug: &str, name: &str, text: String)
             section: aw_model::template_text::new_id(),
             edit: "gm".into(),
             fields: serde_json::Value::Null,
-            parent: None,
         }],
     )
 }
@@ -1612,7 +1585,6 @@ pub(crate) fn propose_document(store: &Store, world: &str, article_type: String,
                 (layer.policy, layer.edit, layer.title) = (part.view.clone(), part.edit.clone(), block.title.clone());
                 layer.fields = serde_json::Value::Object(Default::default());
             }
-            layer.parent = None;
             Some(layer)
         })
         .collect();
@@ -1701,7 +1673,6 @@ fn create_document_as(
         layer.policy = own_view(&layer.policy, &id, &article_type);
         layer.edit = own_view(&layer.edit, &id, &article_type);
     }
-    // Nested sections inherit their parents' visibility.
     let effective = effective_policies(&layers)?;
     // A rule that cannot be read is no rule to keep.
     visibility.parse::<Policy>().map_err(AppError::from)?;
