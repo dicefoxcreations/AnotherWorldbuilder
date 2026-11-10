@@ -85,18 +85,52 @@ export function MarkdownText({
 }
 
 /**
+ * Texts split already, by their text — how Rust splits a text depends on
+ * nothing else. Kept up to a budget, the longest unused let go first: a
+ * page one comes back to stands at once, without asking again.
+ */
+const trees = new Map<string, Node[]>();
+let treeChars = 0;
+const TREE_BUDGET = 8_000_000;
+
+function treeOf(text: string): Node[] | undefined {
+  const found = trees.get(text);
+  if (found) {
+    trees.delete(text);
+    trees.set(text, found);
+  }
+  return found;
+}
+
+/** Splits a text — from what is kept where it can. */
+async function split(text: string): Promise<Node[]> {
+  const kept = treeOf(text);
+  if (kept) return kept;
+  const fresh = await api.markdownRead(text);
+  if (!trees.has(text)) {
+    trees.set(text, fresh);
+    treeChars += text.length;
+    for (const [old] of trees) {
+      if (treeChars <= TREE_BUDGET) break;
+      trees.delete(old);
+      treeChars -= old.length;
+    }
+  }
+  return fresh;
+}
+
+/**
  * Lets Rust split the text.
  *
  * While typing, the last valid tree stays, so the preview does not flicker
  * on every keystroke.
  */
 export function useMarkdown(text: string | null): Node[] {
-  const [node, setNode] = useState<Node[]>([]);
+  const [node, setNode] = useState<Node[]>(() => (text === null ? undefined : treeOf(text)) ?? []);
   useEffect(() => {
     if (text === null) return;
     let cancelled = false;
-    api
-      .markdownRead(text)
+    split(text)
       .then((fresh) => {
         if (!cancelled) setNode(fresh);
       })
@@ -120,6 +154,14 @@ const MARKS = /([\uE020-\uE023])/;
  * tree is walked in reading order, with what is open carried along.
  */
 function withMarks(nodes: Node[]): Drawn[] {
+  let found = marked.get(nodes);
+  if (!found) marked.set(nodes, (found = markedIn(nodes)));
+  return found;
+}
+/** Each tree read once for its marks — not on every draw of its text. */
+const marked = new WeakMap<Node[], Drawn[]>();
+
+function markedIn(nodes: Node[]): Drawn[] {
   if (!MARKS.test(JSON.stringify(nodes))) return nodes;
   const state: { open: MarkKind | null } = { open: null };
   const wrap = (node: Drawn): Drawn => (state.open ? { kind: "mark", mark: state.open, children: [node] } : node);
@@ -169,19 +211,22 @@ function withMarks(nodes: Node[]): Drawn[] {
  */
 export function useMarkdowns(texts: string[]): Node[][] | null {
   const key = JSON.stringify(texts);
-  const [split, setSplit] = useState<{ key: string; trees: Node[][] } | null>(null);
+  const [done, setDone] = useState<{ key: string; trees: Node[][] } | null>(() => {
+    const kept = texts.map(treeOf);
+    return kept.every(Boolean) ? { key, trees: kept as Node[][] } : null;
+  });
   useEffect(() => {
     let cancelled = false;
     const all: string[] = JSON.parse(key);
-    Promise.all(all.map((t) => api.markdownRead(t)))
-      .then((trees) => !cancelled && setSplit({ key, trees }))
+    Promise.all(all.map(split))
+      .then((trees) => !cancelled && setDone({ key, trees }))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [key]);
   // While typing, the last split stays — as long as it has as many parts.
-  return split && split.trees.length === texts.length ? split.trees : null;
+  return done && done.trees.length === texts.length ? done.trees : null;
 }
 
 /** A heading's words, as plain text — what names it in `shared/Sections`. */
