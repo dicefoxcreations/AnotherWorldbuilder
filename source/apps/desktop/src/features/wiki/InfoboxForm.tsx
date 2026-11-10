@@ -14,7 +14,7 @@ import { useWorldData } from "../worlds/WorldData";
 import { readNumber } from "../../shared/Sheet";
 
 /**
- * How a number of the document shown came about — `15 + 1 Swift` — by
+ * How a number of the document shown came about — `15 + 1 Athlete` — by
  * property key; empty when it is just its own. See `shared/Sheet`.
  */
 export const NumberHow = createContext<((key: string) => string) | null>(null);
@@ -307,7 +307,7 @@ function Display({
               // Unreadable target: it exists, but not for this reader.
               <span className="dead-link">{target?.name ?? "???"}</span>
             );
-          // A pick's own number stands after it: Sailing 3.
+          // A pick's own number stands after it: Fighter 3.
           return field.count && count !== undefined ? (
             <span key={id} className="counted">
               {link} {count}

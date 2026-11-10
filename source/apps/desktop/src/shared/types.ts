@@ -416,7 +416,7 @@ export { PROPERTIES };
 
 /**
  * Whether someone holding these attributes passes a view as written —
- * `players`, `team:blue OR gm`, `players AND doc:…`. Every player holds
+ * `players`, `class:rogue OR gm`, `players AND doc:…`. Every player holds
  * `players` and `all`.
  */
 export function permits(policy: string, held: string[]): boolean {

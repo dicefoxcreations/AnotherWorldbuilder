@@ -201,7 +201,7 @@ export function ArticlePage({
   const missing = article.layerTotal - article.layers.length;
   const groups = useMemo(() => (glance ? [] : incoming(templates, all, article)), [glance, templates, all, article]);
 
-  // Numbers with what talents and the like add to them — see `shared/Sheet`.
+  // Numbers with what feats and the like add to them — see `shared/Sheet`.
   const values = summedValues(templates, all, article);
   const numberHow = (key: string) => {
     const field = template?.properties.find((p) => p.key === key);

@@ -611,7 +611,7 @@ fn shown(opened: &Opened, kind: &FieldKind, value: &serde_json::Value) -> String
                     .named_id(&id)
                     .map(Named::link)
                     .unwrap_or_else(|| link::write("", &id));
-                // A pick's own number stands after it: `@@Calling:Sailor@@ 3`.
+                // A pick's own number stands after it: `@@Class:Fighter@@ 3`.
                 match n {
                     Some(n) if !count.is_empty() => format!("{link} {}", plain(&n)),
                     _ => link,
@@ -1053,7 +1053,7 @@ fn fields_from(opened: &Opened, properties: &[Property]) -> Result<serde_json::V
         let value = match &field.kind {
             FieldKind::Reference { multiple, count, every, .. } => {
                 // With a number per pick, the words after each link are its
-                // number: `@@Calling:Sailor@@ 3, @@Calling:Scout@@ 2`.
+                // number: `@@Class:Fighter@@ 3, @@Class:Rogue@@ 2`.
                 let mut numbers: Vec<Option<serde_json::Value>> = Vec::new();
                 if !count.is_empty() {
                     for piece in link::scan(&property.value) {
@@ -1114,7 +1114,7 @@ fn fields_from(opened: &Opened, properties: &[Property]) -> Result<serde_json::V
                 // `<=3` at most. See `shared/Sheet.ts`.
                 let written = property.value.trim();
                 // A formula of its own, reckoned where it is read — for
-                // whoever picks the document: `[[Agility bonus]]`.
+                // whoever picks the document: `[[Dexterity mod]]`.
                 if written.starts_with("[[") && written.ends_with("]]") && written.len() > 4 {
                     serde_json::Value::String(written.to_string())
                 } else {

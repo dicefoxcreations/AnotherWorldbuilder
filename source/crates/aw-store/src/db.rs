@@ -74,7 +74,7 @@ const SCHEMA: &str = "
 ";
 
 /// Who may see and change something, as written: `players`, `gm`,
-/// `team:blue OR gm`. An empty or unreadable rule is the game master's.
+/// `class:rogue OR gm`. An empty or unreadable rule is the game master's.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Access {
     pub view: String,
@@ -124,7 +124,7 @@ pub struct Member {
     pub id: String,
     pub name: String,
     pub role: Role,
-    /// Roles given to them, as written: `team:blue`, `doc:01ABC`.
+    /// Roles given to them, as written: `class:rogue`, `doc:01ABC`.
     pub attributes: Vec<String>,
     pub colour: String,
     /// Their writing counts without waiting for the game master.

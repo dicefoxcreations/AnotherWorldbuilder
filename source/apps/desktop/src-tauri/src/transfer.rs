@@ -26,7 +26,7 @@ pub struct Package {
     pub version: u32,
     #[serde(default)]
     pub name: String,
-    /// Texts as written — names (`@@Place:Harbour@@`, `%%Defence%%`)
+    /// Texts as written — names (`@@Spell:Fireball@@`, `%%Armor class%%`)
     /// instead of ids, the way an editor shows them. Taking the package in
     /// translates them. An export writes ids.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

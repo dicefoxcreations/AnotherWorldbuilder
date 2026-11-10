@@ -175,7 +175,7 @@ export function EveryPick({
   onCount,
 }: {
   items: { key: string; name: string; count: string }[];
-  /** The name of the number — `Rank`. */
+  /** The name of the number — `Proficiency`. */
   count: string;
   onCount: (i: number, n: string) => void;
 }) {

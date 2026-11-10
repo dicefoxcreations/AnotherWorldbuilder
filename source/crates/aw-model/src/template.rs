@@ -130,18 +130,18 @@ pub enum FieldKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         parent: bool,
         /// `adds`: the documents it picks add their numbers to this one's —
-        /// a talent with `Might: 1` raises the character's Might by one.
-        /// Only where it says so: a father's Might is not the son's.
+        /// a feat with `Strength: 1` raises the character's Strength by one.
+        /// Only where it says so: a father's Strength is not the son's.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         adds: bool,
         /// `with Level`: every pick carries a number of its own, by this
-        /// name — the levels in each calling, the potions in the bag. Stored
+        /// name — the levels in each class, the potions in the bag. Stored
         /// as `{"with": id, "count": 3}`; a formula reads it within the pick
-        /// (`Callings.(Level * Base)`).
+        /// (`Classes.(Level * Hit die)`).
         #[serde(default, skip_serializing_if = "String::is_empty")]
         count: String,
         /// `every`: always every document of the type — each skill, each
-        /// resistance. None is picked or taken out; only their numbers
+        /// saving throw. None is picked or taken out; only their numbers
         /// (`with`) are stored, and only those that are not 0. A document of
         /// the type made later is there too.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -169,9 +169,9 @@ pub enum FieldKind {
     /// the type's own: `Stats: group Abilities`.
     ///
     /// A group is defined once and used by every type that needs it — the
-    /// abilities by characters, monsters, talents and items alike. What
+    /// six abilities by characters, monsters, feats and items alike. What
     /// changes in the group changes everywhere. Its properties keep their
-    /// names: `%%Might%%` reads the same, whether it comes from a group or
+    /// names: `%%Strength%%` reads the same, whether it comes from a group or
     /// not. The group's name only heads them where they are listed.
     Group {
         /// The id of the group — a [`Template`] with `group` set.
@@ -626,7 +626,7 @@ impl TemplateBlock {
 ///
 /// No game is built in. What a modifier is, what a check rolls, when a roll
 /// is a critical — a world says it, in its types and groups. Formulas call a
-/// rule as they call `floor`: `bonus(Might)`, or `Might bonus` for a rule
+/// rule as they call `floor`: `mod(Strength)`, or `Strength mod` for a rule
 /// of one argument. Reckoned by the app (`shared/Dice.ts`); here it is kept
 /// and checked.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -753,7 +753,7 @@ pub struct Template {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sort: Vec<String>,
     /// Who besides the GM may make documents of this type — a view, as
-    /// `players` or `team:blue`. Empty: the GM alone. A player's new
+    /// `players` or `class:rogue`. Empty: the GM alone. A player's new
     /// document goes to the GM's device, which makes it with this type's
     /// access (see `journal::Proposal`).
     #[serde(default, skip_serializing_if = "String::is_empty")]

@@ -25,7 +25,7 @@ export type RollScope = {
   document: string;
   /** Its numbers, with what is added to them — see `shared/Sheet`. */
   lookup: Lookup;
-  /** How a number came about — `15 + 1 Swift` — or empty. */
+  /** How a number came about — `15 + 1 Athlete` — or empty. */
   explain: (name: string) => string;
   /** Its type's number properties, by name — what an ability row can show. */
   numbers: string[];
@@ -35,7 +35,7 @@ export type RollScope = {
 
 export const RollScopeContext = createContext<RollScope | null>(null);
 
-/** The bold words a paragraph starts with — `Spear.` — name its rolls. */
+/** The bold words a paragraph starts with — `Scimitar.` — name its rolls. */
 export const RollLabel = createContext<string>("");
 
 type Dice = {

@@ -2,30 +2,30 @@
  * Reckoning and rolling — what `[[…]]` and dice in the text do.
  *
  * A formula is a sum the way it is said at the table: `1d20 + 5`,
- * `2W6 + Might bonus`, `10 + bonus(Agility)`, `[[+4]]` for a check with
+ * `2W6 + Strength mod`, `10 + mod(Dexterity)`, `[[+4]]` for a check with
  * four on top. Rust only cuts it out of the text (`aw_model::markdown`);
  * here it is read and reckoned, because only here are the property values
  * of the document known.
  *
  * No game is built in. What a modifier is, what a check rolls, when a roll
  * is a critical: the world's rules say it, in its types and groups —
- * `bonus(x) = floor((x - 10) / 2)`, `check(x) = 1d20 + x`, `crit = 20`. A
- * rule is called like a function, `bonus(Might)`; one of one argument also
- * after a name, `Might bonus`. Where a document has no `check`, `[[+4]]` is
+ * `mod(x) = floor((x - 10) / 2)`, `check(x) = 1d20 + x`, `crit = 20`. A
+ * rule is called like a function, `mod(Strength)`; one of one argument also
+ * after a name, `Strength mod`. Where a document has no `check`, `[[+4]]` is
  * just the number.
  *
  * - Dice: `2d6`, `d20`, `1W8` — German writes `W`. Count and sides may be
- *   reckoned: `(Level)W(Calling.Base)`, `1d(Base)`.
+ *   reckoned: `(Level)W(Class.Hit die)`, `1d(Hit die)`.
  * - Numbers, `+ - * /`, brackets. Division rounds down, as the rules do.
- * - Properties by name, as everywhere: `Might`, `Might bonus`,
- *   `Defence`. A name runs on over single spaces and hyphens as long as
- *   a letter follows — `Might - 10` is a difference, `Might-bonus` a name.
- *   A dot goes through a reference: `Calling.Base` is the base of the
- *   calling the document picks; several picks add up.
- * - `Callings.(Level * Base)`: reckoned within each pick, then added up —
+ * - Properties by name, as everywhere: `Strength`, `Strength mod`,
+ *   `Armor Class`. A name runs on over single spaces and hyphens as long as
+ *   a letter follows — `Strength - 10` is a difference, `Strength-mod` a name.
+ *   A dot goes through a reference: `Class.Hit die` is the hit die of the
+ *   class the document picks; several picks add up.
+ * - `Classes.(Level * Hit die)`: reckoned within each pick, then added up —
  *   inside, a pick's own number (`with Level`) and its properties are known,
  *   and what is not, the document's own.
- * - Over several picks: `first(Callings.Base)`, `last`, `sum`, `count`,
+ * - Over several picks: `first(Classes.Hit die)`, `last`, `sum`, `count`,
  *   `min`, `max` take the picks one by one.
  * - `or(Rolled, average)`: the first that has a number — a value someone
  *   entered, or else what the rules say.
@@ -40,7 +40,7 @@ export type Ast =
   | { kind: "dice"; count: Ast; sides: Ast; letter: string; keep?: Keep }
   | { kind: "name"; name: string }
   | { kind: "call"; name: string; args: Ast[] }
-  /** `Callings.(…)`: reckoned within each pick of a reference, added up. */
+  /** `Classes.(…)`: reckoned within each pick of a reference, added up. */
   | { kind: "each"; ref: string; body: Ast }
   | { kind: "neg"; of: Ast }
   | { kind: "op"; op: Op; left: Ast; right: Ast }
@@ -76,8 +76,8 @@ export const FUNCTIONS: Record<string, (...a: number[]) => number> = {
   not: (x) => (x === 0 ? 1 : 0),
   /**
    * A table by steps: `steps(Level, 1, 2, 5, 3, 9, 4)` — the value of the
-   * highest step at or below the first number. A rank bonus, uses per
-   * day — whatever rises in steps.
+   * highest step at or below the first number. A proficiency bonus, spell
+   * slots, whatever rises in steps.
    */
   steps: (x, ...a) => {
     let found: number | undefined;
@@ -111,7 +111,7 @@ function tokens(formula: string): Token[] {
       i++;
       continue;
     }
-    // A die whose count or sides are reckoned: `(Level)W(Base)`, `1d(…)`,
+    // A die whose count or sides are reckoned: `(Level)W(Hit die)`, `1d(…)`,
     // `W(…)` — the letter stands right before a bracket, or right after one.
     const last = out[out.length - 1];
     const glued = i > 0 && formula[i - 1] !== " " && formula[i - 1] !== "\t";
@@ -149,7 +149,7 @@ function tokens(formula: string): Token[] {
       let j = i;
       for (;;) {
         while (j < formula.length && WORD.test(formula[j])) j++;
-        // `Callings[Calling]`: which picks — part of the name.
+        // `Classes[Class]`: which picks — part of the name.
         if (formula[j] === "[") {
           const close = formula.indexOf("]", j);
           if (close < 0) throw new Error("“]” is missing");
@@ -171,7 +171,7 @@ function tokens(formula: string): Token[] {
       i = j;
       continue;
     }
-    // `Callings.(…)`: within each pick.
+    // `Classes.(…)`: within each pick.
     if (c === "." && formula[i + 1] === "(") {
       out.push({ t: "sym", v: "." });
       i++;
@@ -352,7 +352,7 @@ export function parse(formula: string, rules: Rule[] = [], inside: string[] = []
         return applied(rule, args, rules, inside);
       }
       // A property of that name comes first; otherwise the rule — `crit`,
-      // or `Might bonus` for `bonus(Might)`.
+      // or `Strength mod` for `mod(Strength)`.
       if (rule && rule.params.length === 0) return or({ kind: "name", name: t.v }, applied(rule, [], rules, inside));
       const after = /^(.+?)[\s-]+([\p{L}_][\p{L}\p{N}_]*)$/u.exec(t.v);
       const suffix = after && ruleNamed(rules, after[2]);
@@ -417,7 +417,7 @@ export function hasDice(ast: Ast): boolean {
 }
 
 /**
- * `[[+4]]`, `[[-1]]`, `[[+ Might bonus]]`: a check, as a stat block writes
+ * `[[+4]]`, `[[-1]]`, `[[+ Strength mod]]`: a check, as a stat block writes
  * “+4 to hit” — what it rolls, the rule `check` says.
  */
 export const isCheck = (formula: string) => /^\s*[+-]/.test(formula);
@@ -443,7 +443,7 @@ export type Lookup = ((name: string) => number | undefined) & {
   ids?: (name: string) => string[] | undefined;
   /** The rules of the document's type — and inside a pick, the picker's after them. */
   rules?: Rule[];
-  /** Inside a pick: its own number (`with Rank`). */
+  /** Inside a pick: its own number (`with Proficiency`). */
   count?: number;
 };
 
@@ -592,7 +592,7 @@ export function reckon(ast: Ast, lookup: Lookup, roll?: (sides: number) => numbe
       }
     }
   };
-  /** `Callings.(…)` within each pick — its dice thrown with the rest. */
+  /** `Classes.(…)` within each pick — its dice thrown with the rest. */
   const within = (a: Extract<Ast, { kind: "each" }>): Rolled[] => {
     const scopes = lookup.within?.(a.ref);
     if (!scopes) throw new Error(`“${a.ref}” picks nothing here`);
@@ -633,7 +633,7 @@ function arithmetic(op: Op, l: number, r: number): number {
 }
 
 /**
- * How a formula reads with the names filled in: `1d20 + Might bonus` →
+ * How a formula reads with the names filled in: `1d20 + Strength mod` →
  * `1d20 + 3`. The dice stay dice. `null` when a name has no number.
  */
 export function written(ast: Ast, lookup: Lookup): string | null {

@@ -1,5 +1,5 @@
 /**
- * Policies as people pick them: an OR over terms, `players OR team:blue`.
+ * Policies as people pick them: an OR over terms, `players OR class:rogue`.
  *
  * The game master holds every key: they see and change everything anyway.
  * So *Everyone*, *All players* and *GM only* exclude each other, and whoever

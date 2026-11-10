@@ -284,7 +284,7 @@ function Element({
     case "mark":
       return <span className={`mark-${node.mark}`}>{deep(node.children)}</span>;
     case "paragraph":
-      // Each line names its own rolls: `**Health** 7 (2d6)` under `**Defence** 15`.
+      // Each line names its own rolls: `**Hit Points** 7 (2d6)` under `**Armor Class** 15`.
       return (
         <p>
           {byLine(node.children).map((line, i) => (
@@ -552,7 +552,7 @@ function plain(nodes: Drawn[]): string {
 
 /**
  * What a paragraph's rolls are for: the bold words it starts with, as a
- * stat block writes an action — `***Spear.*** Thrust …`.
+ * stat block writes an action — `***Scimitar.*** Melee Weapon Attack …`.
  */
 function leadingWords(children: Drawn[]): string {
   const first = children.find((c) => !(c.kind === "text" && !c.text.trim()));
@@ -663,7 +663,7 @@ export function GroupView({ of, resolve, onPlace }: { of: string; resolve: Resol
 }
 
 /**
- * `<abilities show=Abilities with=bonus>` — the ability row of a stat block:
+ * `<abilities show=Abilities with=mod>` — the ability row of a stat block:
  * each score, below it what the rule `with` makes of it — the modifier, as
  * the world defines it. Where the rules say what a check rolls, a click
  * rolls one: on the rule's result, or on the score itself.
@@ -689,14 +689,14 @@ export function Abilities({
   const editing = useContext(SheetEdit);
   const lists = useContext(ListEditing);
   const current = useContext(CurrentDocument);
-  // A group names its numbers: `show=Abilities` is the numbers of that group.
+  // A group names its numbers: `show=Abilities` is the six of that group.
   const names = show.flatMap((n) => {
     const group = world && groupNamed(world.templates, n);
     return group ? effective(world.templates, group).properties.filter((p) => p.kind === "number").map((p) => p.label) : [n];
   });
   if (names.length === 0) return <code className="value-name">&lt;abilities&gt;</code>;
   const rules = scope?.lookup.rules ?? [];
-  /** What the tile rolls and shows below the score: `bonus(Might)`. */
+  /** What the tile rolls and shows below the score: `mod(Strength)`. */
   const of = (name: string) => (rule ? `${rule}(${name})` : name);
   const below = (name: string) => {
     if (!rule || !scope) return undefined;
@@ -706,7 +706,7 @@ export function Abilities({
       return undefined;
     }
   };
-  // `also="Resistances.Bonus"`: the pick named like the score, its number.
+  // `also="Saving throws.Bonus"`: the pick named like the score, its number.
   const dot = also?.indexOf(".") ?? -1;
   const ref = also && dot > 0 ? also.slice(0, dot).trim() : "";
   const prop = also && dot > 0 ? also.slice(dot + 1).trim() : "";
@@ -804,7 +804,7 @@ export function Abilities({
           </div>
         );
       })}
-      {/* The line of what `also` shows — the resistances, under their scores. */}
+      {/* The line of what `also` shows — the saving throws, under their scores. */}
       {ref && alsoHeading && <div className="ability-caption also">{alsoHeading}</div>}
       {ref &&
         names.map((name) => (

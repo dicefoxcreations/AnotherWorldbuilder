@@ -98,14 +98,14 @@ export const BRICKS: Group[] = [
       {
         name: "Reckoned number",
         where: "properties",
-        line: "«Health»: number = [[«Calling.Base + Level * bonus(Endurance)»]]",
-        what: "A default in [[…]] is a formula, not a value: a document without a value of its own has what it comes to — from its numbers and, over a dot, from what it picks (Calling.Base). Talents add to it; a value of its own stands instead. A document's value may be a formula too: a shield's [[2 + Agility bonus]] reckons for whoever carries it."
+        line: "«Hit points»: number = [[«Class.Hit die + Level * mod(Constitution)»]]",
+        what: "A default in [[…]] is a formula, not a value: a document without a value of its own has what it comes to — from its numbers and, over a dot, from what it picks (Class.Hit die). Feats add to it; a value of its own stands instead. A document's value may be a formula too: armour's [[14 + min(Dexterity mod, 2)]] reckons for whoever wears it."
       },
       {
         name: "Rule",
         where: "properties",
-        line: "«bonus»(«x») = «floor((x - 10) / 2)»",
-        what: "A rule of your game, called in every formula like a function: bonus(Might), or Might bonus. Kept in a type or a group, it holds for all that take it in. check(x) is what [[+4]] and a click on a score roll. crit, fumble and success judge a check: a number (crit = 20: dice at 20 or more) or a rule of d, the dice, x, the value checked, and r, the result — success(d, x) = d <= x rolls under a skill. [[check(a, b, c, fw)]] calls a check of several values; shown says what its button shows. No game is built in."
+        line: "«mod»(«x») = «floor((x - 10) / 2)»",
+        what: "A rule of your game, called in every formula like a function: mod(Strength), or Strength mod. Kept in a type or a group, it holds for all that take it in. check(x) is what [[+4]] and a click on a score roll. crit, fumble and success judge a check: a number (crit = 20: dice at 20 or more) or a rule of d, the dice, x, the value checked, and r, the result — success(d, x) = d <= x rolls under a skill. [[check(a, b, c, fw)]] calls a check of several values; shown says what its button shows. No game is built in."
       },
       {
         name: "World date",
@@ -134,13 +134,13 @@ export const BRICKS: Group[] = [
       {
         name: "Picks that add",
         where: "properties",
-        line: "«Talents»: @@Talent@@ multiple adds",
-        what: "What it picks changes this document's numbers, by name — as their operator says: Might: +1 raises (a talent), -1 lowers, =19 sets, >=19 sets to at least 19 (a ring that grants it), <=3 to at most 3. A bare number is a document's own value. Everywhere it shows and in every formula.",
+        line: "«Feats»: @@Feat@@ multiple adds",
+        what: "What it picks changes this document's numbers, by name — as their operator says: Strength: +1 raises (a feat), -1 lowers, =19 sets, >=19 sets to at least 19 (gauntlets of ogre power), <=3 to at most 3. A bare number is a document's own value. Everywhere it shows and in every formula.",
       },
       {
         name: "Every one, with a number",
         where: "properties",
-        line: "«Skills»: @@«Skill»@@ every with «Rank»",
+        line: "«Skills»: @@«Skill»@@ every with «Proficiency»",
         what: "Always every document of the type — none to add or take out, and one made later is there too. Only the numbers change; only those not 0 are written: @@Skill:Stealth@@ 2.",
       },
       {
@@ -152,8 +152,8 @@ export const BRICKS: Group[] = [
       {
         name: "Picks with a number",
         where: "properties",
-        line: "«Callings»: @@«Calling»@@ multiple with «Level»",
-        what: "Each pick carries a number of its own — the level in each calling, how many potions. The document writes it after the link: @@Calling:Sailor@@ 3. In formulas: Callings.Level adds them up, Callings.(Level * Base) reckons within each pick, first(…) takes the first.",
+        line: "«Classes»: @@«Class»@@ multiple with «Level»",
+        what: "Each pick carries a number of its own — the level in each class, how many potions. The document writes it after the link: @@Class:Fighter@@ 3. In formulas: Classes.Level adds them up, Classes.(Level * Hit die) reckons within each pick, first(…) takes the first.",
       },
       {
         name: "Property group",
@@ -329,23 +329,23 @@ export const BRICKS: Group[] = [
       },
       {
         name: "Roll",
-        line: "[[«1d20 + Might bonus»]]",
-        what: "A click rolls it into the tray. Dice as written in the text roll too: 2d6 + 3, 1W20. Names are this document's numbers; Might bonus calls the rule bonus on Might.",
+        line: "[[«1d20 + Strength mod»]]",
+        what: "A click rolls it into the tray. Dice as written in the text roll too: 2d6 + 3, 1W20. Names are this document's numbers; Strength mod calls the rule mod on Strength.",
       },
       {
         name: "Check",
         line: "[[«+4»]]",
-        what: "Shows +4 and rolls the rule check on it: with check(x) = 1d20 + x, 1d20 + 4 — “+4 to hit”. Also [[+ Might bonus]]. Without a check rule it is just +4.",
+        what: "Shows +4 and rolls the rule check on it: with check(x) = 1d20 + x, 1d20 + 4 — “+4 to hit”. Also [[+ Strength mod]]. Without a check rule it is just +4.",
       },
       {
         name: "Reckon",
-        line: "[[«10 + bonus(Agility)»]]",
-        what: "Without dice it shows the number. + - * /, brackets, comparisons (< <= > >= = !=, 1 or 0), if(c, a, b), and, not, floor, ceil, round, min, max, steps(Level, 1, 2, 5, 3) for a table by steps — and your rules. 2W20kh1 keeps the highest die, 4d6kh3 the three highest, 2W20kl1 the lowest. Callings[Calling].Level: of the picks, those another reference picks — or the one so named. Each die: map(rule, 5W6) takes a rule to every die, [a, b, c] is a list, sum/count/min/max take a list value by value — pools and three dice against three values.",
+        line: "[[«10 + mod(Dexterity)»]]",
+        what: "Without dice it shows the number. + - * /, brackets, comparisons (< <= > >= = !=, 1 or 0), if(c, a, b), and, not, floor, ceil, round, min, max, steps(Level, 1, 2, 5, 3) for a table by steps — and your rules. 2W20kh1 keeps the highest die, 4d6kh3 the three highest, 2W20kl1 the lowest. Classes[Class].Level: of the picks, those another reference picks — or the one so named. Each die: map(rule, 5W6) takes a rule to every die, [a, b, c] is a list, sum/count/min/max take a list value by value — pools and three dice against three values.",
       },
       {
         name: "Ability row",
-        line: '<abilities show=«Abilities» with=«bonus» short="«MIG, AGI, END, WIT»">',
-        what: "The numbers of a group, or names listed. with= names the rule whose result stands below each score; a click rolls the rule check on it. short= heads the tiles, otherwise their first three letters. also=\"Resistances.Bonus\": a second line, under each score the pick named like it. heading= and also-heading= say what the lines are.",
+        line: '<abilities show=«Abilities» with=«mod» short="«STR, DEX, CON, INT, WIS, CHA»">',
+        what: "The numbers of a group, or names listed. with= names the rule whose result stands below each score; a click rolls the rule check on it. short= heads the tiles, otherwise their first three letters. also=\"Saving throws.Bonus\": a second line, under each score the pick named like it. heading= and also-heading= say what the lines are.",
       },
       {
         name: "Group layout",
@@ -385,12 +385,12 @@ export const BRICKS: Group[] = [
       },
       {
         name: "Through the picks",
-        line: '<list from="«Callings.Features»" when="«From level <= Level»" show="«[[+ Bonus]]»">',
-        what: "A path goes on through what is picked: the features each calling brings. when: a formula, reckoned inside each — what it makes 0 is left out. show may hold the pick's own number (Rank), numbers reckoned for whoever picked it, and rolls in [[…]]. A plain list shows them after the name. ●Rank shows a number as so many marks before it.",
+        line: '<list from="«Classes.Features»" when="«From level <= Level»" show="«[[+ Bonus]]»">',
+        what: "A path goes on through what is picked: the features each class brings. when: a formula, reckoned inside each — what it makes 0 is left out. show may hold the pick's own number (Proficiency), numbers reckoned for whoever picked it, and rolls in [[…]]. A plain list shows them after the name. ●Proficiency shows a number as so many marks before it.",
       },
       {
         name: "In the line",
-        line: '**«Skills»** <list from=«Skills» when=«Rank» style=inline show="«[[+ Bonus]]»">',
+        line: '**«Skills»** <list from=«Skills» when=«Proficiency» style=inline show="«[[+ Bonus]]»">',
         what: "The list by commas, where it stands in the text — a short stat block: Stealth +6, Perception +2.",
       },
       {
@@ -421,7 +421,7 @@ export const BRICKS: Group[] = [
       {
         name: "Players make documents",
         line: '<article view=«players» edit=«players» create=«players»>',
-        what: "create= on a type: who besides the GM may make its documents — players, team:blue, … A player's new document goes to the GM's app, which makes it with the type's access.",
+        what: "create= on a type: who besides the GM may make its documents — players, class:rogue, … A player's new document goes to the GM's app, which makes it with the type's access.",
       },
       {
         name: "Secret marker, its name below",
@@ -468,7 +468,7 @@ export const BRICKS: Group[] = [
         name: "view, edit",
         where: "legend-only",
         line: "view=«players» edit=gm",
-        what: "all, players, gm, an attribute like team:blue — several with OR.",
+        what: "all, players, gm, an attribute like class:rogue — several with OR.",
       },
       {
         name: "%%input%%, %%count%%",

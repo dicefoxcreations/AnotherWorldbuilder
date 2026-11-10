@@ -53,7 +53,7 @@ const SEARCH_FROM = 1;
 export const ListEditing = createContext<{
   ids: (key: string) => string[];
   set: (key: string, ids: string[]) => void;
-  /** A pick's own number, as the text says it — `with Rank`. */
+  /** A pick's own number, as the text says it — `with Proficiency`. */
   count: (key: string, id: string) => string;
   setCount: (key: string, id: string, n: string) => void;
 } | null>(null);
@@ -144,7 +144,7 @@ function ListingOf({ node }: { node: ListingNode }) {
 
   // `from=`: what a property of this document picks, in its order — and
   // whoever may change the document adds and removes here with a click.
-  // A path goes on through the picks: `from=Callings.Features` lists what
+  // A path goes on through the picks: `from=Classes.Features` lists what
   // each class brings, and is only read.
   const self = node.from ? articleById(articles, current) : undefined;
   const picker = self ? typeOf(templates, self.articleType) : undefined;
@@ -899,16 +899,16 @@ function Tally({
   );
 }
 
-/** `●Rank`: a number shown as so many marks — before the name in a list. */
+/** `●Proficiency`: a number shown as so many marks — before the name in a list. */
 const MARKS = /^([^\p{L}\p{N}[\s"'])\s*(.+)$/u;
 const isMarks = (col: string) => MARKS.test(col);
 
-/** A column's head: `[[+ Bonus]]` is headed `Bonus`, `●Rank` `Rank`. */
+/** A column's head: `[[+ Bonus]]` is headed `Bonus`, `●Proficiency` `Proficiency`. */
 const headOf = (col: string) => formulaIn(col)?.replace(/^\s*[+-]\s*/, "").trim() ?? MARKS.exec(col)?.[2] ?? col;
 
 /**
  * A cell reckoned inside the listed pick: a roll in `[[…]]`, a number — the
- * pick's own (`Rank`) or one of its properties, reckoned for whoever
+ * pick's own (`Proficiency`) or one of its properties, reckoned for whoever
  * picked it. `undefined`: nothing to reckon here, show it as stored.
  */
 function reckonedCell(scope: Scope | undefined, col: string, field: ReturnType<typeof fieldFor>): ReactNode | undefined {

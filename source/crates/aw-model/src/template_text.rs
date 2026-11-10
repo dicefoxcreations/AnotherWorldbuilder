@@ -772,7 +772,7 @@ pub fn from_text(text: &str, directory: &Directory) -> Parsed {
                         }
                         create = tag.attr("create").unwrap_or_default().trim().to_string();
                         if !create.is_empty() && create.parse::<crate::attribute::Policy>().is_err() {
-                            errors.push(TextError { line: tag.line, text: format!("create=“{create}” is no view — as players, or team:blue OR gm.") });
+                            errors.push(TextError { line: tag.line, text: format!("create=“{create}” is no view — as players, or class:rogue OR gm.") });
                         }
                     }
                     "body" => skeleton.body += 1,

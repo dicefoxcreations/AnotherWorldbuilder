@@ -418,7 +418,7 @@ function EyePopover({
             .catch(onError);
         }}
       >
-        <input value={fresh} onChange={(e) => setFresh(e.target.value)} placeholder="team:blue" />
+        <input value={fresh} onChange={(e) => setFresh(e.target.value)} placeholder="class:rogue" />
         <button type="submit" disabled={!fresh.trim()}>
           Add
         </button>

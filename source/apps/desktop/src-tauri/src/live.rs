@@ -167,7 +167,7 @@ pub struct Roll {
     pub name: String,
     /// The document rolled from.
     pub document: String,
-    /// What it was for — `Lantern`, `Might`.
+    /// What it was for — `Scimitar`, `Strength`.
     pub label: String,
     /// The formula, names filled in: `1d20 + 4`.
     pub formula: String,

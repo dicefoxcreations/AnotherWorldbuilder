@@ -1,6 +1,6 @@
 /**
  * A number as marks — how well someone has a skill: `●` once, `●●` twice
- * (double), `◐` for a half (half rank), a faint `●` for none.
+ * (expertise), `◐` for a half (half proficiency), a faint `●` for none.
  * Other signs repeat as they are; only `●` has a half.
  */
 export function tally(sign: string, n: number): { text: string; none: boolean } {
