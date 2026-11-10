@@ -201,10 +201,12 @@ function ListingOf({ node }: { node: ListingNode }) {
           />
         )
       : undefined;
+  // What did not save says so — the list would only look as if it had.
+  const failed = (e: unknown) => data.onError?.(e);
   const setPicked = (ids: string[]) => {
     if (!field || !self) return;
     if (editing) editing.set(field.key, ids);
-    else api.referencesSet(data.world.id, self.id, field.key, ids).then(data.onChanged).catch(() => {});
+    else api.referencesSet(data.world.id, self.id, field.key, ids).then(data.onChanged).catch(failed);
   };
 
   const entries: Scope[] = (
@@ -311,7 +313,7 @@ function ListingOf({ node }: { node: ListingNode }) {
           const done = making
             ? api.articleDelete(data.world.id, a.id, a.name)
             : api.referencesSet(data.world.id, a.id, back!.key, idsIn(a, back!.key).filter((id) => id !== current));
-          done.then(data.onChanged).catch(() => {});
+          done.then(data.onChanged).catch(failed);
         }}
       >
         {making && asking === a.id ? "Delete?" : <Icon name="close" />}
@@ -328,7 +330,7 @@ function ListingOf({ node }: { node: ListingNode }) {
     onPlace({ kind: "article", id });
   };
   const backAdd = making ? (!mayMake && !mayBack ? null : (
-    <button className="compact listing-add" title={`New ${type!.name} for ${here!.name}`} onClick={() => void makeOne().catch(() => {})}>
+    <button className="compact listing-add" title={`New ${type!.name} for ${here!.name}`} onClick={() => void makeOne().catch(failed)}>
       <Icon name="add" /> {type!.name}
     </button>
   )) : !mayBack ? null : (
@@ -343,7 +345,7 @@ function ListingOf({ node }: { node: ListingNode }) {
         void api
           .referencesSet(data.world.id, a.id, back!.key, [...idsIn(a, back!.key), current!])
           .then(data.onChanged)
-          .catch(() => {})
+          .catch(failed)
       }
     />
   );
@@ -599,7 +601,7 @@ function Drawn({
   }
 
   if (node.style === "tree") {
-    return <Tree node={node} docs={docs} templates={templates} articles={articles} type={type} open={open} remove={remove} data={data} />;
+    return <Tree node={node} docs={docs} templates={templates} articles={articles} open={open} remove={remove} data={data} />;
   }
 
   return (
@@ -641,7 +643,6 @@ function Tree({
   docs,
   templates,
   articles,
-  type,
   open,
   remove,
   data,
@@ -650,7 +651,6 @@ function Tree({
   docs: ArticleView[];
   templates: Template[];
   articles: ArticleView[];
-  type: Template | undefined;
   open: (a: ArticleView) => void;
   remove: (a: ArticleView) => React.ReactNode;
   data: NonNullable<ReturnType<typeof useWorldData>>;
@@ -665,7 +665,12 @@ function Tree({
   for (const { article, depth } of flat) {
     stack.length = depth;
     if (depth === 0) roots.push(article);
-    else below.set(stack[depth - 1].id, [...(below.get(stack[depth - 1].id) ?? []), article]);
+    else {
+      const parent = stack[depth - 1].id;
+      const kids = below.get(parent);
+      if (kids) kids.push(article);
+      else below.set(parent, [article]);
+    }
     stack.push(article);
   }
   const count = (a: ArticleView): number => (below.get(a.id) ?? []).reduce((n, c) => n + 1 + count(c), 0);
@@ -726,7 +731,6 @@ function Tree({
       </li>
     );
   };
-  void type;
   return <ul className="listing-tree">{roots.map((r) => draw(r, 0))}</ul>;
 }
 
