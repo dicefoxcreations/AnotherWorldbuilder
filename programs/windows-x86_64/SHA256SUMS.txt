@@ -1,1 +1,1 @@
-accba1107ab1313429a687d32c3ada2ededd9e8efd112cd75bfdfc909c792e1c  AnotherWorldbuilder_0.2.18_x64-setup.exe
+e92449e84785837af59d755c65a3e9d73c0e5d816fe7f59795a3385854e15c02  AnotherWorldbuilder_0.3.1_x64-setup.exe
