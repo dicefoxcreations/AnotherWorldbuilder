@@ -1,4 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ArticleView, MapAccess, MapArea, MapNode, MapPin, Place, WorldInfo } from "../../api/client";
 import { COLOURS, firstMap, joinPins, MARKERS } from "../../shared/GraphText";
@@ -110,6 +110,7 @@ export function MapView({
   // The picture's address, with the source it is of: until the next level's
   // has come, the last one's must not stand in for it — its size would fit
   // the view to the wrong picture.
+  // An empty address: the picture is not there.
   const [loaded, setLoaded] = useState<{ src: string; url: string } | null>(null);
   const url = loaded?.src === level.map.src ? loaded.url : null;
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -152,7 +153,7 @@ export function MapView({
     if (level.map.src.startsWith("img:"))
       imageUrl(world, level.map.src, false)
         .then((u) => !gone && setLoaded({ src: level.map.src, url: u }))
-        .catch(() => {});
+        .catch(() => !gone && setLoaded({ src: level.map.src, url: "" }));
     return () => {
       gone = true;
     };
@@ -356,6 +357,8 @@ export function MapView({
       >
         {!level.map.src.startsWith("img:") ? (
           <span className="map-empty small muted">{writing ? "Choose a picture in the side bar." : "No picture yet."}</span>
+        ) : url === "" ? (
+          <span className="map-empty small muted">Picture not found.</span>
         ) : !url ? (
           <span className="map-empty small muted"><Icon name="map" /></span>
         ) : (
@@ -506,7 +509,7 @@ export function MapView({
       <div className="map-controls">
         {levels.length > 0 && (
           <button className="compact" title="Back" onClick={() => setLevels((ls) => ls.slice(0, -1))}>
-            ‹ {levels.length > 1 ? levels[levels.length - 2].name : "Back"}
+            <Icon name="left" /> {levels.length > 1 ? levels[levels.length - 2].name : "Back"}
           </button>
         )}
         {level.name && (
@@ -526,7 +529,7 @@ export function MapView({
             </button>
             {mode === "area" && draft.length >= 3 ? (
               <button className="compact on" title="Close the region" onClick={close}>
-                ✓ Region
+                <Icon name="check" /> Region
               </button>
             ) : (
               <button
@@ -676,9 +679,21 @@ export function MapCard({ world, map, onChange }: { world: WorldInfo; map: MapNo
   const area = chosen?.kind === "area" ? map.areas[chosen.i] : undefined;
   const setPin = (next: Partial<MapPin>) => chosen && onChange({ ...map, pins: map.pins.map((p, i) => (i === chosen.i ? { ...p, ...next } : p)) });
   const setArea = (next: Partial<MapArea>) => chosen && onChange({ ...map, areas: map.areas.map((r, i) => (i === chosen.i ? { ...r, ...next } : r)) });
-  const documents = (data?.articles ?? [])
-    .map((a) => ({ id: a.id, name: a.name, icon: findType(data!.templates, a.articleType)?.icon }))
-    .sort((a, b) => byText(a.name, b.name));
+  const documents = useMemo(
+    () =>
+      (data?.articles ?? [])
+        .map((a) => ({ id: a.id, name: a.name, icon: findType(data!.templates, a.articleType)?.icon }))
+        .sort((a, b) => byText(a.name, b.name)),
+    [data?.articles, data?.templates],
+  );
+  // The height as typed — set when it is a height: `5` on the way to `500` is none yet.
+  const [height, setHeight] = useState<string | null>(null);
+  const setHeightTo = () => {
+    if (height === null) return;
+    const n = Math.round(Number(height));
+    if (Number.isFinite(n) && n > 0) onChange({ ...map, height: Math.min(2000, Math.max(160, n)) });
+    setHeight(null);
+  };
   // While writing, `to` is a document's name as the code has it — or an id, once picked.
   const docOf = (to: string) => {
     const all = data?.articles ?? [];
@@ -813,8 +828,14 @@ export function MapCard({ world, map, onChange }: { world: WorldInfo; map: MapNo
             type="number"
             min={160}
             max={2000}
-            value={map.height}
-            onChange={(e) => onChange({ ...map, height: Math.min(2000, Math.max(160, Number(e.target.value) || 480)) })}
+            value={height ?? map.height}
+            onChange={(e) => {
+              setHeight(e.target.value);
+              const n = Number(e.target.value);
+              if (Number.isInteger(n) && n >= 160 && n <= 2000) onChange({ ...map, height: n });
+            }}
+            onBlur={setHeightTo}
+            onKeyDown={(e) => e.key === "Enter" && setHeightTo()}
           />
           px
         </label>
