@@ -907,7 +907,9 @@ button.infobox-image.choosable { padding: 0; cursor: pointer; font: inherit; }
 /* Where the margin is no room of the text's own — in a box, a preview —
    the arrow stands before the title. */
 .block:is(.box, .statblock, .quote) > .block-mark :is(.head-chevron, .head-fold),
+.block:is(.box, .statblock, .quote) .markdown-head > .head-fold,
 .link-preview :is(.block-fold > .head-chevron, .head-fold) { position: static; margin: 0; }
+.block:is(.box, .statblock, .quote) .markdown-head.foldable { display: flex; align-items: center; gap: 6px; }
 .link-preview .markdown-head.foldable { display: flex; align-items: center; gap: 6px; }
 @media (max-width: 760px) {
   :is(.block-fold > .head-chevron, .head-fold) { position: static; margin: 0; }
