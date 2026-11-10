@@ -26,12 +26,13 @@ import { findType, pageOwner, articleById } from "../shared/types";
 import { takeCovers } from "../shared/Links";
 import { WorldReader } from "../api/worldReader";
 import { NavBar } from "../features/navigation/NavBar";
-import { WorldDataContext } from "../features/worlds/WorldData";
+import { type WorldData, WorldDataContext } from "../features/worlds/WorldData";
 import { LinkPreview } from "../features/wiki/LinkPreview";
 import { DiceTray } from "../features/dice/DiceTray";
 import { announce, isMainWindow, onWorldChanged, resumeOnlineWorld, suspendOnlineWorld } from "../api/changes";
 import { wantsApart } from "../shared/apart";
 import { listen } from "@tauri-apps/api/event";
+import { Icon } from "../shared/ui/Icons";
 
 /** How many places the trail in the header bar keeps. */
 const TRAIL = 10;
@@ -301,9 +302,11 @@ export default function App() {
   // and those met through shared folders.
   const [fresh, setFresh] = useState(0);
   const keeping = !!me;
+  // Others can be here over the local network, the internet or a server.
   useEffect(() => {
-    // Others can be here over the local network, the internet or a server.
     pace.network = !!network?.running;
+  }, [network?.running]);
+  useEffect(() => {
     // One window keeps the network going — the main one; the others hear from it.
     if (!keeping || !isMainWindow) return;
     let gone = false;
@@ -600,6 +603,31 @@ export default function App() {
     };
   }, []);
 
+  // One value while nothing in it changed: every page part reading it is
+  // drawn anew only then — not with each progress note or network round.
+  const previewing = preview !== null;
+  const worldData = useMemo(
+    (): WorldData | null =>
+      world && {
+        world,
+        templates,
+        articles,
+        onPlace: go,
+        onChanged: () => void loadView(),
+        want: (id: string) => reading.current?.reader.want(id),
+        loading: texting,
+        onError: report,
+        onApart: openApart,
+        onTemplates: setTemplates,
+        onNew: (t: string) => {
+          setOptions(false);
+          setNewType(t);
+        },
+        previewing,
+      },
+    [world, templates, articles, go, loadView, texting, report, openApart, previewing],
+  );
+
   if (storage && !stored) return <StorageSetup status={storage} onDone={setStorage} />;
   if (!loaded) return <main className="middle">Loading …</main>;
   if (!me) return <Setup onDone={setMe} onError={report} />;
@@ -641,7 +669,9 @@ export default function App() {
       {error && !blocked && (
         <div className="error" role="alert">
           {error}
-          <button className="compact" onClick={() => setError(null)}>close</button>
+          <button className="ghost icon round" title="Close" onClick={() => setError(null)}>
+            <Icon name="close" />
+          </button>
         </div>
       )}
 
@@ -655,9 +685,7 @@ export default function App() {
           onError={report}
         />
       ) : (
-        <WorldDataContext.Provider
-          value={{ world, templates, articles, onPlace: go, onChanged: () => void loadView(), want: (id: string) => reading.current?.reader.want(id), loading: texting, onError: report, onApart: openApart, onTemplates: setTemplates, onNew: (t: string) => { setOptions(false); setNewType(t); }, previewing: preview !== null }}
-        >
+        <WorldDataContext.Provider value={worldData}>
         <LinkPreview />
         <FindBar />
         <QuickOpen world={world.id} articles={articles} templates={templates} onPlace={go} />
@@ -720,7 +748,7 @@ export default function App() {
 
       {options && (
         // The world's documents for what options show of them — a calendar's preview.
-        <WorldDataContext.Provider value={world ? { world, templates, articles, onPlace: go, onChanged: () => void loadView(), want: (id: string) => reading.current?.reader.want(id), loading: texting, onError: report, onApart: openApart, onTemplates: setTemplates, onNew: (t: string) => { setOptions(false); setNewType(t); }, previewing: preview !== null } : null}>
+        <WorldDataContext.Provider value={worldData}>
         <Options
           world={world}
           me={me}
@@ -779,7 +807,7 @@ export default function App() {
       <section className="card narrow">
         <h2 id="online-status-title">Server world unavailable</h2>
         <p>{blocked.error.replace(/^\[online\]\s*/, "")}</p>
-        <p>Editing is paused. Changes without a server acknowledgement are not confirmed saved. Reconnect to continue using this server world.</p>
+        <p>Editing is paused until it answers again.</p>
         <div className="line">
           <button className="primary" onClick={() => void enter(blocked.world)}>Reconnect</button>
           <button onClick={leave}>Back to worlds</button>
