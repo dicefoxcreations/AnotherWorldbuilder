@@ -704,6 +704,11 @@ pub struct Template {
     /// documents point to. The GM may still place it there.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub navigation_hidden: bool,
+    /// Its subtypes are kinds apart — `Means` over spells, items and
+    /// features: a document changes its type within one of them, never
+    /// across (see [`crate::types::family_id`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kinds_apart: bool,
     /// The rules of the game its documents reckon with — `mod(x) =
     /// floor((x - 10) / 2)`. Inherited like the properties, and taken in
     /// with a group.

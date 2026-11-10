@@ -279,6 +279,17 @@ export function TemplateEditor({
               ))}
           </select>
         </label>
+        {/* Over subtypes that are kinds of their own — Means over spells and
+            items: a document changes its type within one, never across. */}
+        {templates.some((t) => t.supertype === draft.id) && (
+          <button
+            className={draft.kindsApart ? "chip on" : "chip"}
+            title="Its subtypes are kinds of their own: a document changes its type only within one"
+            onClick={() => onChange({ ...draft, kindsApart: !draft.kindsApart })}
+          >
+            Kinds apart
+          </button>
+        )}
         </>}
         <span className="filler" />
         {!isMobile && (

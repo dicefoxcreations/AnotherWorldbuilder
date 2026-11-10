@@ -78,6 +78,17 @@ export function rootId(all: Template[], start: Template): string {
 }
 
 /**
+ * The family of a type — what a document of it may change into: the root of
+ * its tree, unless a type on the way up holds its subtypes as kinds apart,
+ * then the one below it. As `aw_model::types::family_id`.
+ */
+export function familyId(all: Template[], start: Template): string {
+  const chain = [start, ...ancestors(all, start)];
+  for (let i = 0; i + 1 < chain.length; i++) if (chain[i + 1].kindsApart) return chain[i].id;
+  return chain[chain.length - 1].id;
+}
+
+/**
  * Fields with their groups unfolded: in place of `Stats: group Abilities`
  * stand the abilities, each marked with the path of groups it lies in —
  * `["Stats"]`, or `["Values", "Stats"]` for a group in a group. One that

@@ -429,6 +429,8 @@ export type Template = {
   group: boolean;
   /** Not in the outline the app sets out by itself — a type only other documents point to. */
   navigationHidden?: boolean;
+  /** Its subtypes are kinds apart: a document changes its type within one of them — see `familyId`. */
+  kindsApart?: boolean;
   /** The rules of the game its documents reckon with — see `shared/Dice`. */
   rules: Rule[];
   description: string;

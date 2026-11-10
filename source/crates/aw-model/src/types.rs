@@ -61,6 +61,22 @@ pub fn root_id(all: &[Template], start: &Template) -> String {
         .unwrap_or_else(|| start.id.clone())
 }
 
+/// The family a type belongs to — what a document of it may change into.
+///
+/// The root of its tree, unless a type on the way up has its subtypes as
+/// kinds apart: then the one below it. `Means` holds spells, items and
+/// features together for what points at them, yet an item never becomes a
+/// spell; under `Character` an NPC may turn out a player character.
+pub fn family_id(all: &[Template], start: &Template) -> String {
+    let chain: Vec<&Template> = std::iter::once(start).chain(ancestors(all, start)).collect();
+    for pair in chain.windows(2) {
+        if pair[1].kinds_apart {
+            return pair[0].id.clone();
+        }
+    }
+    chain.last().map(|t| t.id.clone()).unwrap_or_else(|| start.id.clone())
+}
+
 /// The type a reference field points at.
 ///
 /// A bare `parent` names no type: it points at the root of the owning type's

@@ -1907,6 +1907,13 @@ pub(crate) fn article_type_set_in(store: &Store, world: String, article: String,
     let target = aw_model::types::find(&templates, &article_type).filter(|t| !t.group).ok_or_else(|| AppError("There is no such type.".into()))?;
     let db = store.db(&world)?;
     let mut doc = db.document(&article)?.filter(|d| d.trashed().is_none()).ok_or_else(|| AppError("There is no such article.".into()))?;
+    // Within its family only: an item may become an armor, never an NPC. A
+    // document whose type is gone may become any.
+    if let Some(now) = aw_model::types::find(&templates, &doc.doc_type) {
+        if aw_model::types::family_id(&templates, now) != aw_model::types::family_id(&templates, target) {
+            return Err(AppError(format!("{} and {} are different kinds — a document changes type within its kind.", now.name, target.name)));
+        }
+    }
     let reader = store.reader(&world)?;
     let may_make = !target.create.trim().is_empty() && reader.allows(&target.create);
     if !reader.is_gm() && !(may_make && doc.base().is_some_and(|b| reader.may_edit(&b.access))) {
