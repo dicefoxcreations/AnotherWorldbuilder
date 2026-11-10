@@ -280,6 +280,7 @@ export function ArticlePage({
           block={block.key}
           layers={parts}
           base={article.visibility}
+          titled={!!block.title}
           access={glance ? undefined : region}
           resolve={resolve}
           values={valueOf}
@@ -315,7 +316,7 @@ export function ArticlePage({
           source={layers.map((l) => l.text).join("\n")}
           access={!glance && differs(layers[0])}
         >
-          <BlockText article={article.id} block={section} layers={layers} base={article.visibility} access={glance ? undefined : region} resolve={resolve} values={valueOf} onPlace={onPlace} />
+          <BlockText article={article.id} block={section} layers={layers} base={article.visibility} titled={!!block.title} access={glance ? undefined : region} resolve={resolve} values={valueOf} onPlace={onPlace} />
         </FoldBlock>
       ) }));
   }
@@ -461,12 +462,15 @@ export function BlockText({
   block,
   layers,
   access,
+  titled = true,
   ...shown
 }: {
   article: string;
   block: string;
   layers: LayerView[];
   base: string;
+  /** Whether the section has a title — where the first part's access stands. Without one, the part says it itself. */
+  titled?: boolean;
   /** Who views and changes a part, where it differs from the document — the first part's stands at the title. */
   access?: (part: LayerView) => ReactNode;
   resolve: Resolve;
@@ -498,7 +502,7 @@ export function BlockText({
     <>
       {layers.map((layer, i) =>
         texts[i] === "" || (folds && folds[i].length > 0 && folds[i].every((n) => n.hidden)) ? null : (
-          <PartDisplay key={layer.id} layer={{ ...layer, text: texts[i] }} nodes={trees?.[i]} folds={folds?.[i]} access={i > 0 ? access?.(layer) : null} first={i === 0} {...shown} />
+          <PartDisplay key={layer.id} layer={{ ...layer, text: texts[i] }} nodes={trees?.[i]} folds={folds?.[i]} access={i > 0 || !titled ? access?.(layer) : null} first={i === 0 && titled} {...shown} />
         ),
       )}
     </>
