@@ -19,7 +19,7 @@ import { MapCard } from "./MapView";
 import { attr, writeImageLine } from "../../shared/ImageTag";
 import { FlowField, FlowHandle, FlowMarks } from "../../shared/editor/FlowField";
 import type { Piece } from "../../shared/GraphText";
-import { HeadingInspector, headingAt, LinkInspector, type SectionActions, SectionInspector } from "./EditorInspectors";
+import { HeadingInspector, headingAt, LinkInspector, type SectionActions, SectionInspector, sectionEnd } from "./EditorInspectors";
 import { type Links, SectionBelow, useBricks } from "./EditorTools";
 
 /**
@@ -44,6 +44,8 @@ export function PartEditor({
   docAccess,
   sections,
   editor = false,
+  onSplit,
+  onJoinAbove,
 }: {
   world: WorldInfo;
   part: BlockPart;
@@ -65,6 +67,10 @@ export function PartEditor({
   onPart: (p: Partial<BlockPart>) => void;
   onRemove: () => void;
   onCaret: (start: number, end: number) => void;
+  /** A stretch of the text made a part of its own, with access of its own — the GM's. */
+  onSplit?: (start: number, end: number) => void;
+  /** This part back into the one above it. */
+  onJoinAbove?: () => void;
   /** Draws a graph standing in the text — the `i`-th piece of it. */
   graph: (g: GraphNode, i: number) => React.ReactNode;
 }) {
@@ -191,8 +197,19 @@ export function PartEditor({
           onClose={() => setChosenLink(null)}
         />
       )}
-      {heading && (
-        <HeadingInspector level={heading.level} words={heading.words} onLevel={setLevel} onClose={() => setHeadingLine(null)} />
+      {heading && headingLine !== null && (
+        <HeadingInspector
+          world={world}
+          level={heading.level}
+          words={heading.words}
+          onLevel={setLevel}
+          // The heading and what belongs to it: it has access of its own where it is a part of its own.
+          access={headingLine === 0 && sectionEnd(part.text, headingLine, heading.level) >= part.text.trimEnd().length ? { view: part.view, edit: part.edit } : null}
+          onAccess={(patch) => onPart(patch)}
+          onOwnAccess={onSplit ? () => (onSplit(headingLine, sectionEnd(part.text, headingLine, heading.level)), setHeadingLine(null)) : undefined}
+          onJoinAbove={onJoinAbove && headingLine === 0 ? () => (onJoinAbove(), setHeadingLine(null)) : undefined}
+          onClose={() => setHeadingLine(null)}
+        />
       )}
       {chosenSection && (
         <SectionInspector

@@ -219,6 +219,33 @@ export function VisualEditor({
       ),
     });
 
+  /**
+   * A stretch of a part — a heading and what belongs to it — made a part of
+   * its own, with access of its own: at first the GM's alone. What stood
+   * before and after it stays as it was.
+   */
+  const splitPart = (b: number, p: number, start: number, end: number) => {
+    const block = doc.blocks[b];
+    const part = block.parts[p];
+    const before = part.text.slice(0, start).replace(/\n+$/, "");
+    const middle = part.text.slice(start, end).replace(/\n+$/, "");
+    const after = part.text.slice(end).replace(/^\n+/, "");
+    const stamp = Date.now();
+    const parts: BlockPart[] = [
+      ...(before.trim() ? [{ ...part, text: before }] : []),
+      { key: `new-${stamp}-own`, text: middle, view: "gm", edit: "gm" },
+      ...(after.trim() ? [{ ...part, key: before.trim() ? `new-${stamp}-after` : part.key, text: after }] : []),
+    ];
+    onDoc({ ...doc, blocks: doc.blocks.map((x, i) => (i === b ? { ...x, parts: [...x.parts.slice(0, p), ...parts, ...x.parts.slice(p + 1)] } : x)) });
+  };
+  /** A part back into the one above it — it takes that one's access. */
+  const joinAbove = (b: number, p: number) => {
+    const parts = doc.blocks[b].parts;
+    const above = parts[p - 1];
+    const joined = { ...above, text: `${above.text.replace(/\n+$/, "")}\n\n${parts[p].text}` };
+    onDoc({ ...doc, blocks: doc.blocks.map((x, i) => (i === b ? { ...x, parts: [...parts.slice(0, p - 1), joined, ...parts.slice(p + 1)] } : x)) });
+  };
+
   const base = article.visibility;
 
   // Whoever edits has every part of the text before them.
@@ -462,6 +489,8 @@ export function VisualEditor({
                   p > 0 && !(samePolicy(part.view, doc.access.view) && samePolicy(part.edit, doc.access.edit))
                 }
                 removable={world.isGm && block.parts.length > 1}
+                onSplit={world.isGm ? (start, end) => splitPart(b, p, start, end) : undefined}
+                onJoinAbove={world.isGm && p > 0 ? () => joinAbove(b, p) : undefined}
                 editor={!world.isGm && mayEditPart(article, part.key)}
                 links={links}
                 carets={carets(part.key)}

@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { type ArticleView } from "../../api/client";
 import { linker, linkIn, linkText, linkTo, MARK, typeNames } from "../../shared/Links";
 import { anchorName } from "../../shared/Anchors";
-import { Inspector, InspectorSection } from "./Inspector";
+import { AccessRows, Inspector, InspectorSection } from "./Inspector";
+import type { WorldInfo } from "../../api/client";
 import { findType, isA, ancestors } from "../../shared/types";
 import { type Links, namedLike } from "./EditorTools";
 
@@ -68,6 +69,14 @@ export function SectionInspector({ anchor, actions, onRenamed, onClose }: { anch
   );
 }
 
+/** Where what belongs to a heading ends: at the next heading as high or higher, or at the end. */
+export function sectionEnd(text: string, start: number, level: number): number {
+  const after = text.indexOf("\n", start);
+  if (after < 0) return text.length;
+  const next = new RegExp(`^#{1,${level}} `, "m").exec(text.slice(after + 1));
+  return next ? after + 1 + next.index : text.length;
+}
+
 /** The heading the caret stands in, at `start` of `text`: its level and its words — or none. */
 export function headingAt(text: string, start: number): { level: number; words: string } | null {
   const m = /^(#{1,6}) (.*)$/m.exec(text.slice(start, text.indexOf("\n", start) < 0 ? undefined : text.indexOf("\n", start)));
@@ -79,9 +88,50 @@ export function headingAt(text: string, start: number): { level: number; words: 
  * marks one would type for it (`## `) are not shown in the visual editor;
  * here they are set.
  */
-export function HeadingInspector({ level, words, onLevel, onClose }: { level: number; words: string; onLevel: (level: number) => void; onClose: () => void }) {
+export function HeadingInspector({
+  world,
+  level,
+  words,
+  onLevel,
+  access,
+  onAccess,
+  onOwnAccess,
+  onJoinAbove,
+  onClose,
+}: {
+  world: WorldInfo;
+  level: number;
+  words: string;
+  onLevel: (level: number) => void;
+  /** Its section's access, where it is a part of its own — none: it shares its part's. */
+  access: { view: string; edit: string } | null;
+  onAccess: (patch: Partial<{ view: string; edit: string }>) => void;
+  /** Makes the heading and what belongs to it a part of its own. */
+  onOwnAccess?: () => void;
+  /** Gives the section back to the text above it. */
+  onJoinAbove?: () => void;
+  onClose: () => void;
+}) {
   return (
     <Inspector title={words ? `Heading · ${words}` : "Heading"} onClose={onClose}>
+      {access ? (
+        <InspectorSection title="Access — this section">
+          <AccessRows world={world} value={access} viewOnly={!world.isGm} onChange={onAccess} />
+          {onJoinAbove && (
+            <button className="compact ghost" onClick={onJoinAbove}>
+              Same access as above
+            </button>
+          )}
+        </InspectorSection>
+      ) : (
+        onOwnAccess && (
+          <InspectorSection title="Access">
+            <button className="compact" onClick={onOwnAccess} title="This heading and what belongs to it, to the next heading as high">
+              Own access from here
+            </button>
+          </InspectorSection>
+        )
+      )}
       <InspectorSection title="Level">
         <div className="segmented">
           {[1, 2, 3, 4, 5, 6].map((n) => (
