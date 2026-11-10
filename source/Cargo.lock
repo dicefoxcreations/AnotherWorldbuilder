@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "aw-crypto"
-version = "0.2.18"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "blake3",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "aw-desktop"
-version = "0.2.18"
+version = "0.3.0"
 dependencies = [
  "aw-crypto",
  "aw-model",
@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "aw-model"
-version = "0.2.18"
+version = "0.3.0"
 dependencies = [
  "pulldown-cmark",
  "serde",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "aw-store"
-version = "0.2.18"
+version = "0.3.0"
 dependencies = [
  "automerge",
  "aw-model",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "aw-sync"
-version = "0.2.18"
+version = "0.3.0"
 dependencies = [
  "aw-crypto",
  "getrandom 0.4.3",

@@ -11,6 +11,10 @@ Docker image when the server changed. Run from `source/`, in this order:
   python3 tools/build/release.py publish "What is new" [--server]
       latest.json, the GitHub release v<version> with every package, and
       with --server the image as <version> and latest on Docker Hub
+  python3 tools/build/release.py publish "What is new" --dev [--server]
+      an internal test release in the private dev repo instead: Linux and
+      Android (and the server files), no Windows, no latest.json — installed
+      apps never see it — and nothing on Docker Hub
 
 `build` needs nothing pushed; `windows` and `publish` need HEAD on GitHub.
 The keys stay outside the project.
@@ -31,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PROGRAMS = ROOT.parent / "programs"
 APP = ROOT / "apps/desktop"
 REPO = "dicefoxcreations/AnotherWorldbuilder"
+DEV_REPO = "dicefoxcreations/AnotherWorldbuilder-dev"
 IMAGE = "index.docker.io/dicefoxcreations/anotherworldbuilder-server"
 
 
@@ -101,17 +106,19 @@ def windows():
     print(f"\nWindows {version()} collected. Commit programs/, push, then `release.py publish`.")
 
 
-def publish(notes: str, server: bool):
+def publish(notes: str, server: bool, dev: bool):
     v = version()
     env = node_env()
-    run("node", "tools/build/update-manifest.mjs", notes, env=env)
     files = [
         PROGRAMS / f"linux-x86_64/AnotherWorldbuilder_{v}_amd64.AppImage",
         PROGRAMS / f"linux-x86_64/AnotherWorldbuilder_{v}_amd64.deb",
-        PROGRAMS / f"windows-x86_64/AnotherWorldbuilder_{v}_x64-setup.exe",
         PROGRAMS / f"android/AnotherWorldbuilder_{v}_android.apk",
-        PROGRAMS / "latest.json",
     ]
+    # An internal release: no installer built on the public repo, and no
+    # update manifest — apps look for updates in the public repo only.
+    if not dev:
+        run("node", "tools/build/update-manifest.mjs", notes, env=env)
+        files += [PROGRAMS / f"windows-x86_64/AnotherWorldbuilder_{v}_x64-setup.exe", PROGRAMS / "latest.json"]
     if server:
         files += [PROGRAMS / "server-linux-x86_64/aw-server", PROGRAMS / f"server-linux-x86_64/aw-server-{v}-docker.tar"]
     missing = [str(f) for f in files if not f.exists()]
@@ -125,10 +132,10 @@ def publish(notes: str, server: bool):
             for path in sorted((template / "D&D 5e.awpack").rglob("*")):
                 z.write(path, path.relative_to(template).as_posix() + ("/" if path.is_dir() else ""))
         run("gh", "release", "download", "-R", REPO, "-p", "Example-world.zip", "-D", extra)
-        if not server:
+        if not server and not dev:
             run("gh", "release", "download", "-R", REPO, "-p", "aw-server", "-p", "aw-server-*-docker.tar", "-D", extra)
         files += sorted(Path(extra).iterdir())
-        image = next(f.name for f in files if f.name.endswith("-docker.tar"))
+        image = next((f.name for f in files if f.name.endswith("-docker.tar")), "")
         rows = [("AnotherWorldbuilder_%s_amd64.AppImage" % v, "Linux, no installation; updates itself"),
                 ("AnotherWorldbuilder_%s_amd64.deb" % v, "Linux (Debian, Ubuntu), installed"),
                 ("AnotherWorldbuilder_%s_x64-setup.exe" % v, "Windows installer, for the current user; updates itself"),
@@ -138,13 +145,19 @@ def publish(notes: str, server: bool):
                 ("aw-server", "The server without a window (Linux, static) — for a NAS or a headless machine"),
                 (image, "The server as a Docker image; simpler: `dicefoxcreations/anotherworldbuilder-server` from Docker Hub"),
                 ("latest.json", "What installed apps ask for when looking for updates")]
-        table = "| File | For |\n| --- | --- |\n" + "\n".join(f"| `{n}` | {t} |" for n, t in rows)
+        names = {f.name for f in files}
+        table = "| File | For |\n| --- | --- |\n" + "\n".join(f"| `{n}` | {t} |" for n, t in rows if n in names)
         sums = "\n".join(f"{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}" for f in files)
-        body = (f"**In development** – not meant for real use yet."
-                + (f" **Update the server too** (Docker: `dicefoxcreations/anotherworldbuilder-server:{v}`)." if server else "")
+        body = ("**Internal test build** – not released. Windows comes with the public release.\n\n" if dev else "") + (f"**In development** – not meant for real use yet."
+                + (f" **Update the server too** (Docker: `dicefoxcreations/anotherworldbuilder-server:{v}`)." if server and not dev else "")
                 + f"\n\n{notes}\n\n{table}\n\n### Checksums (SHA-256)\n\n```\n{sums}\n```\n")
         notes_file = Path(extra) / "notes.md"
         notes_file.write_text(body)
+        if dev:
+            # The dev repo has its own history: the release stands on its main.
+            run("gh", "release", "create", f"v{v}", "-R", DEV_REPO, "--title", f"{v} (internal)", "--notes-file", notes_file, *files)
+            print(f"\nReleased {v} internally.")
+            return
         run("gh", "release", "create", f"v{v}", "-R", REPO, "--title", v, "--notes-file", notes_file, "--latest", "--target", head(), *files)
     if server:
         tar = PROGRAMS / f"server-linux-x86_64/aw-server-{v}-docker.tar"
@@ -163,13 +176,14 @@ def main():
     p = steps.add_parser("publish")
     p.add_argument("notes")
     p.add_argument("--server", action="store_true", help="the Docker image too")
+    p.add_argument("--dev", action="store_true", help="an internal release in the private dev repo")
     args = parser.parse_args()
     if args.step == "build":
         build(args.server)
     elif args.step == "windows":
         windows()
     else:
-        publish(args.notes, args.server)
+        publish(args.notes, args.server, args.dev)
 
 
 if __name__ == "__main__":
