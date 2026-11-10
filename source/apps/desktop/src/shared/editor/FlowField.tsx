@@ -748,7 +748,8 @@ export function FlowMarks({
     const h = handle.current;
     const box = h.root?.parentElement;
     if (!h.root || !box || ranges.length === 0) {
-      setBoxes([]);
+      // Nothing marked, mostly: no new empty list, and no drawing again for it.
+      setBoxes((was) => (was.length ? [] : was));
       return;
     }
     const place = () => {
