@@ -150,7 +150,7 @@ export function caretPoint(field: Field, index: number): { x: number; y: number 
   });
   copy.textContent = field.value.slice(0, index);
   const mark = document.createElement("span");
-  mark.textContent = "​";
+  mark.textContent = "\u200b";
   copy.appendChild(mark);
   document.body.appendChild(copy);
   const box = field.getBoundingClientRect();

@@ -31,7 +31,7 @@ export function readableText(text: string): string {
     .replace(/@@(?:[^@:]*:)?([^@]*)@@/g, "$1")
     .replace(/<[^>]*>/g, " ")
     .replace(new RegExp(`\\s\\^${ANCHOR}(?=\\s|$)`, "gu"), "")
-    .replace(/[#*_>`​]/g, "")
+    .replace(/[#*_>`\u200b]/g, "")
     .replace(/\\\|/g, "|")
     .replace(/\s+/g, " ")
     .trim();

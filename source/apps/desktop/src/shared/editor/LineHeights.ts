@@ -17,7 +17,7 @@ export function useLineHeights(field: RefObject<HTMLTextAreaElement | null>, tex
       const copy = document.createElement("div");
       for (const p of COPIED) copy.style[p] = style[p];
       Object.assign(copy.style, { position: "absolute", visibility: "hidden", top: "0", left: "-9999px", boxSizing: "border-box", width: `${el.clientWidth}px` });
-      for (const line of text.split("\n")) copy.appendChild(document.createElement("div")).textContent = line || "​";
+      for (const line of text.split("\n")) copy.appendChild(document.createElement("div")).textContent = line || "\u200b";
       document.body.appendChild(copy);
       const next = [...copy.children].map((c) => c.getBoundingClientRect().height);
       copy.remove();
