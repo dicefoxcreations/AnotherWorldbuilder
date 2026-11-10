@@ -44,7 +44,7 @@ export type Ast =
   | { kind: "each"; ref: string; body: Ast }
   | { kind: "neg"; of: Ast }
   | { kind: "op"; op: Op; left: Ast; right: Ast }
-  /** `[Mut, Klugheit, Intuition]`: several values, one by one — as a number, their sum. */
+  /** `[Courage, Wits, Intuition]`: several values, one by one — as a number, their sum. */
   | { kind: "list"; items: Ast[] }
   /** `map(success, 5W6)`: a rule on each die, each value — a list. */
   | { kind: "map"; rule: Rule; rules: Rule[]; args: Ast[] }
@@ -239,11 +239,39 @@ function applied(rule: Rule, args: Ast[], rules: Rule[], inside: string[]): Ast 
 /** Keys of dice handed to rules — one throw each. */
 let shared = 0;
 
+/** No rules — one list, so formulas read without rules are remembered too. */
+const NO_RULES: Rule[] = [];
+/**
+ * Formulas read, per list of rules — a sheet reckons the same few for every
+ * document, a table for every row. What does not read is remembered as its
+ * error. A formula read is never changed: reckoning only walks it.
+ */
+const read = new WeakMap<Rule[], Map<string, Ast | Error>>();
+const READ_BUDGET = 4096;
+
 /**
  * Reads a formula — or throws, saying what does not read. The world's
  * `rules` are put in where they are called.
  */
-export function parse(formula: string, rules: Rule[] = [], inside: string[] = []): Ast {
+export function parse(formula: string, rules: Rule[] = NO_RULES, inside: string[] = []): Ast {
+  let known = read.get(rules);
+  if (!known) read.set(rules, (known = new Map()));
+  const key = inside.length ? `${inside.join(",")}\n${formula}` : formula;
+  let ast = known.get(key);
+  if (ast === undefined) {
+    try {
+      ast = parsed(formula, rules, inside);
+    } catch (e) {
+      ast = e instanceof Error ? e : new Error(String(e));
+    }
+    if (known.size >= READ_BUDGET) known.clear();
+    known.set(key, ast);
+  }
+  if (ast instanceof Error) throw ast;
+  return ast;
+}
+
+function parsed(formula: string, rules: Rule[], inside: string[]): Ast {
   const list = tokens(formula);
   let at = 0;
   const peek = () => list[at];
@@ -426,7 +454,7 @@ export const isCheck = (formula: string) => /^\s*[+-]/.test(formula);
 export const checks = (rules: Rule[] = []) => ruleNamed(rules, "check")?.params.length === 1;
 
 /** A formula read as it rolls: a check through the rule `check`. */
-export const parseRoll = (formula: string, rules: Rule[] = []): Ast =>
+export const parseRoll = (formula: string, rules: Rule[] = NO_RULES): Ast =>
   parse(isCheck(formula) && checks(rules) ? `check(${formula})` : formula, rules);
 
 /**
@@ -471,6 +499,8 @@ const random = (sides: number): number => {
 };
 
 const MAX_DICE = 200;
+/** Beyond this a die is no die — and `random` could not throw it fairly. */
+const MAX_SIDES = 1_000_000;
 
 /**
  * Reckons a formula. With `roll` the dice are thrown; without, a formula
@@ -490,8 +520,9 @@ export function reckon(ast: Ast, lookup: Lookup, roll?: (sides: number) => numbe
         if (!roll) throw new Error("dice are no number");
         const count = Math.floor(walk(a.count)[0]);
         const sides = Math.floor(walk(a.sides)[0]);
-        if (sides < 1) throw new Error(`a die has at least one side`);
-        if (count < 0) throw new Error(`no die is thrown less than never`);
+        if (!(sides >= 1)) throw new Error(`a die has at least one side`);
+        if (sides > MAX_SIDES) throw new Error(`a die has at most ${MAX_SIDES} sides`);
+        if (!(count >= 0)) throw new Error(`no die is thrown less than never`);
         if (dice.length + count > MAX_DICE) throw new Error(`more than ${MAX_DICE} dice`);
         const thrown = Array.from({ length: count }, () => roll(sides));
         // Which count: all, or the highest (lowest) `n` — the others are dropped.
@@ -752,7 +783,7 @@ export const signed = (n: number) => (n < 0 ? `−${-n}` : `+${n}`);
 /** What the rules make of a check: a critical, a fumble, a success or a failure. */
 export type Mark = "crit" | "fumble" | "success" | "failure";
 
-/** `check(Mut, Klugheit, Intuition, 7)`: a check of several values, called by name. */
+/** `check(Courage, Wits, Intuition, 7)`: a check of several values, called by name. */
 const calledCheck = (formula: string) => /^\s*check\s*\(/i.test(formula);
 
 /** Whether a roll is a check: `[[+4]]` where the rules have `check`, or `[[check(…)]]`. */

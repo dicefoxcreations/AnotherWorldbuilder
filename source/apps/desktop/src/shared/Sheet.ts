@@ -1,4 +1,4 @@
-import type { ArticleView, Template, TemplateField } from "../api/client";
+import type { ArticleView, Rule, Template, TemplateField } from "../api/client";
 import { idsIn, isA, picksFor, propertyNamed, propertyValues, typeOf, articleById } from "./types";
 import { parse, reckon, type Lookup, type Scope } from "./Dice";
 import { perLists } from "./Cache";
@@ -195,6 +195,25 @@ function splitPath(name: string): [string, string] | undefined {
   return undefined;
 }
 
+const NO_RULES: Rule[] = [];
+const joined = new WeakMap<Rule[], WeakMap<Rule[], Rule[]>>();
+/**
+ * A type's rules, then the picker's it does not have itself — the same list
+ * for the same two, so what is read by them is read once (`parse` remembers
+ * per list).
+ */
+function joinedRules(own: Rule[], outer: Rule[]): Rule[] {
+  if (outer.length === 0) return own;
+  let byOuter = joined.get(own);
+  if (!byOuter) joined.set(own, (byOuter = new WeakMap()));
+  let both = byOuter.get(outer);
+  if (!both) {
+    both = [...own, ...outer.filter((r) => !own.some((o) => o.name.toLowerCase() === r.name.toLowerCase()))];
+    byOuter.set(outer, both);
+  }
+  return both;
+}
+
 /**
  * The lookup of one document. Inside a pick it knows the pick's number, the
  * pick's properties, and — what it does not know — the picker's, and so on
@@ -206,8 +225,7 @@ function splitPath(name: string): [string, string] | undefined {
  */
 function lookupIn(templates: Template[], articles: ArticleView[], article: ArticleView, busy: Set<string>, inside?: Inside): Lookup {
   const type = typeOf(templates, article.articleType);
-  const ownRules = type?.rules ?? [];
-  const rules = [...ownRules, ...(inside?.outer.rules ?? []).filter((r) => !ownRules.some((o) => o.name.toLowerCase() === r.name.toLowerCase()))];
+  const rules = joinedRules(type?.rules ?? NO_RULES, inside?.outer.rules ?? NO_RULES);
   /** The documents a reference of ours picks — `undefined` where we have none so named. */
   const ownIds = (name: string): string[] | undefined => {
     const field = propertyNamed(type, name);
