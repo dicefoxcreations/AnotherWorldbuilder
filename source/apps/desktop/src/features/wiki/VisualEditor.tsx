@@ -441,6 +441,8 @@ export function VisualEditor({
       block={block}
       onPick={pickable ? () => setPicked(block.key) : undefined}
       picked={picked === block.key}
+      // Seen by others than the document: framed, title and all — as when read.
+      guarded={!!block.title && !!block.parts[0] && !samePolicy(block.parts[0].view, doc.access.view)}
       access={
         // Only what differs from the document's — the rest goes as the document does.
         block.parts[0] && !(samePolicy(block.parts[0].view, doc.access.view) && samePolicy(block.parts[0].edit, doc.access.edit)) && (() => {

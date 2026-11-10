@@ -752,6 +752,9 @@ button.infobox-image.choosable { padding: 0; cursor: pointer; font: inherit; }
 
 .block { display: flex; flex-direction: column; gap: 6px; }
 .block.box { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+/* A section others than the document see: framed dashed, its title inside — a box keeps its frame, dashed. */
+.block.guarded:not(.box) { border: 1px dashed var(--accent-line); border-radius: 10px; padding: 10px 14px 12px 28px; }
+.block.box.guarded { border-style: dashed; border-color: var(--accent-line); }
 .block.quote { border-left: 3px solid var(--border); padding-left: 14px; }
 /* ---------- Stat block ----------
    A creature's or a character's values at a glance: a card of the app's

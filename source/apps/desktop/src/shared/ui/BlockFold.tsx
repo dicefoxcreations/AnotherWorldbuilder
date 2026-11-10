@@ -138,6 +138,7 @@ export function FoldBlock({
   picked,
   onMove,
   access,
+  guarded = false,
   children,
   source,
 }: {
@@ -145,6 +146,8 @@ export function FoldBlock({
   block: TemplateBlock;
   /** Who views and changes it — right of the title, after a hairline. */
   access?: ReactNode;
+  /** Seen by others than the document as a whole: framed dashed, title and all. */
+  guarded?: boolean;
   onPick?: () => void;
   picked?: boolean;
   /** Another block was dropped here — `key` goes before or after this one. */
@@ -184,7 +187,7 @@ export function FoldBlock({
   };
   return (
     <section
-      className={`block ${block.style}${place}${shut ? " folded" : ""}${picked ? " picked" : ""}${drop ? ` drop-${drop}` : ""}`}
+      className={`block ${block.style}${place}${guarded ? " guarded" : ""}${shut ? " folded" : ""}${picked ? " picked" : ""}${drop ? ` drop-${drop}` : ""}`}
       style={width}
       onDragOverCapture={over}
       onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setDrop(null)}

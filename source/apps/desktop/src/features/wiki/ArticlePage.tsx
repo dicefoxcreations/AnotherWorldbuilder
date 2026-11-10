@@ -274,6 +274,7 @@ export function ArticlePage({
         article={article.id}
         block={block}
         access={!glance && differs(parts[0])}
+        guarded={!glance && !!block.title && !samePolicy(parts[0].policy, article.visibility)}
       >
         <BlockText
           article={article.id}
@@ -315,6 +316,7 @@ export function ArticlePage({
           block={block}
           source={layers.map((l) => l.text).join("\n")}
           access={!glance && differs(layers[0])}
+          guarded={!glance && !!block.title && !samePolicy(layers[0].policy, article.visibility)}
         >
           <BlockText article={article.id} block={section} layers={layers} base={article.visibility} titled={!!block.title} access={glance ? undefined : region} resolve={resolve} values={valueOf} onPlace={onPlace} />
         </FoldBlock>
