@@ -69,22 +69,4 @@ Server's screen is `app/src/main/java/…/server/`, its Rust side
 `src-tauri/src/dedicated.rs` and `android.rs`. The APK goes to
 `../programs/android/`, signed with `~/.tauri/android/anotherworldbuilder.jks`
 (see the script — without that key no update installs over an installed app).
-`--targets x86_64 --debug` builds for an emulator, with the server's device test.
-
-## Checks
-
-```sh
-cargo test -p aw-desktop dedicated          # start, stop, restart, identity, ports
-python3 tools/build/android.py --targets x86_64 --debug
-python3 tools/test/android-server.py emulator-5590
-```
-
-The device test (on a dedicated emulator only) runs in AW Server's process:
-foreground service, QUIC, TCP code lookup, the notification's Stop, screen
-off, closing the screen, backup export, the same identity after a restart, the
-Options/Worlds/About pages, and losing and regaining Wi-Fi where the emulator
-can. It passed on Android 15 (API 35). Long unattended running, battery and
-vendor limits still need a real phone before one relies on it as the only host.
-
-`tools/test/android-client.mjs` checks the app as an admitted player against a
-server; `docs/testing/android-vm.md` sets that up.
+`--targets x86_64 --debug` builds for an emulator.

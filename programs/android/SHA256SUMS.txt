@@ -1,1 +1,1 @@
-c6c98422bc23a11e7952fbe9352878c9b1ae6266c7c1f406c419cfe7b6797d9a  AnotherWorldbuilder_0.2.18_android.apk
+dc02049d1c6fd481a5c7fa9fdbf7985736bbc597c0b3062d4c50b60df8c1428d  AnotherWorldbuilder_0.3.0_android.apk
