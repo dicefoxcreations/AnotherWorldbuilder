@@ -18,6 +18,7 @@ import { ImagePicker } from "../../shared/ui/ImagePicker";
 import { imageTag } from "../../shared/ImageTag";
 import { FlowHandle } from "../../shared/editor/FlowField";
 import { byText } from "../../shared/Collate";
+import { perLists } from "../../shared/Cache";
 
 type Brick = { name: string; text: string; gmOnly?: boolean; picksImage?: boolean };
 
@@ -185,12 +186,13 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/** What a brick is put into: a text field, or a flow field that acts like one. */
+type Caretful = { selectionStart: number | null; setSelectionRange: (a: number, b: number) => void; focus: () => void };
+
 /**
  * Inserts a brick at the caret and selects its placeholder («…»), so one
  * types straight over it.
  */
-/** What a brick is put into: a text field, or a flow field that acts like one. */
-type Caretful = { selectionStart: number | null; setSelectionRange: (a: number, b: number) => void; focus: () => void };
 
 function insertAt(field: Caretful, current: string, brick: Brick, onText: (t: string) => void) {
   const at = field.selectionStart ?? current.length;
@@ -325,11 +327,17 @@ function BrickMenu({
 type SectionChoice = {
   /** Marks the selection as a section of this name — where something is selected. */
   mark?: (name: string) => void;
-  /** Every section of the world this reader can open. */
-  found: SectionEntry[];
+  /** Every section of the world this reader can open — looked for once asked. */
+  found: () => SectionEntry[];
   onLink: (s: SectionEntry) => void;
 };
 type SectionEntry = { article: ArticleView; anchor: string; shown: string; line: string };
+
+/**
+ * Every anchor of the world — once per world as read: it goes through every
+ * text, and a right click only offers it.
+ */
+const allSections = perLists((all: ArticleView[], templates: Template[]) => sectionsOf(all, linker(all, templates)));
 
 /** Every anchor of the documents — named, or by the words of its line, links read by their names. */
 function sectionsOf(all: ArticleView[], resolve: (link: Link) => ArticleView | undefined): SectionEntry[] {
@@ -363,7 +371,8 @@ function SectionGroup({ sections }: { sections: SectionChoice }) {
   const [input, setInput] = useState("");
   const q = input.trim().toLowerCase();
   const found = mode === "link"
-    ? sections.found
+    ? sections
+        .found()
         .filter((s) => !q || `${s.article.name} ${s.shown} ${s.line}`.toLowerCase().includes(q))
         .slice(0, 8)
     : [];
@@ -678,7 +687,7 @@ export function useBricks(gm: boolean, text: string, onText: (t: string) => void
               if (next) put(next, to);
             }
           : undefined,
-      found: sectionsOf(links.all, resolve),
+      found: () => allSections(links.all, links.templates),
       onLink: (s) => {
         const words = text.slice(from, to);
         const shown = words.trim() && !/[\n@|]/.test(words) ? words : s.shown;
