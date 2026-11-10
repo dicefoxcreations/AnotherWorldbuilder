@@ -2115,6 +2115,7 @@ button.region-access:hover .bubble { border-color: var(--accent-line); }
 .anchor-lit { animation: anchor-lit 2.4s ease-out; border-radius: 4px; scroll-margin-top: calc(var(--header-height, 53px) + 16px); }
 /* An anchor closing a line (`^2f9e17`): the page shows nothing, the editor shows it faint. */
 .flow-anchor { color: var(--muted); font-size: 11px; opacity: .8; margin-left: 4px; cursor: pointer; user-select: none; }
+.flow-anchor svg { vertical-align: -2px; }
 
 /* One's own colour in a world, beside one's name in Players. */
 .own-colour { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { pieces, type Piece } from "../GraphText";
 import { mapPosition } from "./Merge";
 import { runs, shownName, type Run } from "./FlowText";
+import { iconMarkup } from "../ui/dicefox-icons/icon-renderer.js";
 
 /**
  * One field for a part of a document — its text with the images and graphs
@@ -19,7 +20,7 @@ import { runs, shownName, type Run } from "./FlowText";
  */
 
 /** Zero-width space: a place to put the caret where no text is — read back as nothing. */
-const ROOM = "​";
+const ROOM = "\u200b";
 
 const strip = (s: string) => s.split(ROOM).join("");
 
@@ -370,7 +371,9 @@ export function FlowField({
         atom.dataset.raw = r.text;
         atom.className = "flow-anchor";
         atom.title = `Anchor ^${name}`;
-        atom.textContent = /^[0-9a-f]{6}$/.test(name) ? "⚓" : `⚓ ${name}`;
+        // The DiceFox anchor — our own drawing, no text of the document in it.
+        atom.innerHTML = iconMarkup("anchor", { size: 12, mode: "mono" });
+        if (!/^[0-9a-f]{6}$/.test(name)) atom.append(` ${name}`);
         into.appendChild(atom);
         continue;
       }
