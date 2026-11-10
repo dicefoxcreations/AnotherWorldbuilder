@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../../shared/ui/Icons";
 import { api, type DiceLog, type Favorite, type SharedRoll, type WorldInfo } from "../../api/client";
 import { pace } from "../../app/live";
@@ -171,7 +171,8 @@ export function DiceTray({ world, children }: { world: WorldInfo; children: Reac
       };
       throwDice(entry.dice, true);
       take(entry, true);
-      if (!hidden) api.diceRoll(world.id, entry).catch(() => {});
+      // Not sent: the others did not see it — say so.
+      if (!hidden) api.diceRoll(world.id, entry).catch(() => setProblem("Not sent to the others."));
     },
     [everyone, world.id, take],
   );
@@ -215,17 +216,23 @@ export function DiceTray({ world, children }: { world: WorldInfo; children: Reac
       return !v;
     });
   };
-  const toggle = () =>
-    setOpen((o) => {
-      if (!o) {
-        setUnseen(0);
-        setToast(null);
-      }
-      return !o;
-    });
+  const toggle = useCallback(
+    () =>
+      setOpen((o) => {
+        if (!o) {
+          setUnseen(0);
+          setToast(null);
+        }
+        return !o;
+      }),
+    [],
+  );
+  // One value while nothing in it changed: every roll on the page reads it,
+  // and the log fills on its own.
+  const dice = useMemo(() => ({ roll, open, unseen, toggle }), [roll, open, unseen, toggle]);
 
   return (
-    <DiceContext.Provider value={{ roll, open, unseen, toggle }}>
+    <DiceContext.Provider value={dice}>
       {children}
       {open && (
         <DicePanel
