@@ -19,7 +19,7 @@ import { MapCard } from "./MapView";
 import { attr, writeImageLine } from "../../shared/ImageTag";
 import { FlowField, FlowHandle, FlowMarks } from "../../shared/editor/FlowField";
 import type { Piece } from "../../shared/GraphText";
-import { LinkInspector, type SectionActions, SectionInspector } from "./EditorInspectors";
+import { HeadingInspector, headingAt, LinkInspector, type SectionActions, SectionInspector } from "./EditorInspectors";
 import { type Links, SectionBelow, useBricks } from "./EditorTools";
 
 /**
@@ -119,6 +119,17 @@ export function PartEditor({
   const [chosenLink, setChosenLink] = useState<{ start: number; raw: string } | null>(null);
   useSideBar(`link:${part.key}`, !!chosenLink, () => setChosenLink(null));
   const linkPlace = chosenLink && part.text.slice(chosenLink.start, chosenLink.start + chosenLink.raw.length) === chosenLink.raw ? chosenLink : null;
+  // The heading the caret stands in, by where its line starts: its level in the side bar.
+  const [headingLine, setHeadingLine] = useState<number | null>(null);
+  const heading = headingLine === null ? null : headingAt(part.text, headingLine);
+  useSideBar(`heading:${part.key}`, !!heading, () => setHeadingLine(null));
+  /** The heading's marks as asked for — none: plain text. */
+  const setLevel = (level: number) => {
+    if (headingLine === null) return;
+    const rest = part.text.slice(headingLine).replace(/^#{1,6} /, "");
+    onPart({ text: part.text.slice(0, headingLine) + (level ? `${"#".repeat(level)} ` : "") + rest });
+    if (!level) setHeadingLine(null);
+  };
   // As in the right-click menu: a new section below this one.
   const sectionBelow = useContext(SectionBelow);
   const [dismissed, setDismissed] = useState(false);
@@ -130,6 +141,13 @@ export function PartEditor({
   // the versions, which one keeps open on purpose.
   const caretIn = (start: number, end: number) => {
     onCaret(start, end);
+    // In a heading: its level in the side bar, not the part's access.
+    const lineStart = part.text.lastIndexOf("\n", start - 1) + 1;
+    if (start === end && headingAt(part.text, lineStart)) {
+      setHeadingLine(lineStart);
+      return;
+    }
+    setHeadingLine(null);
     const holder = sideBarOwner();
     // Only a section of several parts has a part's own access to set; one
     // of a single part sets it on the section.
@@ -172,6 +190,9 @@ export function PartEditor({
           }}
           onClose={() => setChosenLink(null)}
         />
+      )}
+      {heading && (
+        <HeadingInspector level={heading.level} words={heading.words} onLevel={setLevel} onClose={() => setHeadingLine(null)} />
       )}
       {chosenSection && (
         <SectionInspector

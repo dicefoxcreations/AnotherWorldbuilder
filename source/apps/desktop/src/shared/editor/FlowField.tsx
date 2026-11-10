@@ -237,6 +237,8 @@ export class FlowHandle {
           if (el.dataset.line !== undefined) {
             // A hidden mark holds no caret: its edge is before or after the stretch.
             const hidden = (n: ChildNode | null) => (n as HTMLElement | null)?.dataset?.look === "mark-hidden";
+            // A heading's marks are never shown: in them, the caret stands at its first word.
+            if (el.dataset.line.startsWith("heading") && hidden(child.firstChild) && left <= this.lengthOf(child.firstChild!)) return [child, 1];
             if (left === 0 && hidden(child.firstChild)) return [box, i];
             if (left === length && hidden(child.lastChild)) return [box, i + 1];
             return this.pointIn(child, left);
@@ -684,6 +686,17 @@ export function FlowField({
           handlers?.onKeyDown?.(e);
           if (e.defaultPrevented) return;
           const mod = e.ctrlKey || e.metaKey;
+          // Back at a heading's first word: it becomes plain text — not run into the line above.
+          if (e.key === "Backspace" && !mod && !e.shiftKey && !e.altKey) {
+            const sel = h.selection();
+            const lineStart = sel ? h.text.lastIndexOf("\n", sel[0] - 1) + 1 : -1;
+            if (sel && sel[0] === sel[1] && /^#{1,6} $/.test(h.text.slice(lineStart, sel[0]))) {
+              e.preventDefault();
+              typed(h.text.slice(0, lineStart) + h.text.slice(sel[0]), lineStart);
+              onCaret?.(lineStart, lineStart);
+              return;
+            }
+          }
           if (mod && e.key.toLowerCase() === "z") {
             e.preventDefault();
             if (e.shiftKey) step(undo.current.forward, undo.current.back);

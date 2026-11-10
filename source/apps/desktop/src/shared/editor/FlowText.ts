@@ -32,9 +32,10 @@ const INLINE = new RegExp(
 /**
  * Cuts a text into what is drawn alike — as the page draws it.
  *
- * The marks one writes (`**`, `*`, `` ` ``, `## `) are hidden, the way the
- * page shows none, unless the caret stands in or at their stretch (`open`,
- * a position in this text): then they are there, to be changed. A link is
+ * The marks one writes (`**`, `*`, `` ` ``) are hidden, the way the page
+ * shows none, unless the caret stands in or at their stretch (`open`, a
+ * position in this text): then they are there, to be changed. A heading's
+ * `## ` stays hidden: its level is set in the side bar. A link is
  * drawn as read — its name — unless the caret stands inside it: then it is
  * the text one writes.
  */
@@ -124,8 +125,7 @@ export function runs(text: string, open = -1, around: { after?: boolean; before?
     if (h) {
       // A heading takes its line break with it: it stands on a line of its own.
       const hashes = h[1].length + 1;
-      const shown = open >= base && open <= base + line.replace(/\n$/, "").length;
-      const inner: Run[] = [mark(line.slice(0, hashes), shown)];
+      const inner: Run[] = [mark(line.slice(0, hashes), false)];
       inline(inner, line.slice(hashes), base + hashes);
       out.push({ text: line, look: `heading h${Math.min(7, h[1].length + 1)}`, inner });
       prev = "heading";

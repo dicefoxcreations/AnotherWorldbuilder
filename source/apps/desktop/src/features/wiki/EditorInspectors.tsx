@@ -68,6 +68,36 @@ export function SectionInspector({ anchor, actions, onRenamed, onClose }: { anch
   );
 }
 
+/** The heading the caret stands in, at `start` of `text`: its level and its words — or none. */
+export function headingAt(text: string, start: number): { level: number; words: string } | null {
+  const m = /^(#{1,6}) (.*)$/m.exec(text.slice(start, text.indexOf("\n", start) < 0 ? undefined : text.indexOf("\n", start)));
+  return m ? { level: m[1].length, words: m[2].trim() } : null;
+}
+
+/**
+ * A heading in the side bar: how high it stands — or plain text again. The
+ * marks one would type for it (`## `) are not shown in the visual editor;
+ * here they are set.
+ */
+export function HeadingInspector({ level, words, onLevel, onClose }: { level: number; words: string; onLevel: (level: number) => void; onClose: () => void }) {
+  return (
+    <Inspector title={words ? `Heading · ${words}` : "Heading"} onClose={onClose}>
+      <InspectorSection title="Level">
+        <div className="segmented">
+          {[1, 2, 3, 4, 5, 6].map((n) => (
+            <button key={n} className={level === n ? "on" : ""} title={`As ${"#".repeat(n)} in the code`} onClick={() => onLevel(n)}>
+              H{n}
+            </button>
+          ))}
+        </div>
+      </InspectorSection>
+      <button className="compact inspector-remove" onClick={() => onLevel(0)}>
+        Plain text again
+      </button>
+    </Inspector>
+  );
+}
+
 /**
  * A link in the side bar: where it leads — another document found by its
  * name — and the text it shows in its place, empty for the document's own
