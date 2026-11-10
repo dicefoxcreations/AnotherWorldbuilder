@@ -241,6 +241,13 @@ function draw(node: Drawn[], resolve: Resolve, onPlace: (o: Place) => void, fold
   const out: ReactNode[] = [];
   for (let i = 0; i < drawn.length; i++) {
     if (fold?.[i].hidden) continue;
+    // Plain words stand as they are — no element, with its contexts, for each
+    // stretch of text: a long page holds thousands.
+    const node = drawn[i];
+    if (node.kind === "text") {
+      out.push(node.text);
+      continue;
+    }
     // Images on the lines right after an image: one row with it.
     let end = i + 1;
     while (drawn[i].kind === "image" && end < drawn.length && drawn[end].kind === "image" && (drawn[end] as { beside?: boolean }).beside && !fold?.[end].hidden) end++;
@@ -656,7 +663,7 @@ export function GroupView({ of, resolve, onPlace }: { of: string; resolve: Resol
 }
 
 /**
- * `<abilities show=Abilities with=mod>` — the ability row of a stat block:
+ * `<abilities show=Abilities with=bonus>` — the ability row of a stat block:
  * each score, below it what the rule `with` makes of it — the modifier, as
  * the world defines it. Where the rules say what a check rolls, a click
  * rolls one: on the rule's result, or on the score itself.
@@ -682,7 +689,7 @@ export function Abilities({
   const editing = useContext(SheetEdit);
   const lists = useContext(ListEditing);
   const current = useContext(CurrentDocument);
-  // A group names its numbers: `show=Abilities` is the six of that group.
+  // A group names its numbers: `show=Abilities` is the numbers of that group.
   const names = show.flatMap((n) => {
     const group = world && groupNamed(world.templates, n);
     return group ? effective(world.templates, group).properties.filter((p) => p.kind === "number").map((p) => p.label) : [n];
