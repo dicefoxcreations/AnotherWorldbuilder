@@ -366,7 +366,7 @@ export function PlayersArea({
           </button>
         )}
       </div>
-      {world.mailboxes && <small className="small muted">Share each player's folder with them alone, and “alle” with everyone.</small>}
+      {world.mailboxes && <small className="small muted">Share each player's folder with them alone, and “everyone” with all of them.</small>}
 
       {removeDialog}
 

@@ -1,13 +1,13 @@
 //! Worlds without a server: mailboxes in a folder a cloud app keeps in step.
 //!
 //! The world lies with its GM. Beside it, in a folder of the GM's choice,
-//! each player has a mailbox the GM shares with them alone — `ein/` holds
-//! the world as they see it, `aus/` what they changed:
+//! each player has a mailbox the GM shares with them alone — `in/` holds
+//! the world as they see it, `out/` what they changed:
 //!
 //! ```text
-//! <folder>/alle/media/        pictures every player sees
-//! <folder>/<name>/ein/        world.sqlite as <name> sees it, media, done.json
-//! <folder>/<name>/aus/        <name>'s changes, one signed file each
+//! <folder>/everyone/media/    pictures every player sees
+//! <folder>/<name>/in/         world.sqlite as <name> sees it, media, done.json
+//! <folder>/<name>/out/        <name>'s changes, one signed file each
 //! ```
 //!
 //! A change is a command of the app, as a member on a server asks for it
@@ -26,11 +26,11 @@ use std::sync::{Mutex, OnceLock};
 use store::{Mailbox, Member, WorldDb};
 
 /// Pictures every player sees.
-const ALL: &str = "alle";
+const ALL: &str = "everyone";
 /// What a player gets.
-const IN: &str = "ein";
+const IN: &str = "in";
 /// What a player sends.
-const OUT: &str = "aus";
+const OUT: &str = "out";
 /// What the GM's app took of a player's changes, and what it refused.
 const DONE: &str = "done.json";
 /// What a mailbox's place is called before a player took it.
@@ -336,7 +336,7 @@ fn everyone_sees(store: &Store, world: &str) -> Answer<BTreeSet<String>> {
 /// A player's mailbox, as this device keeps track of it.
 #[derive(Serialize, Deserialize, Default)]
 struct Kept {
-    /// When the world in `ein/` was last taken: its size and time.
+    /// When the world in `in/` was last taken: its size and time.
     seen: (u64, u64),
 }
 
@@ -389,7 +389,7 @@ pub(crate) fn is_mailbox(store: &Store, world: &str) -> bool {
     store.load_network().is_ok_and(|s| s.mailboxes.contains_key(world))
 }
 
-/// Writes a change into the mailbox's `aus/`.
+/// Writes a change into the mailbox's `out/`.
 fn send(store: &Store, world: &str, command: &str, args: serde_json::Value, states: BTreeMap<String, document::Plain>) -> Answer<()> {
     let me = store.me()?;
     let at = store::now();
@@ -424,7 +424,7 @@ pub(crate) fn call(store: &Store, world: &str, command: &str, args: serde_json::
     Ok(value)
 }
 
-/// Takes the world from `ein/` where it changed — and what this device
+/// Takes the world from `in/` where it changed — and what this device
 /// sent that the GM's app has not taken yet stays as written. Says whether
 /// it changed.
 pub(crate) fn refresh(store: &Store, world: &str) -> Answer<bool> {

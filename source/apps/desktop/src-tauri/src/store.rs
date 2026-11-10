@@ -122,7 +122,7 @@ pub struct NetworkSettings {
 /// A player's mailbox in a world without a server.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Mailbox {
-    /// The folder shared with this player: `ein/` and `aus/` in it.
+    /// The folder shared with this player: `in/` and `out/` in it.
     pub folder: String,
 }
 
