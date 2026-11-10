@@ -6,6 +6,7 @@ import { CurrentDocument, useWorldData } from "../../features/worlds/WorldData";
 import { FolderTile } from "../../features/gallery/FolderTile";
 import { folderAt, imagesInside, navigationPlaces } from "../../features/gallery/Sorting";
 import { articleById } from "../types";
+import { byText } from "../Collate";
 
 /**
  * Choosing an image: uploading a new one under a name, or taking one from
@@ -104,7 +105,7 @@ export function ImagePicker({
   // In folders only for whoever has them, and not while searching.
   const browsing = folders.length > 0 && !needle;
   const shown = (images ?? []).filter((i) => (needle ? i.name.toLowerCase().includes(needle) : !browsing || folderOf(i) === at));
-  const subfolders = browsing ? folders.filter((f) => f.parent === at).sort((a, b) => a.name.localeCompare(b.name)) : [];
+  const subfolders = browsing ? folders.filter((f) => f.parent === at).sort((a, b) => byText(a.name, b.name)) : [];
   const trail: FolderNode[] = [];
   for (let f = folders.find((x) => x.id === at); f && trail.length < 32; f = folders.find((x) => x.id === f!.parent)) trail.unshift(f);
 

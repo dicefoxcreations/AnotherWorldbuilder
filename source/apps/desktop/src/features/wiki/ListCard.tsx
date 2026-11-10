@@ -14,6 +14,7 @@ import { Embed } from "./Embed";
 import { Abilities, GroupView, groupNamed } from "./MarkdownText";
 import { linker } from "../../shared/Links";
 import { RollScopeContext } from "../dice/DiceTray";
+import { byText } from "../../shared/Collate";
 
 type ListingNode = Extract<Node, { kind: "listing" }>;
 
@@ -90,7 +91,7 @@ function typeItems(templates: Template[], only?: (t: Template) => boolean): Pick
   return templates
     .filter((t) => !t.group && (!only || only(t)))
     .map((t) => ({ id: t.id, name: t.name, icon: t.icon, hint: t.supertype ? `in ${findType(templates, t.supertype)?.name ?? "?"}` : undefined }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => byText(a.name, b.name));
 }
 
 /** The type a tag names, by id or by name. */
@@ -518,7 +519,7 @@ export function ViewCard({ attrs, onChange }: { attrs: ImageAttrs; onChange: (ne
   const groups = templates
     .filter((t) => t.group && t.blocks[0]?.parts[0]?.text.trim())
     .map((t) => ({ id: t.id, name: t.name, icon: t.icon }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => byText(a.name, b.name));
   const resolve = linker(data?.articles ?? [], templates);
   return (
     <Surface
@@ -567,7 +568,7 @@ export function EmbedCard({ attrs, onChange }: { attrs: ImageAttrs; onChange: (n
     () =>
       articles
         .map((a) => ({ id: a.id, name: a.name, icon: findType(templates ?? [], a.articleType)?.icon }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
+        .sort((a, b) => byText(a.name, b.name)),
     [articles, templates],
   );
   return (

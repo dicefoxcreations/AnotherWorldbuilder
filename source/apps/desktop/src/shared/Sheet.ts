@@ -2,6 +2,7 @@ import type { ArticleView, Template, TemplateField } from "../api/client";
 import { idsIn, isA, picksFor, propertyNamed, propertyValues, typeOf, articleById } from "./types";
 import { parse, reckon, type Lookup, type Scope } from "./Dice";
 import { perLists } from "./Cache";
+import { byNumber as numeric } from "./Collate";
 
 /**
  * Numbers that others change — a character's sheet.
@@ -344,7 +345,6 @@ function summed(templates: Template[], articles: ArticleView[], article: Article
  * index made once per list: `(Session log, Previous)` gives each session the
  * one whose Previous it is.
  */
-const numeric = new Intl.Collator(undefined, { numeric: true }).compare;
 const pointingAt = perLists((articles: ArticleView[], templates: Template[]) => {
   const made = new Map<string, Map<string, string[]>>();
   return (of: string, property: string): Map<string, string[]> => {

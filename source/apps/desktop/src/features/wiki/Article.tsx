@@ -16,6 +16,7 @@ import { linker } from "../../shared/Links";
 import { needsInput, nameFrom, nextNumber, fillCount } from "../templates/NamePattern";
 import { documentsOf, isA, typeOf } from "../../shared/types";
 import { editOnOpen } from "./Document";
+import { byNumber } from "../../shared/Collate";
 
 type Values = Record<string, unknown>;
 
@@ -469,7 +470,7 @@ export function defaults(template: Template | undefined, articles: ArticleView[]
       // `= last`: the last document of the type by name — a new session's previous one.
       const last = articles
         .filter((a) => isA(templates, a.articleType, field.articleType))
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+        .sort((a, b) => byNumber(a.name, b.name))
         .pop();
       if (last) out[field.key] = field.multiple ? [last.id] : last.id;
     } else if (field.kind === "reference") {

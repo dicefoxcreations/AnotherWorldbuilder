@@ -3,6 +3,7 @@ import type { ArticleView, Template, WorldInfo } from "../../api/client";
 import { isA, mayCreate, parentField, realTypes, targetOf, typeOf, articleById } from "../../shared/types";
 import { MultiPick } from "../../shared/ui/MultiPick";
 import { InspectorSection } from "./Inspector";
+import { byText } from "../../shared/Collate";
 
 /**
  * Which type a document is — and another one for it, with what it then
@@ -27,7 +28,7 @@ export function TypeRows({
   const [busy, setBusy] = useState(false);
   const choices = realTypes(templates)
     .filter((t) => t.id === article.articleType || mayCreate(world, t))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => byText(a.name, b.name));
   if (choices.length < 2) return null;
   const changed = to !== article.articleType;
   const field = changed ? parentField(typeOf(templates, to)) : undefined;

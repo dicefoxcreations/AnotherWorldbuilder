@@ -12,6 +12,7 @@ import { defaultNavigation, hangingKinds } from "../../shared/navigation";
 import { documentOutline, searchDocument, type TextHit } from "../../shared/documentText";
 import { leadTo } from "../../shared/Anchors";
 import { OutlineLinks, openHit } from "../wiki/OutlineLinks";
+import { byText } from "../../shared/Collate";
 
 /**
  * The side bar on the left: the world's outline, as the GM sets it out —
@@ -344,7 +345,7 @@ export function NavBar({
     };
     const context = [...outside.entries()]
       .map(([p, docs]) => [articleById(articles, p)!, docs] as const)
-      .sort(([a], [b]) => a.name.localeCompare(b.name))
+      .sort(([a], [b]) => byText(a.name, b.name))
       .map(([parent, docs]) => docRow(entry, parent, docs.map((d) => draw(d, depth + 1, new Set([parent.id]))), depth, true));
     return [...context, ...capped(entry, roots, depth, (d) => draw(d, depth, new Set()))];
   };

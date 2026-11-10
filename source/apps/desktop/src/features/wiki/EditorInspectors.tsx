@@ -6,6 +6,7 @@ import { AccessRows, Inspector, InspectorSection } from "./Inspector";
 import type { WorldInfo } from "../../api/client";
 import { findType, isA, ancestors } from "../../shared/types";
 import { type Links, namedLike } from "./EditorTools";
+import { byText } from "../../shared/Collate";
 
 /** What a section chosen by its anchor can be given: a new name, or none. */
 export type SectionActions = {
@@ -168,7 +169,7 @@ export function LinkInspector({ raw, links, onChange, onClose }: { raw: string; 
       const t = findType(links.templates, a.articleType);
       if (t) [t, ...ancestors(links.templates, t)].forEach((x) => ids.add(x.id));
     }
-    return [...ids].flatMap((id) => findType(links.templates, id) ?? []).sort((a, b) => a.name.localeCompare(b.name));
+    return [...ids].flatMap((id) => findType(links.templates, id) ?? []).sort((a, b) => byText(a.name, b.name));
   }, [links.all, links.templates]);
   const among = only ? links.all.filter((a) => isA(links.templates, a.articleType, only)) : links.all;
   const found = find.trim() ? namedLike(among, find, links.selfId) : [];

@@ -577,6 +577,8 @@ function Drawn({
             </>
           ) : person ? (
             <CardSettings
+              // Its own text is typed per card — another card, another field.
+              key={person}
               card={cards.get(person)}
               hasMiddle={!!around && around !== person}
               onCard={edit.onGraph ? (patch) => setCard(person, patch) : undefined}
@@ -585,6 +587,7 @@ function Drawn({
             />
           ) : connector ? (
             <ConnectorCard
+              key={connector.ends.map((end) => end.join("+")).join("|")}
               connector={{ ...connector, ends: asTheyStand(connector.ends) }}
               written={connector.ends}
               line={connectorLine(connector)}

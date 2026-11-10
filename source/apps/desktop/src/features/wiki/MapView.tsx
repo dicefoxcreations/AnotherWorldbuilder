@@ -11,6 +11,7 @@ import { SearchPick } from "../../shared/ui/SearchPick";
 import { imageUrl } from "../../shared/ui/WorldImage";
 import { useWorldData } from "../worlds/WorldData";
 import { AccessRows, InspectorSection, PartAccessContext, Surface } from "./Inspector";
+import { byText } from "../../shared/Collate";
 
 /**
  * A map: a picture moved and zoomed like a map on the web — dragged, the
@@ -677,7 +678,7 @@ export function MapCard({ world, map, onChange }: { world: WorldInfo; map: MapNo
   const setArea = (next: Partial<MapArea>) => chosen && onChange({ ...map, areas: map.areas.map((r, i) => (i === chosen.i ? { ...r, ...next } : r)) });
   const documents = (data?.articles ?? [])
     .map((a) => ({ id: a.id, name: a.name, icon: findType(data!.templates, a.articleType)?.icon }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => byText(a.name, b.name));
   // While writing, `to` is a document's name as the code has it — or an id, once picked.
   const docOf = (to: string) => {
     const all = data?.articles ?? [];

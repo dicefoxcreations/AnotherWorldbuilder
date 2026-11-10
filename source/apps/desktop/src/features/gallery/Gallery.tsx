@@ -10,6 +10,7 @@ import { useWorldData } from "../worlds/WorldData";
 import { imagesInside, navigationPlaces, sortIntoFolders } from "./Sorting";
 import { FolderTile } from "./FolderTile";
 import { bytes } from "../../shared/Bytes";
+import { byText } from "../../shared/Collate";
 
 /**
  * The gallery of a world, in the options: a tree of folders on the left,
@@ -144,7 +145,7 @@ export function GalleryArea({ world, onOpen, onError }: { world: WorldInfo; onOp
   const needle = search.trim().toLowerCase();
   // Where one is: its folders first — none while searching, which looks through all.
   const here = shown.kind === "folder" ? shown.id : shown.kind === "top" ? "" : null;
-  const subfolders = needle || here === null ? [] : folders.filter((f) => f.parent === here).sort((a, b) => a.name.localeCompare(b.name));
+  const subfolders = needle || here === null ? [] : folders.filter((f) => f.parent === here).sort((a, b) => byText(a.name, b.name));
   const visible = (images ?? []).filter((i) => {
     if (needle && !i.name.toLowerCase().includes(needle)) return false;
     if (!needle && here !== null && folderOf(i) !== here) return false;
@@ -285,7 +286,7 @@ function FolderTree({
   const [editing, setEditing] = useState<{ id: string; name: string; fresh: boolean } | null>(null);
   const [deleting, setDeleting] = useState<FolderNode | null>(null);
 
-  const children = (parent: string) => folders.filter((f) => f.parent === parent).sort((a, b) => a.name.localeCompare(b.name));
+  const children = (parent: string) => folders.filter((f) => f.parent === parent).sort((a, b) => byText(a.name, b.name));
 
   const add = (parent: string) => {
     const id = newId();
@@ -471,7 +472,7 @@ function Detail({
     if (JSON.stringify(d) !== JSON.stringify(image.defaults)) void run(api.imageDefaultsSet(world.id, image.id, d));
   };
   const d = image.defaults;
-  const paths = folders.map((f) => ({ id: f.id, path: pathOf(folders, f.id) })).sort((a, b) => a.path.localeCompare(b.path));
+  const paths = folders.map((f) => ({ id: f.id, path: pathOf(folders, f.id) })).sort((a, b) => byText(a.path, b.path));
 
   return (
     <aside className="gallery-detail">

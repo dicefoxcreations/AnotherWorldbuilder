@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Icon } from "../../shared/ui/Icons";
 import type { Template, WorldInfo } from "../../api/client";
 import { comboOf, FIXED, freeFor, loadShortcuts, saveShortcuts, shownCombo, type Combo, type TypeShortcut } from "../../shared/Shortcuts";
+import { byText } from "../../shared/Collate";
 
 /**
  * The keys: those every world has, and a key per type — the selected words
@@ -11,7 +12,7 @@ export function ShortcutsArea({ world, templates }: { world: WorldInfo; template
   const [mine, setMine] = useState<TypeShortcut[]>(() => loadShortcuts(world.id));
   const [combo, setCombo] = useState<Combo | null>(null);
   const [type, setType] = useState("");
-  const types = templates.filter((t) => !t.group).sort((a, b) => a.name.localeCompare(b.name));
+  const types = templates.filter((t) => !t.group).sort((a, b) => byText(a.name, b.name));
   const change = (next: TypeShortcut[]) => {
     setMine(next);
     saveShortcuts(world.id, next);
@@ -77,7 +78,7 @@ export function ShortcutsArea({ world, templates }: { world: WorldInfo; template
           disabled={!combo || !type || used || blocked}
           onClick={() => {
             if (!combo || !type) return;
-            change([...mine, { combo, type }].sort((a, b) => a.combo.localeCompare(b.combo)));
+            change([...mine, { combo, type }].sort((a, b) => byText(a.combo, b.combo)));
             setCombo(null);
             setType("");
           }}

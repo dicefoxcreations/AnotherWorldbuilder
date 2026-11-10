@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArticleView, Place, Template } from "../../api/client";
 import { findType, isProperties } from "../types";
 import { comboOf, FIXED, loadShortcuts, shownCombo } from "../Shortcuts";
+import { byText } from "../Collate";
 
 /**
  * Keys that reach the whole world, not one field:
@@ -85,7 +86,7 @@ export function QuickOpen({
       return articles
         .map((a) => ({ a, at: a.name.toLowerCase().indexOf(q) }))
         .filter((x) => x.at >= 0)
-        .sort((x, y) => (x.at === 0) === (y.at === 0) ? x.a.name.length - y.a.name.length || x.a.name.localeCompare(y.a.name) : x.at === 0 ? -1 : 1)
+        .sort((x, y) => (x.at === 0) === (y.at === 0) ? x.a.name.length - y.a.name.length || byText(x.a.name, y.a.name) : x.at === 0 ? -1 : 1)
         .slice(0, 30)
         .map((x) => ({ article: x.a }));
     }

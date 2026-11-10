@@ -8,6 +8,7 @@ import { findRole, isRelation, roleChoices, type GraphEdge, type RelationField }
 import { ARROWS, COLOURS, SHAPES, SIDES } from "../../shared/GraphText";
 import { readSide } from "./GraphLines";
 import { type Connector, type Menu, type Pair } from "./RelationGraph";
+import { byNumber, byText } from "../../shared/Collate";
 
 /**
  * The right-click menu of the surface: on a card, its card and taking it
@@ -63,7 +64,7 @@ export function GraphMenu({
         .sort(
           (a, b) =>
             Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)) ||
-            a.name.localeCompare(b.name, undefined, { numeric: true }),
+            byNumber(a.name, b.name),
         )
         .slice(0, 40);
   useEffect(() => {
@@ -669,7 +670,7 @@ export function GraphSettings({
 }) {
   const [naming, setNaming] = useState<Template | null>(null);
   const [name, setName] = useState("");
-  const people = articles.filter((a) => kinds.some((t) => t.id === a.articleType)).sort((a, b) => a.name.localeCompare(b.name));
+  const people = articles.filter((a) => kinds.some((t) => t.id === a.articleType)).sort((a, b) => byText(a.name, b.name));
   const addable = people.filter((a) => !inGraph.has(a.id));
   const relations = [...new Map(templates.flatMap((t) => t.properties.filter(isRelation)).map((f) => [f.label, f])).values()];
 

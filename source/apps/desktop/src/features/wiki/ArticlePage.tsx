@@ -28,6 +28,7 @@ import { sectioned } from "../../shared/Sections";
 import { joinPins } from "../../shared/GraphText";
 import { incoming } from "../../shared/Backlinks";
 import { linkIcon } from "./DocLink";
+import { byText } from "../../shared/Collate";
 
 /** How many of one kind show before the rest are asked for. */
 const BACKLINKS_SHOWN = 24;
@@ -54,7 +55,7 @@ function Backlinks({
   const kinds = useMemo(() => {
     const by = new Map<string, ArticleView[]>();
     for (const a of articles) by.set(a.articleType, [...(by.get(a.articleType) ?? []), a]);
-    return [...by].map(([type, list]) => ({ type, name: typeOf(templates, type)?.name ?? "Page", list })).sort((x, y) => x.name.localeCompare(y.name));
+    return [...by].map(([type, list]) => ({ type, name: typeOf(templates, type)?.name ?? "Page", list })).sort((x, y) => byText(x.name, y.name));
   }, [articles, templates]);
   /** What a document belongs to: the first document its references name. */
   const above = (a: ArticleView) => {

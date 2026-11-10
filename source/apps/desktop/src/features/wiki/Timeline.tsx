@@ -7,6 +7,7 @@ import { documentOrder, findType, isA, isProperties, propertyValues, typeOf } fr
 import { MoonsOf } from "../../shared/ui/MoonPhase";
 import { WorldImage } from "../../shared/ui/WorldImage";
 import { CurrentDocument, useWorldData, type WorldData } from "../worlds/WorldData";
+import { byText } from "../../shared/Collate";
 
 type TimelineNode = Extract<Node, { kind: "timeline" }>;
 
@@ -167,7 +168,7 @@ export function datedEntries(data: WorldData, current: string | null, node: Date
       if (p && q && p !== q) return orderOf(p.articleType)(p, q);
       const d = rank(x.article) - rank(y.article);
       if (d !== 0) return d;
-      return x.article.articleType === y.article.articleType ? orderOf(x.article.articleType)(x.article, y.article) : x.article.name.localeCompare(y.article.name);
+      return x.article.articleType === y.article.articleType ? orderOf(x.article.articleType)(x.article, y.article) : byText(x.article.name, y.article.name);
     });
 }
 

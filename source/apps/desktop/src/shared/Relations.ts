@@ -1,6 +1,7 @@
 import type { ArticleView, Template, TemplateField } from "../api/client";
 import { linkText, scanLinks, type Link } from "./Links";
 import { documentsOf, isA, isProperties, typeOf } from "./types";
+import { byText } from "./Collate";
 
 /**
  * Relations between documents: who someone is to whom.
@@ -246,7 +247,7 @@ export function buildGraph(
   const nodes: GraphNode[] = [
     ...[...ids].flatMap((id) => (byId.has(id) ? [{ id, article: byId.get(id) }] : [])),
     ...unknown.filter((u) => ids.has(u.id)),
-  ].sort((x, y) => (x.article?.name ?? "￿").localeCompare(y.article?.name ?? "￿"));
+  ].sort((x, y) => byText(x.article?.name ?? "￿", y.article?.name ?? "￿"));
   return {
     nodes,
     edges: [...edges.values()].filter((e) => ids.has(e.a) && ids.has(e.b)),

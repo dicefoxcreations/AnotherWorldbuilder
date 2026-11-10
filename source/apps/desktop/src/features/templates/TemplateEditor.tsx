@@ -28,6 +28,7 @@ import { useFieldFind } from "../../shared/ui/FindBar";
 import { ValueList } from "./DataType";
 import { BRICKS, type Brick } from "./TemplateLegend";
 import { ancestors, effective, unfold, usersOf } from "../../shared/types";
+import { byText } from "../../shared/Collate";
 
 /**
  * Defining a kind of article — as text, with a preview beside it.
@@ -270,7 +271,7 @@ export function TemplateEditor({
           >
             <option value="">— nothing above —</option>
             {possibleSupertypes
-              .sort((a, b) => a.name.localeCompare(b.name))
+              .sort((a, b) => byText(a.name, b.name))
               .map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.icon} {t.name}

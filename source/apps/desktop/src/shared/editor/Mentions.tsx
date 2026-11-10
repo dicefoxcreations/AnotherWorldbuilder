@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { ArticleView, Template, TemplateField } from "../../api/client";
 import { linker, linkIn, linkTo, MARK } from "../Links";
 import { documentsOf, findType, typeOf as effectiveType } from "../types";
+import { byText as collate } from "../Collate";
 
 /**
  * Suggestions after `@@` — the way to write a link without knowing its form.
@@ -77,7 +78,6 @@ function queryAt(text: string, caret: number): Query | null {
   };
 }
 
-const collate = new Intl.Collator().compare;
 
 /**
  * The first `count` matches: those that start with what was typed, then

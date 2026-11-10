@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { api, type ArticleView, type PackageSummary, type Template, type WorldInfo } from "../../api/client";
 import { ancestors, documentsOf, realTypes } from "../../shared/types";
+import { byText } from "../../shared/Collate";
 
 /**
  * Types and documents from one world into another — the GM's. A package is
@@ -35,7 +36,7 @@ function inTree(templates: Template[]): [Template, number][] {
   const kinds = [...realTypes(templates), ...templates.filter((t) => t.group)];
   const out: [Template, number][] = [];
   const add = (parent: string, depth: number) => {
-    for (const t of kinds.filter((k) => k.supertype === parent).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const t of kinds.filter((k) => k.supertype === parent).sort((a, b) => byText(a.name, b.name))) {
       out.push([t, depth]);
       add(t.id, depth + 1);
     }

@@ -40,6 +40,7 @@ import { OutlineLinks, openHit } from "./OutlineLinks";
 import { asTree } from "../../shared/documentTree";
 import { documentOutline, searchDocument, type TextHit } from "../../shared/documentText";
 import { leadTo } from "../../shared/Anchors";
+import { byNumber, byText } from "../../shared/Collate";
 
 type ListingNode = Extract<Node, { kind: "listing" }>;
 
@@ -89,7 +90,7 @@ function Filtered({ node }: { node: ListingNode }) {
         .filter((a) => node.filter.every(([f, w]) => matches(templates, articles, a, f, w === "self" ? (current ?? "") : w)))
         .flatMap((a) => shown(templates, articles, a, label).split(",").map((v) => v.trim()).filter(Boolean)),
     ),
-  ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  ].sort(byNumber);
   return (
     <>
       {values.length > 1 && (
@@ -266,7 +267,7 @@ function ListingOf({ node }: { node: ListingNode }) {
   const addable = () =>
     articles
       .filter((a) => a.id !== self!.id && !(picked ?? []).includes(a.id) && isA(templates, a.articleType, target))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => byText(a.name, b.name));
   const add =
     mayPick && target ? (
       <span className="listing-add">
@@ -336,7 +337,7 @@ function ListingOf({ node }: { node: ListingNode }) {
       open={() =>
         articles
           .filter((a) => isA(templates, a.articleType, type!.id) && !idsIn(a, back!.key).includes(current!))
-          .sort((a, b) => a.name.localeCompare(b.name))
+          .sort((a, b) => byText(a.name, b.name))
       }
       onAdd={(a) =>
         void api
@@ -805,9 +806,9 @@ function Tally({
   if (split?.kind === "reference") {
     parts.sort((x, y) => {
       const [p, q] = [byId.get(x)!, byId.get(y)!];
-      return p.articleType === q.articleType ? documentOrder(templates, p.articleType, articles)(p, q) : nameOf(x).localeCompare(nameOf(y));
+      return p.articleType === q.articleType ? documentOrder(templates, p.articleType, articles)(p, q) : byText(nameOf(x), nameOf(y));
     });
-  } else parts.sort((x, y) => x.localeCompare(y, undefined, { numeric: true }));
+  } else parts.sort(byNumber);
   const rows = new Map<string, { total: number; of: Map<string, number> }>();
   for (const a of docs) {
     const within = split ? valuesOf(a, split) : [];
@@ -826,7 +827,7 @@ function Tally({
     }
     return 0;
   };
-  const byName = (x: string, y: string) => nameOf(x).localeCompare(nameOf(y), undefined, { numeric: true });
+  const byName = (x: string, y: string) => byNumber(nameOf(x), nameOf(y));
   const usual = (x: string, y: string) => byNumbers(["total", ...parts])(x, y) || byName(x, y);
   const order = !sorted
     ? usual

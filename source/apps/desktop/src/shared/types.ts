@@ -1,14 +1,7 @@
 import { PROPERTIES, type ArticleView, type Template, type TemplateField } from "../api/client";
+import { byNumber as numeric, byText as plain } from "./Collate";
 import { perList, perLists } from "./Cache";
 
-/**
- * Comparing names as the language does — made once: `localeCompare` with
- * options builds a collator on every call, and sorting thousands of names
- * calls it hundreds of thousands of times.
- */
-const plain = new Intl.Collator().compare;
-/** `Session 9` before `Session 10`. */
-const numeric = new Intl.Collator(undefined, { numeric: true }).compare;
 
 /**
  * Types among each other: supertypes, inheritance and the parent axis.

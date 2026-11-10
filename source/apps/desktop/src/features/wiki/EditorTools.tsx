@@ -17,6 +17,7 @@ import { useWorldData } from "../worlds/WorldData";
 import { ImagePicker } from "../../shared/ui/ImagePicker";
 import { imageTag } from "../../shared/ImageTag";
 import { FlowHandle } from "../../shared/editor/FlowField";
+import { byText } from "../../shared/Collate";
 
 type Brick = { name: string; text: string; gmOnly?: boolean; picksImage?: boolean };
 
@@ -515,7 +516,7 @@ export function namedLike(all: ArticleView[], word: string, selfId?: string): Ar
     .filter((a) => a.id !== selfId)
     .map((a) => ({ a, s: score(a) }))
     .filter((x) => x.s >= 0)
-    .sort((x, y) => x.s - y.s || x.a.name.localeCompare(y.a.name))
+    .sort((x, y) => x.s - y.s || byText(x.a.name, y.a.name))
     .slice(0, 6)
     .map((x) => x.a);
 }
@@ -635,7 +636,7 @@ export function useBricks(gm: boolean, text: string, onText: (t: string) => void
       onLink: (a) => put(linkTo(links.templates, a, label(a.name))),
       types:
         worldData && !worldData.previewing
-          ? links.templates.filter((t) => mayCreate(worldData.world, t)).sort((a, b) => a.name.localeCompare(b.name))
+          ? links.templates.filter((t) => mayCreate(worldData.world, t)).sort((a, b) => byText(a.name, b.name))
           : [],
       onNew: (t) => {
         if (!worldData) return;
@@ -704,7 +705,7 @@ export function useBricks(gm: boolean, text: string, onText: (t: string) => void
     if (to <= from || !words || !worldData || worldData.previewing) return undefined;
     const source = articleById(links.all, links.selfId);
     return {
-      types: links.templates.filter((t) => mayCreate(worldData.world, t)).sort((a, b) => a.name.localeCompare(b.name)),
+      types: links.templates.filter((t) => mayCreate(worldData.world, t)).sort((a, b) => byText(a.name, b.name)),
       // The words need a text section there — with what the type inherits.
       writable: (t) => (typeOf(links.templates, t.id) ?? t).blocks.some((b) => b.parts.length > 0),
       onMake: (t, name) => {

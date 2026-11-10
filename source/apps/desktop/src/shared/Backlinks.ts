@@ -2,6 +2,7 @@ import type { ArticleView, Template } from "../api/client";
 import { perLists } from "./Cache";
 import { linker, linksIn } from "./Links";
 import { idsIn, typeOf } from "./types";
+import { byText } from "./Collate";
 
 /**
  * Everything that points at an article, grouped by the field it points with.
@@ -19,10 +20,10 @@ export function incoming(
 ): { title: string; articles: ArticleView[] }[] {
   const groups = backlinks(all, templates).get(article.id) ?? new Map<string, ArticleView[]>();
   return [...groups.entries()]
-    .sort(([x], [y]) => (x === "Below" ? -1 : y === "Below" ? 1 : x.localeCompare(y)))
+    .sort(([x], [y]) => (x === "Below" ? -1 : y === "Below" ? 1 : byText(x, y)))
     .map(([title, articles]) => ({
       title,
-      articles: [...articles].sort((x, y) => x.name.localeCompare(y.name)),
+      articles: [...articles].sort((x, y) => byText(x.name, y.name)),
     }));
 }
 

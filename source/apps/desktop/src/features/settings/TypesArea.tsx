@@ -4,6 +4,7 @@ import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
 import { api, type ArticleView, type Template, type WorldInfo } from "../../api/client";
 import { TemplateEditor } from "../templates/TemplateEditor";
 import { documentsOf, findType, realTypes, subtypes, usersOf } from "../../shared/types";
+import { byText } from "../../shared/Collate";
 
 export function TypesArea({
   world,
@@ -122,7 +123,7 @@ export function TypesArea({
   // A subtype sits inside its supertype, folded away until opened — a
   // character opens to show the NPC. A type whose supertype is gone stands
   // at the top. By name within each level, so things can be found again.
-  const byName = (list: Template[]) => [...list].sort((a, b) => a.name.localeCompare(b.name));
+  const byName = (list: Template[]) => [...list].sort((a, b) => byText(a.name, b.name));
   const types = realTypes(templates);
   const groups = byName(templates.filter((t) => t.group));
   const roots = byName(types.filter((t) => !t.supertype || !findType(templates, t.supertype)));

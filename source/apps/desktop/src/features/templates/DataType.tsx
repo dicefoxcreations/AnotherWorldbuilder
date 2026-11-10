@@ -4,6 +4,7 @@ import { api, type ArticleView, type Template, type WorldInfo } from "../../api/
 import { defaults, layersFor, slugify, startTexts } from "../wiki/Article";
 import { DeleteDialog, DeleteButton } from "../../shared/ui/Delete";
 import { typeOf } from "../../shared/types";
+import { byText } from "../../shared/Collate";
 
 /**
  * The documents of a type, quick to add by name.
@@ -43,7 +44,7 @@ export function ValueList({
   // things occurred to someone.
   const values = articles
     .filter((a) => a.articleType === template.id)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => byText(a.name, b.name));
 
   const add = () => {
     const name = fresh.trim();
