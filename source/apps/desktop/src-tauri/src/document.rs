@@ -124,6 +124,9 @@ struct Opened {
     set_out: BTreeMap<String, TypeAccess>,
     /// The type's blocks with no layer at all yet that this reader may start.
     startable: std::collections::BTreeSet<String>,
+    /// Fields with access of their own, no layer yet, that this reader may
+    /// give a value — a player's Owner or Acquired on an item of theirs.
+    startable_fields: std::collections::BTreeSet<String>,
 }
 
 /// A document a link can point at.
@@ -470,6 +473,18 @@ fn open_doc(store: &Store, world: &str, doc: store::Document, reader: &Reader, t
         .map(|(b, p)| (p.key.clone(), typed_access(&templates, &doc.id, &article_type, &b.key, p, &document)))
         .collect();
     let startable = startable_of(&templates, template.as_ref(), &doc, reader).into_iter().collect();
+    let startable_fields = template
+        .iter()
+        .flat_map(|t| &t.properties)
+        .filter(|f| !readable.iter().any(|(section, _, _)| *section == field_section(&f.key)))
+        .filter(|f| {
+            f.access.as_ref().is_some_and(|a| {
+                let own = |p: &str| crate::own_view(p, &doc.id, &article_type);
+                reader.may_edit(&store::Access { view: own(&a.view), edit: own(&a.edit) })
+            })
+        })
+        .map(|f| f.key.clone())
+        .collect();
 
     let mut opened = Opened {
         id: doc.id.clone(),
@@ -488,6 +503,7 @@ fn open_doc(store: &Store, world: &str, doc: store::Document, reader: &Reader, t
         calendar,
         set_out,
         startable,
+        startable_fields,
     };
     opened.text = DocumentText {
         name,
@@ -553,10 +569,11 @@ fn stored_fields(opened: &Opened) -> serde_json::Map<String, serde_json::Value> 
 }
 
 /// Whether this reader has a field at all. One with access of its own is
-/// theirs only when its layer opens for them — or when they are the game
-/// master, who can give it one.
+/// theirs only when its layer opens for them, when it has none yet and its
+/// access lets them give it a value — or when they are the game master, who
+/// can give it one.
 fn has_field(opened: &Opened, field: &aw_model::template::TemplateField) -> bool {
-    field.access.is_none() || opened.gm || opened.layer(&field_section(&field.key)).is_some()
+    field.access.is_none() || opened.gm || opened.layer(&field_section(&field.key)).is_some() || opened.startable_fields.contains(&field.key)
 }
 
 /// The properties: the type's fields in their order, then the free ones.
