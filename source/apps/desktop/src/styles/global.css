@@ -1407,6 +1407,10 @@ svg.graph.fit { max-width: 100%; height: auto; }
 .infobox.editing .infobox-row dd select { appearance: none; color: var(--accent); cursor: pointer; }
 .infobox.editing .infobox-row dd :is(input, select, textarea):hover { outline-color: var(--border); }
 .infobox.editing .infobox-row dd :is(input, select, textarea):focus { outline-color: var(--accent); background: var(--sunken); }
+/* Only some of a document the reader's: what is not stands back, what is shows its field. */
+.infobox.editing:has(.infobox-row.locked) .infobox-row:not(.locked) dd :is(input, select, textarea) { outline-color: var(--border); }
+.infobox-row.locked, .property-row.locked, .block-part.locked { opacity: .55; }
+.yours { display: flex; align-items: center; gap: 6px; margin: 2px 0 10px; }
 .number-input { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; }
 .number-input input { min-width: 0; }
 .infobox.editing .number-input input { width: auto; }

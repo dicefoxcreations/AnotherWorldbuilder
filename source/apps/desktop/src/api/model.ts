@@ -674,7 +674,17 @@ export type ReadResult = {
 export type Bases = Record<string, { generation: number; heads: string[] }>;
 
 /** A document opened for editing. */
-export type DocumentCode = { code: string; document: DocumentText; base: Bases };
+export type DocumentCode = { code: string; document: DocumentText; base: Bases; writable: Writable };
+
+/**
+ * What the reader may change in a document as opened — `document::Writable`:
+ * all of it, or its head, the properties of no field, the type's fields and
+ * the parts of its sections by key.
+ */
+export type Writable = { whole: boolean; head: boolean; free: boolean; fields: string[]; parts: string[] };
+
+/** Everything — from a server that does not say. */
+export const WRITABLE_ALL: Writable = { whole: true, head: true, free: true, fields: [], parts: [] };
 
 /** One version of a document: an editing session. */
 export type Version = {

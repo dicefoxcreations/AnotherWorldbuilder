@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../shared/ui/Icons";
-import { api, type ArticleView, type BlockPart, type Caret, type DocumentText, type Property, type Template, type TemplateField, type WorldInfo, type BlockPlace, type TemplateBlock } from "../../api/client";
+import { api, type ArticleView, type BlockPart, type Caret, type DocumentText, type Property, type Template, type TemplateField, type WorldInfo, type BlockPlace, type TemplateBlock, type Writable, WRITABLE_ALL } from "../../api/client";
 import { FoldBlock, SideColumn } from "../../shared/ui/BlockFold";
 import { addSection, BlockSettings, moveBlock, ownerOf, type Arranging } from "./BlockSettings";
 import { AccessLine, samePolicy } from "../../shared/ui/Visibility";
@@ -12,12 +12,12 @@ import { type MarkKind, type Range } from "../../shared/Marks";
 import { useSideBar } from "../../shared/ui/SideBar";
 import { SectionAccess } from "./Inspector";
 import { asRead, blockRank, lookOf } from "../../shared/BlockOrder";
-import { propertyNamed, typeOf, articleById } from "../../shared/types";
+import { propertyNamed, propertyValues, typeOf, articleById } from "../../shared/types";
 import { RelationGraph } from "./RelationGraph";
 import { CurrentDocument, ReadableParts, useWorldData } from "../worlds/WorldData";
 import { RollScopeContext, type RollScope } from "../dice/DiceTray";
 import { explain, lookupFor, sumOf, summedValues } from "../../shared/Sheet";
-import { SheetEdit, ValuesProvider } from "./MarkdownText";
+import { MarkdownText, SheetEdit, ValuesProvider } from "./MarkdownText";
 import { PropertyValue } from "./InfoboxForm";
 import { ListEditing } from "./Listing";
 import { type Run, sections } from "./CodeEditor";
@@ -27,6 +27,7 @@ import { CutSections, type Links, SectionBelow } from "./EditorTools";
 import { PartEditor, mayEditPart } from "./PartEditor";
 import { PropertyInput, boundIn, uniqueName } from "./PropertyInputs";
 import { InfoboxEdit, OwnSectionSettings, useGraphEdit } from "./VisualSettings";
+import { mayChangePart, mayChangeProperty } from "./Writable";
 
 /** Exported for the test bench, which draws it on documents in memory. */
 export function VisualEditor({
@@ -42,12 +43,15 @@ export function VisualEditor({
   marks,
   onDoc,
   onCaret,
+  writable = WRITABLE_ALL,
 }: {
   world: WorldInfo;
   article: ArticleView;
   templates: Template[];
   all: ArticleView[];
   doc: DocumentText;
+  /** What the reader may change — the rest stands there as it reads. */
+  writable?: Writable;
   propsOpen: boolean;
   onPropsOpen: (open: boolean) => void;
   links: Links;
@@ -62,6 +66,12 @@ export function VisualEditor({
   const fieldFor = (name: string) => propertyNamed(type, name);
   const worldData = useWorldData();
   const reload = worldData?.onChanged;
+  const mayProperty = (field: TemplateField | undefined) => mayChangeProperty(writable, field);
+  // The values as kept — what a property one may not change shows.
+  const stored = useMemo(() => propertyValues(article), [article]);
+  /** A property as it reads, for whoever may not change it. */
+  const asKept = (field: TemplateField | undefined, value: string) =>
+    field ? <PropertyValue field={field} value={stored[field.key]} articles={all} templates={templates} articleType={article.articleType} /> : <span>{value || "—"}</span>;
   // The block chosen by its title — its settings in the side bar.
   const [picked, setPicked] = useState<string | null>(null);
   useSideBar(`block:${picked ?? ""}`, !!picked, () => setPicked(null));
@@ -144,10 +154,10 @@ export function VisualEditor({
     return (
       <dl className="bound-fields">
         {rows.map(({ i, label }) => (
-          <div key={i} className="property-row">
+          <div key={i} className={`property-row${mayProperty(fieldFor(doc.properties[i].name)) ? "" : " locked"}`}>
             <dt>{label}</dt>
             <dd>
-              <PropertyInput
+              {!mayProperty(fieldFor(doc.properties[i].name)) ? asKept(fieldFor(doc.properties[i].name), doc.properties[i].value) : <PropertyInput
                 field={fieldFor(doc.properties[i].name)}
                 value={doc.properties[i].value}
                 templates={templates}
@@ -157,7 +167,7 @@ export function VisualEditor({
                 all={all}
                 links={links}
                 onValue={(value) => setProperty(i, { value })}
-              />
+              />}
             </dd>
           </div>
         ))}
@@ -268,6 +278,7 @@ export function VisualEditor({
     return out;
   };
   const listEditing = {
+    may: (key: string) => mayProperty(type?.properties.find((f) => f.key === key)),
     count: (key: string, id: string) => {
       const i = propertyIndex(key);
       return i < 0 ? "" : (entries(doc.properties[i].value).find((e) => e.id === id)?.count ?? "");
@@ -302,7 +313,7 @@ export function VisualEditor({
     const field = fieldFor(name);
     if (!field) return name.trim().toLowerCase() === "name" ? doc.name : <code className="value-name">%%{name}%%</code>;
     const i = propertyAt(field);
-    if (i < 0 || field.kind === "image" || field.kind === "relation")
+    if (i < 0 || field.kind === "image" || field.kind === "relation" || !mayProperty(field))
       return <PropertyValue field={field} value={saved[field.key]} articles={all} templates={templates} articleType={article.articleType} />;
     return (
       <span className="sheet-input">
@@ -324,7 +335,7 @@ export function VisualEditor({
   const sheetEdit = (name: string): React.ReactNode => {
     const field = fieldFor(name);
     const i = field ? propertyAt(field) : -1;
-    if (!field || i < 0) return null;
+    if (!field || i < 0 || !mayProperty(field)) return null;
     return (
       <input
         className="ability-own"
@@ -367,6 +378,14 @@ export function VisualEditor({
     });
   const propertyRow = (p: Property, i: number) => {
     const field = fieldFor(p.name);
+    if (!mayProperty(field)) {
+      return (
+        <div key={i} className="property-row locked">
+          <dt>{p.name}</dt>
+          <dd>{asKept(field, p.value)}</dd>
+        </div>
+      );
+    }
     return (
       <div key={i} className="property-row">
         <dt>
@@ -418,8 +437,8 @@ export function VisualEditor({
     const own = !typed(block.key);
     // The GM sets up every section; a player the ones they may write in —
     // of a section the type sets out only who sees their part.
-    const writable = block.parts.some((p) => mayEditPart(article, p.key));
-    const pickable = (world.isGm || writable) && (own || !!ownerOf(templates, article.articleType, block.key));
+    const writes = block.parts.some((p) => mayEditPart(article, p.key));
+    const pickable = (world.isGm || writes) && (own || !!ownerOf(templates, article.articleType, block.key));
     const below = !pickable || !world.isGm
       ? null
       : own
@@ -475,7 +494,12 @@ export function VisualEditor({
           : undefined
       }
     >
-      {block.parts.map((part, p) => (
+      {block.parts.map((part, p) => !mayChangePart(writable, part.key) ? (
+            // Not the reader's to change: as it reads.
+            <div key={part.key} className="block-part locked">
+              <MarkdownText text={part.text} resolve={resolve} value={valueOf} onPlace={worldData?.onPlace ?? (() => {})} />
+            </div>
+          ) : (
             <div key={part.key}>
               {/* Only from the last part: what follows it would stand before the new sections. */}
               <CutSections.Provider value={own && world.isGm && pickable && p === block.parts.length - 1 ? (text, level) => cutSections(b, p, text, level) : null}>
@@ -571,7 +595,7 @@ export function VisualEditor({
           <dl>
             {drawRuns(sections(doc.properties, (p) => fieldFor(p.name)?.inGroup ?? []), 0)}
           </dl>
-          <button
+          {writable.free && <button
             className="compact"
             onClick={() =>
               onDoc({
@@ -581,7 +605,7 @@ export function VisualEditor({
             }
           >
             <Icon name="add" /> Property
-          </button>
+          </button>}
         </section>
       )}
 
@@ -597,6 +621,7 @@ export function VisualEditor({
         all={all}
         links={links}
         onProperty={setProperty}
+        mayChange={mayProperty}
         onAccess={(a) => onDoc({ ...doc, infobox: samePolicy(a.view, doc.access.view) && samePolicy(a.edit, doc.access.edit) ? undefined : a })}
         onChanged={reload}
       />}

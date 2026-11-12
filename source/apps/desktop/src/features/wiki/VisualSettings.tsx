@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { Icon } from "../../shared/ui/Icons";
-import { api, type ArticleView, type Access, type DocumentText, type GraphNode, type Property, type Template, type WorldInfo, type TemplateBlock } from "../../api/client";
+import { api, type ArticleView, type Access, type DocumentText, type GraphNode, type Property, type Template, type TemplateField, type WorldInfo, type TemplateBlock } from "../../api/client";
 import { ShapeRows, type Arranging } from "./BlockSettings";
 import { AccessLine } from "../../shared/ui/Visibility";
 import { linker, typeNames } from "../../shared/Links";
@@ -15,6 +15,7 @@ import { useWorldData } from "../worlds/WorldData";
 import { ImagePicker } from "../../shared/ui/ImagePicker";
 import { type Links } from "./EditorTools";
 import { PropertyInput } from "./PropertyInputs";
+import { PropertyValue } from "./InfoboxForm";
 
 /**
  * A section of the document's own, chosen by its title: its name, where it
@@ -143,11 +144,14 @@ export function InfoboxEdit({
   onProperty,
   onAccess,
   onChanged,
+  mayChange = () => true,
 }: {
   world: WorldInfo;
   article: ArticleView;
   type: Template;
   doc: DocumentText;
+  /** Whether the reader may change a field — the others stand there as read. */
+  mayChange?: (field: TemplateField) => boolean;
   /** Who sees and changes the infobox — the GM's, like a section's. */
   onAccess: (a: Access) => void;
   templates: Template[];
@@ -176,13 +180,15 @@ export function InfoboxEdit({
       const value = stored[field.key];
       const id = typeof value === "string" && value.startsWith("img:") ? value : null;
       const sized = !!(field.width && field.height);
+      const may = mayChange(field);
       return [
         <button
           key={field.key}
-          className={`infobox-image ${field.align}${sized ? "" : " natural"} choosable`}
+          className={`infobox-image ${field.align}${sized ? "" : " natural"}${may ? " choosable" : ""}`}
           style={sized ? { aspectRatio: `${field.width} / ${field.height}`, width: `${field.width}px`, maxWidth: "100%" } : { width: "100%" }}
-          onClick={() => setPicking(field.key)}
-          title="Choose an image"
+          onClick={may ? () => setPicking(field.key) : undefined}
+          disabled={!may}
+          title={may ? "Choose an image" : undefined}
         >
           {id ? <WorldImage world={world.id} id={id} alt={label} /> : <span className="image-placeholder"><Icon name="image" /></span>}
         </button>,
@@ -190,6 +196,16 @@ export function InfoboxEdit({
     }
     const i = doc.properties.findIndex((p) => p.name.toLowerCase() === field.label.toLowerCase());
     if (i < 0) return [];
+    if (!mayChange(field)) {
+      return [
+        <div key={field.key} className="infobox-row locked">
+          <dt>{label}</dt>
+          <dd>
+            <PropertyValue field={field} value={stored[field.key]} articles={all} templates={templates} articleType={article.articleType} />
+          </dd>
+        </div>,
+      ];
+    }
     return [
       <div key={field.key} className="infobox-row">
         <dt>{label}</dt>

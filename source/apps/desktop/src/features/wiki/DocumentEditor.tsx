@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../shared/ui/Icons";
-import { api, type ArticleView, type Bases, type Caret, type Seen, type VersionDocument, type VersionMarks, type DocumentText, type LineError, type Template, type WorldInfo, type TemplateBlock } from "../../api/client";
+import { api, type ArticleView, type Bases, type Caret, type Seen, type VersionDocument, type VersionMarks, type DocumentText, type LineError, type Template, type WorldInfo, type TemplateBlock, type Writable, WRITABLE_ALL } from "../../api/client";
 import { moveBlock } from "./BlockSettings";
 import { ArticleHead } from "./ArticleHead";
 import { AccessLine } from "../../shared/ui/Visibility";
@@ -70,6 +70,8 @@ export function DocumentEditor({
 }) {
   const [text, setText] = useState<string | null>(opened?.code ?? null);
   const [doc, setDoc] = useState<DocumentText | null>(opened?.document ?? null);
+  // What this reader may change — offered alone; the rest stands as it reads.
+  const [writable, setWritable] = useState<Writable>(opened?.writable ?? WRITABLE_ALL);
   // The properties are data, not text: folded away until asked for — in
   // the code and on the visual side alike.
   const [propsOpen, setPropsOpen] = useState(false);
@@ -149,6 +151,7 @@ export function DocumentEditor({
         kept.current = { code: r.code, base: r.base };
         keptDoc.current = r.document;
         fromVisual.current = true;
+        setWritable(r.writable);
         setText(r.code);
         setDoc(r.document);
       })
@@ -199,6 +202,7 @@ export function DocumentEditor({
       pending.current = saving.catch(() => {});
       const r = await saving;
       wrote.current = true;
+      setWritable(r.writable);
       // What was saved means what was typed: the text stays as typed — an
       // empty line, an empty block one is about to fill. Only where the saved
       // document says something else (someone else wrote, a link got its
@@ -220,6 +224,14 @@ export function DocumentEditor({
       trace("save-failed", { ms: Date.now() - started, error: String(e) });
       setStatus("failed");
       setProblem(String(e));
+      busy.current = false;
+      // Not again by itself — it would fail again, at once and for ever: the
+      // next keystroke tries, or the button. What was typed meanwhile, though, goes.
+      if (again.current) {
+        again.current = false;
+        setTimeout(() => void save(), SAVE_AFTER_MS);
+      }
+      return;
     } finally {
       busy.current = false;
     }
@@ -328,6 +340,7 @@ export function DocumentEditor({
           later();
           return;
         }
+        setWritable(r.writable);
         if (r.code === sent) {
           kept.current = { code: sent, base: r.base };
           return;
@@ -448,6 +461,7 @@ export function DocumentEditor({
       marks={{ kind: kinds.now, ranges: newInCode }}
       carets={codeCarets}
       onPropsOpen={setPropsOpen}
+      readOnly={!writable.whole}
       onText={setText}
       onCaret={(c) => (caret.current = c)}
       movable={(i, by) => {
@@ -472,6 +486,7 @@ export function DocumentEditor({
       marks={{ kind: kinds.now, of: partMarks("now") }}
       onDoc={changeDoc}
       onCaret={(c) => (caret.current = c)}
+      writable={writable}
     />
   );
   // The version, as it stood — to read, not to write.
@@ -598,6 +613,7 @@ export function DocumentEditor({
           )}
         </Inspector>
       )}
+      {!writable.whole && <p className="small muted yours"><Icon name="edit" /> {yours(writable, doc, typeOf(templates, article.articleType))}</p>}
       {!then && <Toolbar target={toolbarTarget} />}
       {then ? (
         <div className="two-columns document-columns compare-live">
@@ -619,6 +635,14 @@ export function DocumentEditor({
       )}
     </ToolbarTarget.Provider>
   );
+}
+
+/** What of a document is the reader's to change, said in a line. */
+function yours(w: Writable, doc: DocumentText, type: Template | undefined): string {
+  const fields = (type?.properties ?? []).filter((f) => w.fields.includes(f.key)).map((f) => f.label);
+  const sections = doc.blocks.filter((b) => b.parts.some((p) => w.parts.includes(p.key))).map((b) => b.title || "Text");
+  const names = [...(w.head ? ["Name"] : []), ...fields, ...(w.free ? ["other properties"] : []), ...sections];
+  return names.length ? `Yours to change: ${[...new Set(names)].join(", ")}` : "Read only";
 }
 
 /** A text cut into what is marked and what is not. */

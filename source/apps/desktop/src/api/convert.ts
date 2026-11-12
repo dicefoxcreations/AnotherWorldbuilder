@@ -2,7 +2,7 @@
 // what Rust leaves out where it is empty filled in.
 
 import { DEFAULT_CALENDAR, type WorldCalendar } from "../shared/Calendar";
-import { type Access, type Alignment, type ArticleView, type Bases, type BlockLook, type Cover, type DocumentCode, type DocumentText, type IdentityInfo, type Infobox, type LayerView, type MemberInfo, type PackageSummary, type Shown, type Template, type TemplateBlock, type TemplateField, type WorldInfo } from "./model";
+import { type Access, type Alignment, type ArticleView, type Bases, type BlockLook, type Cover, type DocumentCode, type DocumentText, type IdentityInfo, type Infobox, type LayerView, type MemberInfo, type PackageSummary, type Shown, type Template, type TemplateBlock, type TemplateField, type WorldInfo, type Writable, WRITABLE_ALL } from "./model";
 
 export type Raw = Record<string, any>;
 
@@ -276,4 +276,5 @@ export const toCode = (r: Raw): DocumentCode => ({
   code: r.code as string,
   document: toDocument(r.document as Raw),
   base: r.base as Bases,
+  writable: (r.writable as Writable | undefined) ?? WRITABLE_ALL,
 });

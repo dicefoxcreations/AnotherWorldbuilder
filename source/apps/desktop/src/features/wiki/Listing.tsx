@@ -52,6 +52,8 @@ const SEARCH_FROM = 1;
  * the editor's text — saving writes it with everything else.
  */
 export const ListEditing = createContext<{
+  /** Whether the reader may change the property — or only read it. */
+  may: (key: string) => boolean;
   ids: (key: string) => string[];
   set: (key: string, ids: string[]) => void;
   /** A pick's own number, as the text says it — `with Proficiency`. */
@@ -185,10 +187,10 @@ function ListingOf({ node }: { node: ListingNode }) {
     !!self &&
     !every &&
     !node.when?.trim() &&
-    (!!editing || data.world.isGm || self.layers.some((l) => isProperties(l.section) && l.mayEdit));
+    (editing ? editing.may(field.key) : data.world.isGm || self.layers.some((l) => isProperties(l.section) && l.mayEdit));
   // While writing, each pick's own number is changed right in the list.
   const counter =
-    editing && field?.kind === "reference" && field.count && !node.when?.trim()
+    editing && field?.kind === "reference" && field.count && !node.when?.trim() && editing.may(field.key)
       ? (a: ArticleView) => (
           <input
             className="pick-count"

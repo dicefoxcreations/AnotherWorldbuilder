@@ -333,6 +333,70 @@ pub struct DocumentCode {
     pub code: String,
     pub document: DocumentText,
     pub base: Bases,
+    pub writable: Writable,
+}
+
+/// What the reader may change in a document as opened — the editor offers
+/// that alone; a save is checked again all the same.
+#[derive(Serialize, Debug, Default, PartialEq)]
+pub struct Writable {
+    /// All of it: nothing to hold back.
+    pub whole: bool,
+    /// Its name, who sees and changes it, its cover.
+    pub head: bool,
+    /// The properties no field of its type is for — and new ones.
+    pub free: bool,
+    /// The type's fields, by key.
+    pub fields: Vec<String>,
+    /// The parts of its sections, by key.
+    pub parts: Vec<String>,
+}
+
+/// What `reader` may change in `opened` — by the same rules a save is checked by.
+fn writable_of(opened: &Opened, reader: &Reader) -> Writable {
+    let may = |i: usize| opened.gm || reader.may_edit(&opened.doc.layers[i].access);
+    let own = |a: &Access| store::Access { view: crate::own_view(&a.view, &opened.id, &opened.article_type), edit: crate::own_view(&a.edit, &opened.id, &opened.article_type) };
+    let head = may(opened.base.0);
+    // The common layer of the properties — or, before there is one, the infobox's access.
+    let free = match opened.layer(INFOBOX_SECTION) {
+        Some((_, i, _)) => may(*i),
+        None => opened.gm || reader.may_edit(&own(opened.text.infobox.as_ref().unwrap_or(&opened.shape.defaults))),
+    };
+    let fields = opened
+        .template
+        .iter()
+        .flat_map(|t| &t.properties)
+        .filter(|f| {
+            let holder = opened.readable.iter().find(|(section, _, c)| is_infobox(section) && c.fields.as_object().is_some_and(|m| m.contains_key(&f.key)));
+            match holder {
+                Some((_, i, _)) => may(*i),
+                None if f.access.is_some() => match opened.layer(&field_section(&f.key)) {
+                    Some((_, i, _)) => may(*i),
+                    None => opened.gm || opened.startable_fields.contains(&f.key),
+                },
+                None => free,
+            }
+        })
+        .map(|f| f.key.clone())
+        .collect::<Vec<_>>();
+    let parts = opened
+        .text
+        .blocks
+        .iter()
+        .flat_map(|b| &b.parts)
+        .filter(|p| match opened.layer(&p.key) {
+            Some((_, i, _)) => may(*i),
+            None => match opened.set_out.get(&p.key) {
+                Some(a) => opened.gm || reader.may_edit(&own(a)),
+                None => head,
+            },
+        })
+        .map(|p| p.key.clone())
+        .collect::<Vec<_>>();
+    let all_fields = opened.template.iter().flat_map(|t| &t.properties).count();
+    let all_parts = opened.text.blocks.iter().map(|b| b.parts.len()).sum::<usize>();
+    let whole = head && free && fields.len() == all_fields && parts.len() == all_parts;
+    Writable { whole, head, free, fields, parts }
 }
 
 /// The states handed out, by their hash — their hashes, oldest first, and
@@ -1263,17 +1327,19 @@ pub(crate) fn document_save_in(store: &Store, world: String, article: String, te
 
 /// Opens a document as code — without Tauri, for the command and the tests.
 pub(crate) fn code_of(store: &Store, world: &str, article: &str) -> Answer<DocumentCode> {
-    let opened = open(store, world, article, &store.reader(world)?)?;
-    Ok(code_from(opened))
+    let reader = store.reader(world)?;
+    let opened = open(store, world, article, &reader)?;
+    Ok(code_from(opened, &reader))
 }
 
-fn code_from(opened: Opened) -> DocumentCode {
+fn code_from(opened: Opened, reader: &Reader) -> DocumentCode {
+    let writable = writable_of(&opened, reader);
     let mut base = Bases::new();
     for i in std::iter::once(opened.base.0).chain(opened.readable.iter().map(|(_, i, _)| *i)) {
         let layer = &opened.doc.layers[i];
         base.insert(layer.id.clone(), hand_out(layer));
     }
-    DocumentCode { code: document::to_code(&opened.text), document: document::joined(&opened.text), base }
+    DocumentCode { code: document::to_code(&opened.text), document: document::joined(&opened.text), base, writable }
 }
 
 /// A document being changed by one save: as it was, and as it becomes.

@@ -721,7 +721,7 @@ export function Abilities({
     if (!pick || value === undefined) return null;
     const n = Math.max(0, pick.look.count ?? 0);
     const marks = <TallyMarks sign="●" n={n} className="ability-marks" title={`${refField?.kind === "reference" ? refField.count : ""} ${n}`} />;
-    if (lists && refField) {
+    if (lists && refField && lists.may(refField.key)) {
       return (
         <span className="ability-also">
           <input

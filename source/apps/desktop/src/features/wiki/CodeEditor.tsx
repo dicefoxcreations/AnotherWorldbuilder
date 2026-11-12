@@ -62,7 +62,10 @@ export function CodeEditor({
   onCaret,
   movable,
   onMove,
+  readOnly = false,
 }: {
+  /** Only parts of the document are the reader's: those are changed on the visual side. */
+  readOnly?: boolean;
   text: string;
   errors: LineError[];
   gm: boolean;
@@ -166,6 +169,7 @@ export function CodeEditor({
               report(e);
             }}
             className="template-text"
+            readOnly={readOnly}
             value={shown}
             onChange={(e) => {
               const field = e.currentTarget;
