@@ -266,7 +266,13 @@ pub(crate) fn copy_world(db: &store::WorldDb, into: &Path, world: &str, name: &s
     let media = partial.join("world").join(aw_store::db::MEDIA);
     std::fs::create_dir_all(&media)?;
     db.copy_to(&partial.join("world").join(aw_store::db::FILE))?;
-    for entry in std::fs::read_dir(db.dir().join(aw_store::db::MEDIA))?.flatten() {
+    // A world that came without a picture may have no folder for them.
+    let pictures = match std::fs::read_dir(db.dir().join(aw_store::db::MEDIA)) {
+        Ok(found) => Some(found),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    for entry in pictures.into_iter().flatten().flatten() {
         let path = entry.path();
         let Some(file) = path.file_name() else { continue };
         let target = media.join(file);
