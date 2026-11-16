@@ -144,9 +144,15 @@ fn refreshed(mut now: store::Document, fresh: store::Document) -> store::Documen
                 held.title = layer.title;
                 if !layer.base {
                     held.text = layer.text;
-                    held.images = layer.images;
                 }
                 merge(&mut held.fields, &layer.fields);
+                // The pictures it names as it now stands — a value the package
+                // does not bring keeps its picture.
+                let mut named = store::named_images(&held.text);
+                for value in held.fields.values() {
+                    named.extend(store::named_images(&value.to_string()));
+                }
+                held.images = named.into_iter().collect();
             }
             None => now.layers.push(layer),
         }
