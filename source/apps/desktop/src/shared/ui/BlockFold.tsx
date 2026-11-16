@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type DragEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { DiceFoxIcon } from "./dicefox-icons/DiceFoxIcon";
 import type { TemplateBlock } from "../../api/client";
 import { CreateButton } from "../../features/wiki/CreateButton";
@@ -115,7 +115,66 @@ export function FoldChevron({ open }: { open: boolean }) {
  */
 export function SideColumn({ children }: { children: ReactNode }) {
   const has = (Array.isArray(children) ? children.flat(2) : [children]).some((c) => c !== null && c !== undefined && c !== false);
-  return has ? <aside className="side-column">{children}</aside> : null;
+  const column = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = column.current;
+    const row = el?.parentElement;
+    if (!el || !row) return;
+    let asked = 0;
+    const fit = () => {
+      cancelAnimationFrame(asked);
+      asked = requestAnimationFrame(() => {
+        el.style.maxHeight = getComputedStyle(row).flexDirection === "row" ? `${sideHeight(el, row)}px` : "";
+      });
+    };
+    // What decides it: the window, what the text beside it holds — folded,
+    // opened, written — and what stands above and below.
+    const sizes = new ResizeObserver(fit);
+    const changes = new MutationObserver(fit);
+    const beside = [...row.children].filter((c) => c !== el);
+    for (const part of [...beside.flatMap((c) => [...c.children]), ...(row.parentElement?.children ?? [])]) if (part !== row) sizes.observe(part);
+    for (const part of beside) changes.observe(part, { childList: true, subtree: true, attributes: true });
+    window.addEventListener("resize", fit);
+    fit();
+    return () => {
+      cancelAnimationFrame(asked);
+      sizes.disconnect();
+      changes.disconnect();
+      window.removeEventListener("resize", fit);
+    };
+  }, [has]);
+  return has ? (
+    <aside className="side-column" ref={column}>
+      {children}
+    </aside>
+  ) : null;
+}
+
+/**
+ * How high the side column may be: what the window has below it — so a short
+ * page does not scroll for it — or as high as the text beside it, and never
+ * higher than the window under the header bar, where it stays while the page
+ * scrolls.
+ */
+function sideHeight(column: HTMLElement, row: HTMLElement): number {
+  const px = (v: string) => parseFloat(v) || 0;
+  const header = px(getComputedStyle(document.documentElement).getPropertyValue("--header-height")) || 53;
+  const most = window.innerHeight - header - 32;
+  /** Where what an element holds ends — not where it ends, stretched to the row. */
+  const end = (el: Element) => {
+    const inFlow = [...el.children].filter((c) => !["fixed", "absolute"].includes(getComputedStyle(c).position));
+    return inFlow.length ? Math.max(...inFlow.map((c) => c.getBoundingClientRect().bottom + px(getComputedStyle(c).marginBottom))) : el.getBoundingClientRect().bottom;
+  };
+  const top = row.getBoundingClientRect().top;
+  const beside = Math.max(0, ...[...row.children].filter((c) => c !== column).map((c) => end(c) - top + px(getComputedStyle(c).paddingBottom)));
+  // What stands below the row, up to the page's end: siblings after it, and the paddings around.
+  let below = 0;
+  for (let at: HTMLElement = row; at.parentElement && at !== document.body; at = at.parentElement) {
+    const style = getComputedStyle(at.parentElement);
+    below += Math.max(0, end(at.parentElement) - at.getBoundingClientRect().bottom) + px(style.paddingBottom) + px(style.borderBottomWidth);
+  }
+  const room = window.innerHeight - (top + window.scrollY) - below;
+  return Math.max(Math.min(most, 160), Math.min(most, Math.max(room, beside)));
 }
 
 /**

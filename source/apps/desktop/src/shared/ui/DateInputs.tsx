@@ -28,6 +28,18 @@ const latestDay = perLists((articles: ArticleView[], templates: Template[]): num
 });
 
 /**
+ * A time of day — `19:00` — or none. Without one it shows `--:--`, not the
+ * sample time some systems put into an empty field, which reads as set.
+ */
+function TimeInput({ value, onValue }: { value: string; onValue: (v: string) => void }) {
+  return (
+    <span className={value ? "time-slot" : "time-slot empty"}>
+      <input type="time" className="date-time" value={value} onChange={(e) => onValue(e.target.value)} aria-label="Time" />
+    </span>
+  );
+}
+
+/**
  * A moment in the world, picked: day, month, year, era — and a time, if
  * wanted. Empty until one sets it; it then starts where the story stands.
  */
@@ -113,15 +125,12 @@ export function WorldMomentPicker({
         era.abbr && <span className="muted">{era.abbr}</span>
       )}
       {!days && (
-        <input
-          type="time"
-          className="date-time"
+        <TimeInput
           value={time === null ? "" : `${String(Math.floor(time / 60)).padStart(2, "0")}:${String(time % 60).padStart(2, "0")}`}
-          onChange={(e) => {
-            const [h, mi] = e.target.value.split(":").map(Number);
-            set(index, y, m, d, e.target.value ? h * 60 + mi : null);
+          onValue={(v) => {
+            const [h, mi] = v.split(":").map(Number);
+            set(index, y, m, d, v ? h * 60 + mi : null);
           }}
-          aria-label="Time"
         />
       )}
       {!days && (
@@ -143,8 +152,33 @@ export function WrittenMomentPicker({ calendar, value, onValue }: { calendar: Wo
   return <WorldMomentPicker calendar={calendar} value={moment} onValue={(v) => onValue(v === null ? "" : formatMoment(calendar, v))} />;
 }
 
-/** A date and time of ours — `2026-09-12T19:00`. */
+/** Today, as our own calendar writes it: `2026-09-12`. */
+function today(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * A date of ours — `2026-09-12` — and a time, if wanted: `2026-09-12T19:00`.
+ * Empty until one sets it; it then starts today, without a time.
+ */
 export function OurMomentInput({ value, onValue }: { value: string; onValue: (v: string) => void }) {
-  const shown = value && !value.includes("T") ? `${value}T00:00` : value;
-  return <input type="datetime-local" className="our-moment" value={shown} onChange={(e) => onValue(e.target.value)} />;
+  const [date, time = ""] = value.split("T");
+  if (!date) {
+    return (
+      <button className="date-set compact ghost" onClick={() => onValue(today())}>
+        Set date
+      </button>
+    );
+  }
+  const shownTime = time.slice(0, 5);
+  return (
+    <span className="date-pick our-moment">
+      <input type="date" value={date} onChange={(e) => e.target.value && onValue(shownTime ? `${e.target.value}T${shownTime}` : e.target.value)} aria-label="Date" />
+      <TimeInput value={shownTime} onValue={(v) => onValue(v ? `${date}T${v}` : date)} />
+      <button className="pick-x" title="No date" onClick={() => onValue("")}>
+        <Icon name="close" />
+      </button>
+    </span>
+  );
 }

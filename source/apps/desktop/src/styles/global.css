@@ -1687,8 +1687,13 @@ fieldset.then textarea, fieldset.then input, fieldset.then select { opacity: 1; 
 .date-pick .date-time { width: 92px; }
 .date-pick .pick-x { border: 0; background: transparent; color: var(--muted); padding: 0 3px; height: auto; min-height: 0; }
 .date-pick .pick-x:hover { color: var(--danger-text); }
+/* No time set: `--:--`, not a sample time that looks like one. */
+.time-slot { position: relative; display: inline-flex; }
+.time-slot.empty:not(:focus-within) .date-time::-webkit-datetime-edit { opacity: 0; }
+.time-slot.empty:not(:focus-within)::after { content: "--:--"; position: absolute; inset: 0; display: flex; align-items: center; padding-left: var(--time-inset, 11px); color: var(--muted); pointer-events: none; }
+.infobox.editing .infobox-row dd .time-slot { --time-inset: 0px; }
 input.invalid { border-color: var(--danger-line); }
-.our-moment { width: 210px; }
+.date-pick.our-moment input[type="date"] { width: 132px; }
 
 /* ---------- Timeline ---------- */
 
@@ -1735,7 +1740,6 @@ input.invalid { border-color: var(--danger-line); }
 .infobox.editing .infobox-row dd .date-pick :is(select, input) { width: auto; }
 .infobox.editing .infobox-row dd .date-pick .date-year { width: 5ch; text-align: left; }
 .infobox.editing .infobox-row dd .date-pick .date-time { width: 64px; color: var(--muted); }
-.infobox.editing .infobox-row dd input.our-moment { width: 100%; }
 
 /* ---------- Moons and the month ---------- */
 .moons { display: inline-flex; gap: 2px; align-items: center; }
