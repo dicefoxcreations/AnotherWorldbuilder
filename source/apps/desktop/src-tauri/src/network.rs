@@ -287,14 +287,15 @@ fn as_here(mut info: WorldInfo, code: &str) -> WorldInfo {
     info
 }
 
-/// A world on a server not opened yet: what this device knows of it.
+/// A world on a server not asked yet: what this device knows of it —
+/// no role, until its server says.
 fn sketch(world: &str, remote: &RemoteWorld) -> WorldInfo {
     WorldInfo {
         id: world.to_string(),
         name: remote.name.clone(),
         icon: remote.icon.clone(),
         folder: String::new(),
-        role: "player".into(),
+        role: String::new(),
         is_gm: false,
         attributes: Vec::new(),
         members: Vec::new(),
@@ -331,6 +332,14 @@ pub(crate) fn remote_worlds(store: &Store) -> Answer<Vec<WorldInfo>> {
         .filter(|(_, r)| !r.asked)
         .map(|(world, remote)| told.get(world).map(|i| as_here(i.clone(), &remote.server)).unwrap_or_else(|| sketch(world, remote)))
         .collect())
+}
+
+/// What a world's server said of it in a `world_sync` answer, kept for the
+/// list of worlds.
+pub(crate) fn note_told(world: &str, value: &serde_json::Value) {
+    if let Ok(info) = serde_json::from_value::<WorldInfo>(value.get("world").cloned().unwrap_or_default()) {
+        told().insert(world.to_string(), info);
+    }
 }
 
 /// Notes a world on a server — or forgets it (`None`).
@@ -551,11 +560,20 @@ pub async fn network_sync(app: tauri::AppHandle) -> Answer<SyncOutcome> {
         if let Some(writes) = value.get("writes").and_then(|w| w.as_u64()) {
             open_now().insert(world.clone(), writes);
         }
-        if let Ok(info) = serde_json::from_value::<WorldInfo>(value.get("world").cloned().unwrap_or_default()) {
-            told().insert(world.clone(), info);
-        }
+        note_told(&world, &value);
         if value.get("changed").and_then(|c| c.as_bool()) == Some(true) {
             out.updated.push(world);
+        }
+    }
+    // Worlds on servers not opened yet: what they are — whether one leads
+    // them, how much is in them — for the list of worlds.
+    let untold: Vec<String> = {
+        let told = told();
+        store.load_network()?.remote.into_iter().filter(|(w, r)| !r.asked && !told.contains_key(w) && !store::moving(w)).map(|(w, _)| w).collect()
+    };
+    for world in untold {
+        if let Ok(value) = call(&store, &world, "world_sync", serde_json::json!({ "since": 0 })).await {
+            note_told(&world, &value);
         }
     }
     // Worlds asked to join: let in by now?

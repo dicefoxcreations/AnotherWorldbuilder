@@ -191,8 +191,9 @@ export function MainMenu({ worlds, network, onOpen, onChanged, onNetwork, onErro
     <span className="world-location" title={place.title}>
       {onServer(w) && <Reach on={!!serverOf(w.server)?.reached} />}<PlaceIcon place={place} /> {place.name}{note && ` · ${note}`}
     </span>
-    <span className={`role-badge ${w.role}`}>{w.isGm ? "GM" : "Player"}</span>
-    <small>{w.articleCount} {w.articleCount === 1 ? "article" : "articles"}</small>
+    {/* A world on a server not asked yet: nothing known of it but its name. */}
+    {w.role && <span className={`role-badge ${w.role}`}>{w.isGm ? "GM" : "Player"}</span>}
+    {w.role && <small>{w.articleCount} {w.articleCount === 1 ? "article" : "articles"}</small>}
   </button>;
   };
 
