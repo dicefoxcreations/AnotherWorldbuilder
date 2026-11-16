@@ -28,8 +28,12 @@
   the example world rolls 2d6 + ability, yours rolls what you write.
 - **Images** in a gallery of the world; metadata such as location and camera is removed.
 - **Who sees what:** sections for the GM only, for single players or for everyone,
-  with read and write rights apart. Characters can be assigned to players.
-- **Versions:** everything is saved automatically; earlier versions can be viewed.
+  with read and write rights apart. Characters can be assigned to players; the
+  editor offers each player only what they may change.
+- **Versions:** everything is saved automatically; earlier versions can be viewed,
+  deleted articles wait in the trash.
+- **Packages:** types and articles go from one world to another (*Options → Transfer*);
+  a browser extension can send in what you have there (*Options → Browser*).
 - **Writing together**, with visible cursors – see below for the ways to meet.
 - **On Linux, Windows and Android:** the same app everywhere, and the same server
   in it – started as *AW Server* it hosts worlds for the group on its own.
