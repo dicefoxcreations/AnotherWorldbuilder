@@ -449,6 +449,13 @@ export default function App() {
     void loadView();
   }, [loadView, fresh]);
 
+  // Every page one goes to shows the world as it is now — whoever changed
+  // it, wherever: what changed since the last reading comes along.
+  useEffect(() => {
+    const now = reading.current;
+    if (now?.world === openWorld) now.reader.sync().catch(report);
+  }, [where, openWorld, report]);
+
   /**
    * Where one stands. A page is an article like any other, but it stands
    * where its owner stands: the world's page is the world, a type's page the
