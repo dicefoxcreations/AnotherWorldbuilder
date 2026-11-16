@@ -1,5 +1,5 @@
 {
-  "version": "0.3.1",
+  "version": "0.3.2",
   "minAndroid": "8.0",
   "targetSdk": 36,
   "targets": [
@@ -7,8 +7,8 @@
     "armv7-linux-androideabi",
     "x86_64-linux-android"
   ],
-  "commit": "67fd8e1c4df8891cf426f1cd7053ec7a808f69bd",
-  "apk": "AnotherWorldbuilder_0.3.1_android.apk",
-  "bytes": 59375710,
-  "sha256": "329cedb334f3aabaa9defb641d2e44f78a86d7bdcebd512de5a21dbbf74356a2"
+  "commit": "60f18b1a525cceb27023ffaab617458b4673d3f9",
+  "apk": "AnotherWorldbuilder_0.3.2_android.apk",
+  "bytes": 59400286,
+  "sha256": "73e986ae056d3045a9ce906538e2d82645280bf89f6671a0c91b9852644fc66e"
 }
