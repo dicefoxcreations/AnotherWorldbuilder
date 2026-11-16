@@ -32,7 +32,7 @@ for kind, values in VALUES.items():
 P.navigation = [
     entry("story", "group", label="Story", children=[
         entry("sessions", "type", "session-log", "Sessions"), entry("quests", "type", "quest", "Quests"),
-        entry("rumours", "type", "rumour", "Rumours"), entry("events", "type", "event", "Events"), entry("kills", "type", "kill", "Killboard")]),
+        entry("rumours", "type", "rumour", "Rumours"), entry("story-notes", "type", "story-note", "Story notes"), entry("events", "type", "event", "Events"), entry("kills", "type", "kill", "Killboard")]),
     entry("world", "group", label="World", children=[
         entry("characters", "type", "character", "Characters"), entry("locations", "type", "location", "Locations"),
         entry("organizations", "type", "organization", "Organizations"), entry("monsters", "type", "monster", "Monsters")]),

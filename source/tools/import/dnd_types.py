@@ -206,6 +206,7 @@ CAMPAIGN_DATA = {
     "Quest status": ("🚩", ["Open", "Active", "Done", "Failed", "Declined"]),
     "Accuracy": ("🎯", ["True", "Good", "Mediocre", "False"]),
     "Kill kind": ("☠️", ["Boss", "Major", "Minion"]),
+    "Note kind": ("🏷️", ["Clue", "Handout", "Diary", "Letter", "Prophecy", "Legend", "Other"]),
     "Gender": ("⚧️", ["Male", "Female", "Diverse"]),
     "Language": ("🗣️", ["Common", "Common Sign Language", "Draconic", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc",
                          "Abyssal", "Celestial", "Deep Speech", "Druidic", "Infernal", "Primordial", "Sylvan", "Thieves' Cant", "Undercommon"]),
@@ -321,7 +322,8 @@ Next: @@Session log@@ from Previous
     ['<block title="Journal entry">', '<block title="Plans">', '<block title="Notes">',
      '<block title="Items found" bottom fold=folded>\n      <list type=Item where="Acquired=self" style=table show="Type, Owner">',
      '<block title="Events" bottom fold=folded>\n      <list type=Event where="Session=self">',
-     '<block title="Kills" bottom fold=folded>\n      <list type=Kill where="Session=self" style=table show="Killer, Kind, Enemy, With, How">'],
+     '<block title="Kills" bottom fold=folded>\n      <list type=Kill where="Session=self" style=table show="Killer, Kind, Enemy, With, How">',
+     '<block title="Story notes" bottom fold=folded>\n      <list type="Story note" where="Found in=self" style=table show="Kind, Written by, Found at">'],
     sort="In-game start, In-game end, Session date, name", players=True, name="Session %%count%%",
 ))
 T.add("event", "Event", "📅", campaign_text(
@@ -345,7 +347,8 @@ Locations: @@Location@@ multiple
 Monsters: @@Monster@@ multiple
 """,
     ["<image bind=Image>", "<select bind=Status>", "<select bind=Characters>", "<select bind=Organizations>", "<select bind=Locations>", "<select bind=Monsters>"],
-    ['<block title="Summary">', '<block title="Details">'], players=True,
+    ['<block title="Summary">', '<block title="Details">',
+     '<block title="Clues" bottom fold=folded>\n      <list type="Story note" where="Quests=self" style=table show="Kind, Found in">'], players=True,
 ))
 T.add("rumour", "Rumour", "💬", campaign_text(
     """Image: image
@@ -357,6 +360,24 @@ Monsters: @@Monster@@ multiple
 """,
     ["<image bind=Image>", "<select bind=Accuracy>", "<select bind=Characters>", "<select bind=Organizations>", "<select bind=Locations>", "<select bind=Monsters>"],
     ['<block title="Summary">', '<block title="Details">'], players=True,
+))
+# What the story leaves in the players' hands: clues, handouts, diaries,
+# letters — not things one carries, but what one reads and remembers.
+T.add("story-note", "Story note", "📝", campaign_text(
+    """Image: image
+Kind: @@Note kind@@
+Written by: @@Character@@
+Found in: @@Session log@@
+Found at: @@Location@@
+Characters: @@Character@@ multiple
+Locations: @@Location@@ multiple
+Organizations: @@Organization@@ multiple
+Quests: @@Quest@@ multiple
+""",
+    ["<image bind=Image>", "<select bind=Kind>", '<select bind="Written by">', '<select bind="Found in">', '<select bind="Found at">',
+     "<select bind=Characters>", "<select bind=Locations>", "<select bind=Organizations>", "<select bind=Quests>"],
+    ['<block title="Text">', '<block title="Notes">'],
+    sort="Found in, name", players=True,
 ))
 T.add("kill", "Kill", "💀", campaign_text(
     """Killer: @@Character@@
@@ -443,7 +464,7 @@ URL: text
 # Values, groups of fields and what stands below another: found through what
 # uses them, not offered in the navigation.
 for hidden in ["source", "size", "creature-type", "alignment", "spell-school", "rarity", "equipment-category", "feat-category", "environment",
-               "means", "life-status", "quest-status", "accuracy", "kill-kind", "gender", "language", "relation", "subclass", "book-chapter"]:
+               "means", "life-status", "quest-status", "accuracy", "kill-kind", "note-kind", "gender", "language", "relation", "subclass", "book-chapter"]:
     T.by_id[hidden]["_hidden"] = True
 
 # --- Values: game terms, the same in every world ------------------------------
