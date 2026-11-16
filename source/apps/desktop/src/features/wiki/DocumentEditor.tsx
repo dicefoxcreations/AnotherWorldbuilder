@@ -200,9 +200,12 @@ export function DocumentEditor({
     try {
       const saving = api.documentSave(world.id, article.id, sending, kept.current.base, session);
       pending.current = saving.catch(() => {});
+      const named = keptDoc.current?.name;
       const r = await saving;
       wrote.current = true;
       setWritable(r.writable);
+      // Renamed: the outline and the path above show the new name at once.
+      if (named !== undefined && r.document.name !== named) worldData?.onChanged();
       // What was saved means what was typed: the text stays as typed — an
       // empty line, an empty block one is about to fill. Only where the saved
       // document says something else (someone else wrote, a link got its
@@ -597,6 +600,9 @@ export function DocumentEditor({
       </CurrentDocument.Provider>
       {inspecting && (
         <Inspector title={`Document · ${doc.name || article.name}`} onClose={() => setInspecting(false)}>
+          <InspectorSection title="Name">
+            <NameRow key={doc.name || article.name} name={doc.name || article.name} may={writable.head} onName={(name) => changeDoc({ ...doc, name })} />
+          </InspectorSection>
           <InspectorSection title="Access">
             <AccessRows
               world={world}
@@ -657,4 +663,27 @@ function pieces(text: string, ranges: Range[]): { text: string; marked: boolean 
   }
   if (at < text.length) out.push({ text: text.slice(at), marked: false });
   return out;
+}
+
+/** The document's name, changed once one leaves the field — not at every key. */
+function NameRow({ name, may, onName }: { name: string; may: boolean; onName: (name: string) => void }) {
+  const [typed, setTyped] = useState(name);
+  const done = () => {
+    const fresh = typed.trim();
+    if (fresh && fresh !== name) onName(fresh);
+    else setTyped(name);
+  };
+  return (
+    <input
+      value={typed}
+      disabled={!may}
+      aria-label="Name"
+      onChange={(e) => setTyped(e.target.value)}
+      onBlur={done}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setTyped(name);
+      }}
+    />
+  );
 }

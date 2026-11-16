@@ -160,6 +160,8 @@ export function DocumentPage({
   const switchMode = () => {
     if (mode === "edit") {
       setOpened(null);
+      // Made just now, it opened for writing: leaving it reads it.
+      setJustMade(false);
       hold();
       setPrefs({ mode: "view" });
       return;

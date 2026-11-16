@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState, type CSSProperties } from "react";
 import { Icon } from "./Icons";
 import type { ArticleView } from "../../api/client";
 
@@ -63,6 +63,33 @@ function useClickAway(box: React.RefObject<HTMLSpanElement | null>, shown: boole
 }
 
 /**
+ * Where a menu opens: over the page, not in what holds its button — the page
+ * or a side bar would cut it off. Below the button, or above where there is
+ * more room; as high as the window lets it, and it scrolls itself.
+ */
+function useMenuPlace(box: React.RefObject<HTMLSpanElement | null>, shown: boolean): CSSProperties {
+  const [, again] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!shown) return;
+    window.addEventListener("resize", again);
+    window.addEventListener("scroll", again, true);
+    return () => {
+      window.removeEventListener("resize", again);
+      window.removeEventListener("scroll", again, true);
+    };
+  }, [shown]);
+  const r = box.current?.getBoundingClientRect();
+  if (!shown || !r) return {};
+  const below = window.innerHeight - r.bottom - 12;
+  const above = r.top - 12;
+  const width = Math.min(280, window.innerWidth - 16);
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+  return below >= 240 || below >= above
+    ? { top: r.bottom + 4, left, width, maxHeight: Math.min(520, below) }
+    : { bottom: window.innerHeight - r.top + 4, left, width, maxHeight: Math.min(520, above) };
+}
+
+/**
  * ＋ and what may be added: a search over the names, the matches below it —
  * Enter takes the first, Escape closes. One after another, it stays open.
  */
@@ -80,6 +107,7 @@ export function AddPick({
   const [text, setText] = useState("");
   const box = useRef<HTMLSpanElement>(null);
   useClickAway(box, shown, () => setShown(false));
+  const place = useMenuPlace(box, shown);
   const needle = text.trim().toLowerCase();
   const matches = !shown ? [] : (typeof open === "function" ? open() : open).filter((c) => !needle || c.name.toLowerCase().includes(needle)).slice(0, 50);
   const take = (c: ArticleView) => {
@@ -92,7 +120,7 @@ export function AddPick({
         <Icon name="add" />
       </button>
       {shown && (
-        <span className="pick-menu">
+        <span className="pick-menu" style={place}>
           <input
             autoFocus
             value={text}
@@ -126,6 +154,7 @@ export function TextPicks({ items, onItems }: { items: string[]; onItems: (items
   const [text, setText] = useState("");
   const box = useRef<HTMLSpanElement>(null);
   useClickAway(box, shown, () => setShown(false));
+  const place = useMenuPlace(box, shown);
   // A comma divides them where they are written: none in one of them.
   const take = () => {
     const fresh = text.replace(/,/g, " ").trim();
@@ -147,7 +176,7 @@ export function TextPicks({ items, onItems }: { items: string[]; onItems: (items
           <Icon name="add" />
         </button>
         {shown && (
-          <span className="pick-menu">
+          <span className="pick-menu" style={place}>
             <input
               autoFocus
               value={text}
