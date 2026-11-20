@@ -1,15 +1,15 @@
 {
-  "version": "0.3.2",
-  "notes": "**Update the app and the server together** — an older server tells the app nothing of what a player may change, and the editor then holds nothing back.\n\n**New**\n- The editor offers a player only what they may change: the other parts and values stand as they read, dimmed, and the code view stays read-only.\n- A value a player may set on their own — Owner or Acquired on an item — is there for them before it holds anything.\n- D&D 5e template: players may make items of every kind; homebrew items are theirs to change, the books' items stay the GM's.\n\n**Fixed**\n- A save that fails is no longer tried again and again; its warning no longer flickers.\n- A package taken in anew keeps the pictures its articles name when one of them could not come along, and counts as no change.\n- A world without any picture is backed up too — on a server such a world was never backed up.",
-  "pub_date": "2026-11-16T13:22:49.630Z",
+  "version": "0.3.3",
+  "notes": "The server stays at 0.3.2 — only the app changed.\n\n**New**\n- D&D 5e template: Story note — clues, handouts, diaries, letters, prophecies: what the story leaves to be read. Kind, written by, found in which session and where; sessions list theirs, quests their clues.\n- A date is set with or without a time, in the visual editor too.\n- A document is renamed in the visual editor too: its name stands in the side bar beside access and alias.\n\n**Fixed**\n- Pasting into a text works on Windows and Android — nothing was put in.\n- Every page one goes to shows the world as it is now, whoever changed it and wherever.\n- A world on a server is listed as its server tells it before it is opened — not as a player's with nothing in it.\n- A side column fits the window, so a short page no longer scrolls for it.\n- A document made just now can be left for reading again; the add menus open over the page.",
+  "pub_date": "2026-11-20T12:00:17.449Z",
   "platforms": {
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUVdYZVRPWVJvekNSZzB2M2ZtRmhGamlOdG0zL3dERzk5UUtGVDBCN1VYZGgwYWVKL1g1amMzR05lbHBORTkyTHBhYTgyS0RPSUppSSs0S1NkdWtvekFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODMzNzkwCWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjMuMl9hbWQ2NC5BcHBJbWFnZQpvRzVwUFJ5TUwxUDdkV0E5MFVRd0RhV2dyOUllY242SU91RWgwZ2lvV0ZENjkrem9tdEJoY3dJNGgyaWMwWk9WbEZyUTJqL3MwZ0oxYXVwV1IvK1JEUT09Cg==",
-      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.3.2/AnotherWorldbuilder_0.3.2_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUVlwWCtQOGs2MkVrTUhSV25CWGhienZFRXBMeGNDWDNXemZjY3JCRldvR2RuU0lVZzN3T2ZYbEJ0aUluYTVpODJVSlNWeHhQOXNUUm9GaU10cmV2VlFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTc0NDQxCWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjMuM19hbWQ2NC5BcHBJbWFnZQpxeTRGdnNYNzdBUDdoTXRxWC8zSHFXVVJsUEFwQzFEaDZPY3pXKzFoQUgzMUNqck4zZmdCUWxROHdWT0hOUWFvaGMyMnVNRm5INzRVRlgxOGpER1pBdz09Cg==",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.3.3/AnotherWorldbuilder_0.3.3_amd64.AppImage"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUVVOa0lpQ0FzTE5NcndkQkdYS0tHclFFL05BQlRMVlhWMXlubEFKc2t1cUZiemhpSDhPYzJUMmpoczJiaUxCTzRTeXFmNUovcHRYR1E0SUhkNjYxc0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODM1MzUzCWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjMuMl94NjQtc2V0dXAuZXhlCmhyaFJLdi9Nd3pRZDJvQTZwVjJuSVRsK25WMVlXbEJJVzY1V3EyZGQ1M1hHU1lzVGFvNEdyQUJzZGZjcnRMOXZmdHB5V2c5VENxWWlTS2NMbFp3aUF3PT0K",
-      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.3.2/AnotherWorldbuilder_0.3.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUSENHM1k3cFZiUWFpNlF5YmVXT2pSRnlvci95Syt4REltZE1kbGVwTlYzSmJxZERoNUxrcmRlNDBsR0VJaGl1NHU3cVBwOEdwT2NNQklQaXlISUxIa3RRVnZyZ3JYOXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MTc2MDA0CWZpbGU6QW5vdGhlcldvcmxkYnVpbGRlcl8wLjMuM194NjQtc2V0dXAuZXhlCjdxMXVQaDQza0pabmpmbHJvc0JYSHJHTm45dDJPNUpIMGFaOHFBNHozbTVIWGRscWN6U3pQUmk1WTNQWDQ2aG5qc3J1QWo2UXZpb1paOHpRYXFqMkRnPT0K",
+      "url": "https://github.com/dicefoxcreations/AnotherWorldbuilder/releases/download/v0.3.3/AnotherWorldbuilder_0.3.3_x64-setup.exe"
     }
   }
 }
