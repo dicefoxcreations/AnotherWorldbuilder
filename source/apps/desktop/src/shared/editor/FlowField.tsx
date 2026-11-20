@@ -579,7 +579,9 @@ export function FlowField({
         case "insertFromPaste":
         case "insertFromDrop": {
           e.preventDefault();
-          const pasted = e.dataTransfer?.getData("text/plain") ?? "";
+          // WebKit hands the text over in dataTransfer; Chromium (WebView2 on
+          // Windows, Android), for a plain-text field, in data.
+          const pasted = e.dataTransfer?.getData("text/plain") || e.data || "";
           if (pasted) now().replaceSelection(pasted.replace(/\r\n?/g, "\n"));
           break;
         }
