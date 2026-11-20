@@ -7,7 +7,7 @@ code, in exactly these versions, is that of the packages named below
 (https://archlinux.org/packages/ and the upstream projects).
 
 ------------------------------------------------------------------------
-aom 3.15.2-1.1 — BSD-3-Clause
+aom 3.15.3-1.1 — BSD-3-Clause
 https://aomedia.org/
 Files: libaom.so.3
 
@@ -764,7 +764,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------
-dbus 1.16.2-2.1 — AFL-2.1 OR GPL-2.0-or-later
+dbus 1.16.4-1.1 — AFL-2.1 OR GPL-2.0-or-later
 https://www.freedesktop.org/wiki/Software/dbus/
 Files: libdbus-1.so.3
 
@@ -1190,7 +1190,7 @@ https://gitlab.gnome.org/GNOME/glib
 Files: libgio-2.0.so, libgio-2.0.so.0, libgio-2.0.so.0.9000.1, libglib-2.0.so.0, libgmodule-2.0.so.0, libgobject-2.0.so, libgobject-2.0.so.0, libgobject-2.0.so.0.9000.1
 
 ------------------------------------------------------------------------
-glycin 2.2.5-1.1 — MPL-2.0 OR LGPL-2.1-or-later
+glycin 2.2.6-1.1 — MPL-2.0 OR LGPL-2.1-or-later
 https://gnome.pages.gitlab.gnome.org/glycin/
 Files: libglycin-2.so.0
 
@@ -1841,12 +1841,12 @@ Files: libgraphite2.so.3
 */
 
 ------------------------------------------------------------------------
-gst-libav 1.28.8-1 — LGPL-2.1-or-later
+gst-libav 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgstlibav.so
 
 ------------------------------------------------------------------------
-gst-plugin-pipewire 1:1.6.10-1 — MIT
+gst-plugin-pipewire 1:1.6.11-1 — MIT
 https://pipewire.org
 Files: libgstpipewire.so
 
@@ -1878,42 +1878,42 @@ The above is the version of the MIT "Expat" License used by X.org:
     http://cgit.freedesktop.org/xorg/xserver/tree/COPYING
 
 ------------------------------------------------------------------------
-gst-plugin-va 1.28.8-1 — LGPL-2.1-or-later
+gst-plugin-va 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgstva.so
 
 ------------------------------------------------------------------------
-gst-plugins-bad 1.28.8-1 — LGPL-2.1-or-later
+gst-plugins-bad 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgstaes.so, libgstanalyticsoverlay.so, libgstaom.so, libgstassrender.so, libgstavtp.so, libgstbs2b.so, libgstbz2.so, libgstchromaprint.so, libgstclosedcaption.so, libgstcodec2json.so, libgstcolormanagement.so, libgstcurl.so, libgstdash.so, libgstdc1394.so, libgstde265.so, libgstdtls.so, libgstdtsdec.so, libgstfaac.so, libgstfaad.so, libgstfdkaac.so, libgstfluidsynthmidi.so, libgstgme.so, libgstgsm.so, libgsthls.so, libgstladspa.so, libgstlc3.so, libgstldac.so, libgstlv2.so, libgstmicrodns.so, libgstmodplug.so, libgstmpeg2enc.so, libgstmplex.so, libgstmusepack.so, libgstneonhttpsrc.so, libgstopenal.so, libgstopenaptx.so, libgstopenexr.so, libgstopenh264.so, libgstopenjpeg.so, libgstopenmpt.so, libgstopusparse.so, libgstqroverlay.so, libgstresindvd.so, libgstrsvg.so, libgstrtmp.so, libgstsbc.so, libgstsctp.so, libgstsmoothstreaming.so, libgstsndfile.so, libgstsoundtouch.so, libgstspandsp.so, libgstsrt.so, libgstsrtp.so, libgstsvtav1.so, libgstteletext.so, libgsttimecode.so, libgstttmlsubs.so, libgstwebp.so, libgstwebrtc.so, libgstwebrtcdsp.so, libgstwildmidi.so, libgstx265.so, libgstzbar.so, libgstzxing.so
 
 ------------------------------------------------------------------------
-gst-plugins-bad-libs 1.28.8-1 — LGPL-2.1-or-later
+gst-plugins-bad-libs 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgstaccurip.so, libgstadpcmdec.so, libgstadpcmenc.so, libgstaiff.so, libgstasfmux.so, libgstaudiobuffersplit.so, libgstaudiofxbad.so, libgstaudiolatency.so, libgstaudiomixmatrix.so, libgstaudiovisualizers.so, libgstautoconvert.so, libgstbayer.so, libgstbluez.so, libgstcamerabin.so, libgstcodecalpha.so, libgstcodectimestamper.so, libgstcoloreffects.so, libgstdebugutilsbad.so, libgstdecklink.so, libgstdvb.so, libgstdvbsubenc.so, libgstdvbsuboverlay.so, libgstdvdspu.so, libgstfaceoverlay.so, libgstfbdevsink.so, libgstfestival.so, libgstfieldanalysis.so, libgstfreeverb.so, libgstfrei0r.so, libgstgaudieffects.so, libgstgdp.so, libgstgeometrictransform.so, libgstid3tag.so, libgstinsertbin.so, libgstinter.so, libgstinterlace.so, libgstipcpipeline.so, libgstivfparse.so, libgstivtc.so, libgstjp2kdecimator.so, libgstjpegformat.so, libgstkms.so, libgstlegacyrawparse.so, libgstmidi.so, libgstmpegpsdemux.so, libgstmpegpsmux.so, libgstmpegtsdemux.so, libgstmpegtsmux.so, libgstmse.so, libgstmxf.so, libgstnetsim.so, libgstnvcodec.so, libgstpcapparse.so, libgstpnm.so, libgstproxy.so, libgstremovesilence.so, libgstrfbsrc.so, libgstrist.so, libgstrtmp2.so, libgstrtpmanagerbad.so, libgstrtponvif.so, libgstsdpelem.so, libgstsegmentclip.so, libgstshm.so, libgstsiren.so, libgstsmooth.so, libgstspeed.so, libgstsubenc.so, libgstswitchbin.so, libgsttensordecoders.so, libgsttranscode.so, libgstunixfd.so, libgstuvcgadget.so, libgstuvch264.so, libgstv4l2codecs.so, libgstvideofiltersbad.so, libgstvideoframe_audiolevel.so, libgstvideoparsersbad.so, libgstvideosignal.so, libgstvmaf.so, libgstvmnc.so, libgstvulkan.so, libgstwaylandsink.so
 
 ------------------------------------------------------------------------
-gst-plugins-base 1.28.8-1 — LGPL-2.1-or-later
+gst-plugins-base 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgstalsa.so, libgstcdparanoia.so, libgstogg.so, libgstopus.so, libgstpango.so, libgsttheora.so, libgstvorbis.so
 
 ------------------------------------------------------------------------
-gst-plugins-base-libs 1.28.8-1 — LGPL-2.1-or-later
+gst-plugins-base-libs 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgstadder.so, libgstallocators-1.0.so.0, libgstapp-1.0.so.0, libgstapp.so, libgstaudio-1.0.so.0, libgstaudioconvert.so, libgstaudiomixer.so, libgstaudiorate.so, libgstaudioresample.so, libgstaudiotestsrc.so, libgstbasedebug.so, libgstcompositor.so, libgstdsd.so, libgstencoding.so, libgstfft-1.0.so.0, libgstgio.so, libgstgl-1.0.so.0, libgstopengl.so, libgstoverlaycomposition.so, libgstpbtypes.so, libgstpbutils-1.0.so.0, libgstplayback.so, libgstrawparse.so, libgstriff-1.0.so.0, libgstsubparse.so, libgsttag-1.0.so.0, libgsttcp.so, libgsttypefindfunctions.so, libgstvideo-1.0.so.0, libgstvideoconvertscale.so, libgstvideorate.so, libgstvideotestsrc.so, libgstvolume.so, libgstximagesink.so, libgstxvimagesink.so
 
 ------------------------------------------------------------------------
-gst-plugins-good 1.28.8-1 — LGPL-2.1-or-later
+gst-plugins-good 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgst1394.so, libgstaasink.so, libgstadaptivedemux2.so, libgstalaw.so, libgstalpha.so, libgstalphacolor.so, libgstamrnb.so, libgstamrwbdec.so, libgstapetag.so, libgstaudiofx.so, libgstaudioparsers.so, libgstauparse.so, libgstautodetect.so, libgstavi.so, libgstcacasink.so, libgstcairo.so, libgstcutter.so, libgstdebug.so, libgstdeinterlace.so, libgstdtmf.so, libgstdv.so, libgsteffectv.so, libgstequalizer.so, libgstflac.so, libgstflv.so, libgstflxdec.so, libgstgdkpixbuf.so, libgstgoom.so, libgstgoom2k1.so, libgsticydemux.so, libgstid3demux.so, libgstimagefreeze.so, libgstinterleave.so, libgstisomp4.so, libgstjack.so, libgstjpeg.so, libgstlame.so, libgstlevel.so, libgstmatroska.so, libgstmonoscope.so, libgstmpg123.so, libgstmulaw.so, libgstmultifile.so, libgstmultipart.so, libgstnavigationtest.so, libgstoss4.so, libgstossaudio.so, libgstpng.so, libgstpulseaudio.so, libgstreplaygain.so, libgstrtp.so, libgstrtpmanager.so, libgstrtsp.so, libgstshapewipe.so, libgstshout2.so, libgstsmpte.so, libgstsoup.so, libgstspectrum.so, libgstspeex.so, libgsttaglib.so, libgsttwolame.so, libgstudp.so, libgstvideo4linux2.so, libgstvideobox.so, libgstvideocrop.so, libgstvideofilter.so, libgstvideomixer.so, libgstvpx.so, libgstwavenc.so, libgstwavpack.so, libgstwavparse.so, libgstximagesrc.so, libgstxingmux.so, libgsty4m.so
 
 ------------------------------------------------------------------------
-gst-plugins-ugly 1.28.8-1 — LGPL-2.1-or-later
+gst-plugins-ugly 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgsta52dec.so, libgstasf.so, libgstcdio.so, libgstdvdlpcmdec.so, libgstdvdread.so, libgstdvdsub.so, libgstmpeg2dec.so, libgstrealmedia.so, libgstx264.so
 
 ------------------------------------------------------------------------
-gstreamer 1.28.8-1 — LGPL-2.1-or-later
+gstreamer 1.28.9-2 — LGPL-2.1-or-later
 https://gstreamer.freedesktop.org/
 Files: libgstbase-1.0.so.0, libgstcoreelements.so, libgstcoretracers.so, libgstreamer-1.0.so.0
 
@@ -1923,7 +1923,7 @@ https://www.gtk.org/
 Files: im-am-et.so, im-broadway.so, im-cedilla.so, im-cyrillic-translit.so, im-inuktitut.so, im-ipa.so, im-multipress.so, im-thai.so, im-ti-er.so, im-ti-et.so, im-viqr.so, im-wayland.so, im-xim.so, libgdk-3.so.0, libgtk-3.so.0, libprintbackend-cups.so, libprintbackend-file.so, libprintbackend-lpr.so
 
 ------------------------------------------------------------------------
-harfbuzz-icu 15.0.0-1.1 — MIT
+harfbuzz-icu 15.1.0-1.1 — MIT
 https://harfbuzz.github.io/
 Files: libharfbuzz-icu.so.0
 
@@ -3153,7 +3153,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 ------------------------------------------------------------------------
-hyphen 2.8.9-1.1 — GPL-2.0-only OR LGPL-2.1-or-later OR MPL-1.1
+hyphen 2.8.10-1.1 — GPL-2.0-only OR LGPL-2.1-or-later OR MPL-1.1
 https://github.com/hunspell/hyphen
 Files: libhyphen.so.0
 
@@ -3165,11 +3165,13 @@ the GNU Lesser General Public License Version 2.1 or later (the "LGPL",
 see COPYING.LGPL) or the Mozilla Public License Version 1.1 or later
 (the "MPL", see COPYING.MPL).
 
-The Plain TeX hyphenation tables "hyphen.tex" by Donald E. Knuth
-has a non MPL/LGPL compatible license, but freely redistributable:
-"Unlimited copying and redistribution of this file are permitted as long
-as this file is not modified. Modifications are permitted, but only if
-the resulting file is not named hyphen.tex."
+The American English hyphenation patterns "ushyphmax.tex" by Gerard
+D.C. Kuiken (Copyright (C) 1990, 2004, 2005), based on Donald E. Knuth's
+plain TeX patterns, have a non MPL/LGPL compatible license, but freely
+redistributable:
+"Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty provided the copyright
+notice and this notice are preserved."
 
 Software distributed under these licenses is distributed on an "AS IS" basis,
 WITHOUT WARRANTY OF ANY KIND, either express or implied. See the licences
@@ -3874,7 +3876,7 @@ https://gnome.pages.gitlab.gnome.org/json-glib/
 Files: libjson-glib-1.0.so.0
 
 ------------------------------------------------------------------------
-kde-gtk-config 6.8.2-1.1 — LGPL-2.0-or-later
+kde-gtk-config 6.8.3-1.1 — LGPL-2.0-or-later
 https://kde.org/plasma-desktop/
 Files: libcolorreload-gtk-module.so, libwindow-decorations-gtk-module.so
 
@@ -3884,7 +3886,7 @@ https://www.kernel.org/
 Files: libkeyutils.so.1
 
 ------------------------------------------------------------------------
-krb5 1.22.2-1.1 — custom
+krb5 1.22.2-2.1 — custom
 https://web.mit.edu/kerberos/
 Files: libgssapi_krb5.so.2, libk5crypto.so.3, libkrb5.so.3, libkrb5support.so.0
 
@@ -5432,7 +5434,7 @@ Ty Coon, President of Vice
 That's all there is to it!
 
 ------------------------------------------------------------------------
-lcms2 2.19.1-1.1 — MIT
+lcms2 2.20-1.1 — MIT
 http://www.littlecms.com/
 Files: liblcms2.so.2
 
@@ -7106,7 +7108,7 @@ https://0pointer.net/lennart/projects/libcanberra/
 Files: libcanberra-gtk3-module.so, libcanberra-gtk3.so.0, libcanberra.so.0
 
 ------------------------------------------------------------------------
-libcloudproviders 0.4.1-1.1 — LGPL-3.0-or-later
+libcloudproviders 0.4.2-1.1 — LGPL-3.0-or-later
 https://gitlab.gnome.org/GNOME/libcloudproviders
 Files: libcloudproviders.so.0
 
@@ -8680,7 +8682,7 @@ https://www.gnu.org/software/libidn/#libidn2
 Files: libidn2.so.0
 
 ------------------------------------------------------------------------
-libjpeg-turbo 3.2.0-2 — BSD-3-Clause  IJG
+libjpeg-turbo 3.2.1-1 — BSD-3-Clause  IJG
 https://libjpeg-turbo.org/
 Files: libjpeg.so.8
 
@@ -9155,7 +9157,7 @@ https://gnome.pages.gitlab.gnome.org/libmanette/
 Files: libmanette-0.2.so.0
 
 ------------------------------------------------------------------------
-libnghttp2 1.70.0-1.1 — MIT
+libnghttp2 1.71.0-1.1 — MIT
 https://nghttp2.org/
 Files: libnghttp2.so.14
 
@@ -9228,7 +9230,7 @@ https://libopenraw.freedesktop.org/
 Files: libopenraw.so.9, libopenraw_pixbuf.so
 
 ------------------------------------------------------------------------
-libp11-kit 0.26.5-1.1 — BSD-3-Clause
+libp11-kit 0.26.6-1.1 — BSD-3-Clause
 https://p11-glue.freedesktop.org
 Files: libp11-kit.so.0
 
@@ -9261,7 +9263,7 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 DAMAGE.
 
 ------------------------------------------------------------------------
-libpipewire 1:1.6.10-1 — MIT
+libpipewire 1:1.6.11-1 — MIT
 https://pipewire.org
 Files: libpipewire-0.3.so.0
 
@@ -9458,7 +9460,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------
-libpulse 17.0+r134+g77d25a1e6-1.1 — LGPL-2.1-or-later
+libpulse 17.0+r134+g77d25a1e6-2.1 — LGPL-2.1-or-later
 https://www.freedesktop.org/wiki/Software/PulseAudio/
 Files: libpulse.so.0, libpulsecommon-17.0.so
 
@@ -11431,9 +11433,9 @@ https://www.lysator.liu.se/~nisse/nettle
 Files: libhogweed.so.7, libnettle.so.9
 
 ------------------------------------------------------------------------
-openssl 3.6.5-1.1 — Apache-2.0
+openssl 4.1.0-1 — Apache-2.0
 https://www.openssl.org
-Files: libcrypto.so.3
+Files: libcrypto.so.4
 
 Apache License
                            Version 2.0, January 2004
@@ -12169,7 +12171,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       License was issued.
 
 ------------------------------------------------------------------------
-systemd-libs 262.1-1 — LGPL-2.1-or-later  CC0-1.0  GPL-2.0-or-later WITH Linux-syscall-note
+systemd-libs 262.2-1 — LGPL-2.1-or-later  CC0-1.0  GPL-2.0-or-later WITH Linux-syscall-note
 https://www.github.com/systemd/systemd
 Files: libsystemd.so.0, libudev.so.1
 
@@ -12307,7 +12309,7 @@ https://tinysparql.org/
 Files: libtinysparql-3.0.so.0
 
 ------------------------------------------------------------------------
-tpm2-tss 4.2.0-2.1 — BSD-2-Clause
+tpm2-tss 4.2.1-2.1 — BSD-2-Clause
 https://github.com/tpm2-software/tpm2-tss
 Files: libtss2-esys.so.0, libtss2-mu.so.0, libtss2-rc.so.0, libtss2-sys.so.1, libtss2-tctildr.so.0
 
